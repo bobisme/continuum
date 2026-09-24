@@ -28,6 +28,8 @@
 //! | every prefix: one cut inside a crash (fences owed, or the crashed subtree not finalized) never conforms, and the model agrees | [`a_journal_cut_inside_a_crash_does_not_conform`] |
 //! | the scripted source's crash report journals the same stopped set as the binding | [`the_scripted_source_reports_the_same_crash`] |
 //! | a crash may not fence a timer already due, or crash a subtree under cancellation (pre-review) | [`a_crash_does_not_launder_a_late_timer_or_a_cancellation`] |
+//! | the calculus's own crash step (RFC 0026 correction 59, bn-fxxf2): every corpus journal, replayed on a fresh calculus through its public operations, is a legal step sequence and reaches the lift's calculus state; a calculus without the crash step refuses every journal that crashes a parked worker | [`every_lifted_crash_is_a_legal_calculus_step_sequence`] |
+//! | on the mutation corpus (the perturbations, deletions and swaps above) the lift conforms to nothing the calculus replay refuses, and the replay refuses each mutant the lift refuses as a calculus fault, at the same event and for the same fault | [`on_the_mutation_corpus_the_calculus_and_the_lift_agree_on_the_calculus_steps`] |
 
 #![allow(clippy::too_many_lines)]
 
@@ -1356,4 +1358,520 @@ fn a_crash_does_not_launder_a_late_timer_or_a_cancellation() {
     let journal = rebuild(control);
     assert!(lift_accepts(&journal), "{:?}", lift(&journal));
     assert!(judge(&BindingConfig::new(0), &journal).is_accepted());
+}
+
+// --- the calculus crash step against the lift (RFC 0026 correction 59, bn-fxxf2) ------
+
+use continuum_asupersync::family::obligation::Discharge;
+use continuum_asupersync::lift::Nonconformance;
+use continuum_task::region::obligation::{
+    SubstrateId, SubstrateKind, SubstrateObligation, SubstrateOutcome,
+};
+use continuum_task::region::worker::{
+    CancelPhase, FailureReason, PublicationSlot, WorkerId, WorkerState, WorkerStep,
+};
+use continuum_task::region::{RegionFault, RegionId, RegionState, RegionTree};
+
+/// How the replay states a crash of one stopped worker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CrashAs {
+    /// The calculus's crash step (correction 59).
+    Crash,
+    /// A calculus with no crash step: the worker's own `Fail` alone.
+    FailOnly,
+    /// Correction 58's approximation: `Resume` a parked worker, then `Fail` it.
+    ResumeThenFail,
+}
+
+/// Why the calculus replay refused a journal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReplayFault {
+    /// The calculus refused the operation an event names.
+    Calculus(RegionFault),
+    /// The calculus allocated another ordinal than the event names.
+    Identity,
+    /// The event names a reservation or an obligation no earlier event opened, so it
+    /// names no calculus operation.
+    UnknownHandle,
+}
+
+impl From<RegionFault> for ReplayFault {
+    fn from(fault: RegionFault) -> Self {
+        Self::Calculus(fault)
+    }
+}
+
+/// What a replay accepted: the calculus tree, and the lifecycle state of each worker a
+/// crash stopped, just before the crash.
+struct Replayed {
+    tree: RegionTree,
+    stopped_from: Vec<WorkerState>,
+    /// Staged publications the crashes discarded, summed over the stopped workers.
+    discarded: u32,
+}
+
+fn crashed_reason() -> FailureReason {
+    FailureReason::new("crashed").unwrap()
+}
+
+fn substrate(kind: ObligationKind, obligation: u32) -> SubstrateObligation {
+    SubstrateObligation::new(
+        SubstrateKind::new(kind.token()).unwrap(),
+        SubstrateId::at(u64::from(obligation)),
+    )
+}
+
+/// The calculus step a lifecycle task step names, written here from the family table
+/// (`family::lifecycle`'s header) rather than taken from the lift's own mapping.
+fn worker_step(step: &TaskStep) -> WorkerStep {
+    match step {
+        TaskStep::Begin => WorkerStep::Begin,
+        TaskStep::Suspend => WorkerStep::Suspend,
+        TaskStep::Resume => WorkerStep::Resume,
+        TaskStep::Complete => WorkerStep::Complete,
+        TaskStep::Fail(reason) => WorkerStep::Fail(reason.clone()),
+        TaskStep::Cancel => WorkerStep::CompleteCancelled,
+        TaskStep::CancelRequested => WorkerStep::RequestCancel,
+    }
+}
+
+/// Replay a journal on a fresh region calculus through its public operations only: the
+/// calculus operation each lifecycle, effect, obligation and cancellation-acknowledgement
+/// event names, per the family tables (`family::lifecycle`, `family::effect`,
+/// `family::obligation`, `family::cancellation`), and none of the lift's own
+/// cross-checks (stopped sets, drain sets, fences, settles, timers, channels). A crash
+/// is `crash_as` for each stopped worker, then a close of the region when it is still
+/// open. This is the calculus's own judgement of a journal: which step sequences it
+/// admits.
+///
+/// Two readings are shared with the lift, because the calculus needs them to name an
+/// operation at all: a cleanup abort with the `cancel` cause stands for the
+/// acknowledgement when the journal reports no phase (correction 53), and a timer's or
+/// channel's cleanup is not replayed (those families take no calculus step but that
+/// acknowledgement). A single task's deadline request (cancellation `requested` with
+/// the `deadline` cause) is out of scope: the crash corpus has none, and the lifecycle
+/// family's `cancel-requested` carries its calculus step.
+fn replay(journal: &Journal, crash_as: CrashAs) -> Result<Replayed, (usize, ReplayFault)> {
+    let mut tree = RegionTree::new();
+    let mut reservations = BTreeMap::<u32, u32>::new();
+    let mut obligations = BTreeMap::<u32, (ObligationKind, u32)>::new();
+    let mut stopped_from = Vec::new();
+    let mut discarded = 0_u32;
+    for (at, event) in journal.events().iter().enumerate() {
+        let mut step = |tree: &mut RegionTree| -> Result<(), ReplayFault> {
+            // A cleanup step stands for the acknowledgement when no phase is journaled.
+            let imply_ack = |tree: &mut RegionTree, task: u32| -> Result<(), ReplayFault> {
+                let worker = WorkerId::at(task);
+                if tree.cancel_phase(worker)? == CancelPhase::Requested {
+                    tree.advance(worker, WorkerStep::AcknowledgeCancel)?;
+                }
+                Ok(())
+            };
+            match event.body() {
+                EventBody::Lifecycle(e) => match e {
+                    LifecycleEvent::RegionOpened { region, parent } => {
+                        let id = tree.open_child(RegionId::at(parent.0))?;
+                        if id.ordinal() != region.0 {
+                            return Err(ReplayFault::Identity);
+                        }
+                    }
+                    LifecycleEvent::TaskSpawned {
+                        task,
+                        region,
+                        resumability,
+                    } => {
+                        let id = tree.spawn(RegionId::at(region.0), resumability.clone())?;
+                        if id.ordinal() != task.0 {
+                            return Err(ReplayFault::Identity);
+                        }
+                    }
+                    LifecycleEvent::TaskStepped { task, step } => {
+                        if *step == TaskStep::Cancel {
+                            imply_ack(tree, task.0)?;
+                        }
+                        tree.advance(WorkerId::at(task.0), worker_step(step))?;
+                    }
+                    LifecycleEvent::RegionCloseRequested { region } => {
+                        tree.close(RegionId::at(region.0))?;
+                    }
+                    LifecycleEvent::RegionCancelRequested { region } => {
+                        tree.cancel(RegionId::at(region.0))?;
+                    }
+                    LifecycleEvent::RegionDrained { region, .. } => {
+                        tree.drain(RegionId::at(region.0))?;
+                    }
+                    LifecycleEvent::RegionFinalized { region } => {
+                        tree.finalize(RegionId::at(region.0))?;
+                    }
+                    LifecycleEvent::RegionCrashed { region, fenced } => {
+                        for task in fenced.as_slice() {
+                            let worker = WorkerId::at(task.0);
+                            let from = tree.worker_state(worker)?.clone();
+                            discarded += tree.evidence(worker)?.staged();
+                            match crash_as {
+                                CrashAs::Crash => {
+                                    tree.advance(worker, WorkerStep::Crash(crashed_reason()))?;
+                                }
+                                CrashAs::FailOnly => {
+                                    tree.advance(worker, WorkerStep::Fail(crashed_reason()))?;
+                                }
+                                CrashAs::ResumeThenFail => {
+                                    if from == WorkerState::Suspended {
+                                        tree.advance(worker, WorkerStep::Resume)?;
+                                    }
+                                    tree.advance(worker, WorkerStep::Fail(crashed_reason()))?;
+                                }
+                            }
+                            stopped_from.push(from);
+                        }
+                        let id = RegionId::at(region.0);
+                        if tree.state(id)? == RegionState::Open {
+                            tree.close(id)?;
+                        }
+                    }
+                },
+                EventBody::Effect(e) => match e {
+                    EffectEvent::Reserved { reservation, task } => {
+                        reservations.insert(reservation.0, task.0);
+                        tree.advance(
+                            WorkerId::at(task.0),
+                            WorkerStep::ReserveSlot(PublicationSlot::at(reservation.0)),
+                        )?;
+                    }
+                    EffectEvent::Committed { reservation } => {
+                        let holder = reservations
+                            .get(&reservation.0)
+                            .copied()
+                            .ok_or(ReplayFault::UnknownHandle)?;
+                        tree.advance(
+                            WorkerId::at(holder),
+                            WorkerStep::CommitSlot(PublicationSlot::at(reservation.0)),
+                        )?;
+                    }
+                    EffectEvent::Aborted { reservation, cause } => {
+                        let holder = reservations
+                            .get(&reservation.0)
+                            .copied()
+                            .ok_or(ReplayFault::UnknownHandle)?;
+                        match cause {
+                            AbortCause::Explicit => {
+                                tree.advance(
+                                    WorkerId::at(holder),
+                                    WorkerStep::AbortSlot(PublicationSlot::at(reservation.0)),
+                                )?;
+                            }
+                            // A cancellation's abort is the drain's discard.
+                            AbortCause::Cancel => imply_ack(tree, holder)?,
+                        }
+                    }
+                    EffectEvent::Fenced { .. } => {}
+                },
+                EventBody::Obligation(e) => match e {
+                    ObligationEvent::Opened {
+                        obligation,
+                        kind,
+                        holder,
+                        ..
+                    } => {
+                        obligations.insert(obligation.0, (*kind, holder.0));
+                        tree.open_substrate(
+                            WorkerId::at(holder.0),
+                            substrate(*kind, obligation.0),
+                        )?;
+                    }
+                    ObligationEvent::Discharged { obligation, how } => {
+                        let (kind, holder) = obligations
+                            .get(&obligation.0)
+                            .copied()
+                            .ok_or(ReplayFault::UnknownHandle)?;
+                        tree.discharge_substrate(
+                            WorkerId::at(holder),
+                            substrate(kind, obligation.0),
+                            match how {
+                                Discharge::Committed => SubstrateOutcome::Committed,
+                                Discharge::Aborted => SubstrateOutcome::Aborted,
+                            },
+                        )?;
+                    }
+                    ObligationEvent::Transferred {
+                        obligation, holder, ..
+                    } => {
+                        let (kind, from) = obligations
+                            .get(&obligation.0)
+                            .copied()
+                            .ok_or(ReplayFault::UnknownHandle)?;
+                        tree.transfer_substrate(
+                            WorkerId::at(from),
+                            substrate(kind, obligation.0),
+                            WorkerId::at(holder.0),
+                        )?;
+                        obligations.insert(obligation.0, (kind, holder.0));
+                    }
+                    ObligationEvent::Leaked { .. }
+                    | ObligationEvent::Fenced { .. }
+                    | ObligationEvent::RegionSettled { .. } => {}
+                },
+                EventBody::Cancellation(CancellationEvent::Acknowledged { task }) => {
+                    tree.advance(WorkerId::at(task.0), WorkerStep::AcknowledgeCancel)?;
+                }
+                EventBody::Cancellation(_) | EventBody::Time(_) | EventBody::Channel(_) => {}
+            }
+            Ok(())
+        };
+        step(&mut tree).map_err(|fault| (at, fault))?;
+    }
+    Ok(Replayed {
+        tree,
+        stopped_from,
+        discarded,
+    })
+}
+
+/// The calculus state the replay and the lift reached, compared whole: every worker's
+/// state, evidence and cancellation phase, every region's state, and the ledger.
+fn same_calculus_state(a: &RegionTree, b: &RegionTree) -> Result<(), String> {
+    if a.worker_count() != b.worker_count() || a.region_count() != b.region_count() {
+        return Err("sizes".to_owned());
+    }
+    for w in 0..u32::try_from(a.worker_count()).unwrap() {
+        let w = WorkerId::at(w);
+        if a.worker_state(w) != b.worker_state(w)
+            || a.evidence(w) != b.evidence(w)
+            || a.cancel_phase(w) != b.cancel_phase(w)
+        {
+            return Err(format!(
+                "{w}: {:?} {:?} {:?} vs {:?} {:?} {:?}",
+                a.worker_state(w),
+                a.evidence(w),
+                a.cancel_phase(w),
+                b.worker_state(w),
+                b.evidence(w),
+                b.cancel_phase(w)
+            ));
+        }
+    }
+    for r in 0..u32::try_from(a.region_count()).unwrap() {
+        if a.state(RegionId::at(r)) != b.state(RegionId::at(r)) {
+            return Err(format!("r{r}"));
+        }
+    }
+    if a.ledger().outstanding() != b.ledger().outstanding()
+        || a.ledger().opened() != b.ledger().opened()
+        || a.ledger().discharged() != b.ledger().discharged()
+    {
+        return Err(format!(
+            "ledger {:?} vs {:?}",
+            a.ledger().outstanding(),
+            b.ledger().outstanding()
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn every_lifted_crash_is_a_legal_calculus_step_sequence() {
+    let (corpus, _) = corpus();
+    let mut journals = 0_usize;
+    let mut stopped = BTreeMap::<&'static str, usize>::new();
+    let mut refused_without_crash_step = 0_usize;
+    let mut parked_journals = 0_usize;
+    let mut discarded = 0_u32;
+    for entry in &corpus {
+        let journal = &entry.journal;
+        let lifted = lift(journal);
+        let lifted = lifted.conforming().expect("the corpus conforms");
+        let replayed = replay(journal, CrashAs::Crash).unwrap_or_else(|(at, fault)| {
+            panic!(
+                "{} log {}: the calculus refuses event {at}: {fault:?}\n{}",
+                entry.name,
+                entry.log,
+                journal.render()
+            )
+        });
+        if let Err(diff) = same_calculus_state(&replayed.tree, lifted.tree()) {
+            panic!("{} log {}: {diff}", entry.name, entry.log);
+        }
+        discarded += replayed.discarded;
+        for from in &replayed.stopped_from {
+            *stopped.entry(from.status_token()).or_default() += 1;
+        }
+        let parked = replayed.stopped_from.contains(&WorkerState::Suspended);
+        parked_journals += usize::from(parked);
+        // Without the crash step, the calculus refuses exactly the journals that crash
+        // a parked worker; correction 58's injected `Resume` made those legal.
+        let fail_only = replay(journal, CrashAs::FailOnly);
+        assert_eq!(
+            fail_only.is_err(),
+            parked,
+            "{} log {}",
+            entry.name,
+            entry.log
+        );
+        if let Err((_, fault)) = fail_only {
+            assert!(matches!(
+                fault,
+                ReplayFault::Calculus(RegionFault::IllegalWorkerStep { .. })
+            ));
+            refused_without_crash_step += 1;
+        }
+        let approximated = replay(journal, CrashAs::ResumeThenFail).unwrap();
+        same_calculus_state(&approximated.tree, &replayed.tree).unwrap();
+        journals += 1;
+    }
+    eprintln!(
+        "{journals} journals replayed, stopped workers by state at the crash {stopped:?}, \
+         {parked_journals} crash a parked worker, {refused_without_crash_step} refused \
+         by a calculus without the crash step"
+    );
+    assert_eq!(journals, corpus.len());
+    // Pinned, as the RFC 0026 correction 59 evidence states them.
+    assert_eq!(journals, 1_952);
+    assert_eq!(
+        stopped,
+        BTreeMap::from([("created", 1_920), ("suspended", 3_872)])
+    );
+    assert_eq!(parked_journals, journals);
+    // In the corpus every stopped task is parked or never begun, so no crash discards a
+    // staged publication there.
+    assert_eq!(discarded, 0);
+    // `crash_program` crashes `t1` right after its reserve, still running with the
+    // publication staged: the crash of a running worker, which discards what it staged.
+    let mut running_programs = 0_usize;
+    for sleep in [false, true] {
+        let (programs, log) = one_actor(crash_program(sleep));
+        for config in every_projection() {
+            let journal = run(&programs, &log, &config).unwrap();
+            let lifted = lift(&journal);
+            let lifted = lifted.conforming().expect("the crash program conforms");
+            let replayed = replay(&journal, CrashAs::Crash).expect("the calculus admits it");
+            same_calculus_state(&replayed.tree, lifted.tree()).unwrap();
+            assert!(replayed.stopped_from.contains(&WorkerState::Running));
+            let has_effects = config.families.contains(Family::Effect);
+            assert_eq!(replayed.discarded > 0, has_effects);
+            running_programs += 1;
+        }
+    }
+    assert_eq!(running_programs, 64);
+    eprintln!(
+        "{running_programs} crash-program journals stop a running worker; \
+         {discarded} corpus publications discarded"
+    );
+    assert_eq!(refused_without_crash_step, journals);
+    // The corpus stops parked and never-begun workers only; the crash program below
+    // stops a running one.
+    assert!(
+        stopped.get("suspended").copied().unwrap_or(0) > 1_000,
+        "{stopped:?}"
+    );
+    assert!(
+        stopped.get("created").copied().unwrap_or(0) > 1_000,
+        "{stopped:?}"
+    );
+    assert!(refused_without_crash_step > 1_000);
+}
+
+#[test]
+fn on_the_mutation_corpus_the_calculus_and_the_lift_agree_on_the_calculus_steps() {
+    let config = all_families();
+    let (corpus, _) = corpus();
+    let mut mutants: Vec<(String, Journal)> = Vec::new();
+    let bases: Vec<&Journal> = corpus
+        .iter()
+        .filter(|e| e.config == config && has_crash(&e.journal))
+        .map(|e| &e.journal)
+        .step_by(7)
+        .collect();
+    let (programs, log) = one_actor(crash_program(true));
+    let sleeper = run(&programs, &log, &config).unwrap();
+    for (name, perturb, _) in perturbations() {
+        for base in bases.iter().copied().chain([&sleeper]) {
+            if let Some(mutant) = perturb(base) {
+                mutants.push((name.to_owned(), mutant));
+            }
+        }
+    }
+    for entry in corpus.iter().filter(|e| has_crash(&e.journal)).step_by(11) {
+        let b = bodies(&entry.journal);
+        for i in 0..b.len() {
+            let mut deleted = b.clone();
+            deleted.remove(i);
+            mutants.push((format!("delete {i}"), rebuild(deleted)));
+            if i + 1 < b.len() && b[i] != b[i + 1] {
+                let mut swapped = b.clone();
+                swapped.swap(i, i + 1);
+                mutants.push((format!("swap {i}"), rebuild(swapped)));
+            }
+        }
+    }
+    let mut calculus_rejects = 0_usize;
+    let mut unknown_handle = 0_usize;
+    let mut lift_refused_by_calculus = 0_usize;
+    let mut lift_rejects_on_its_own_checks = 0_usize;
+    let mut lift_conforms = 0_usize;
+    let mut failures = Vec::new();
+    for (what, mutant) in &mutants {
+        let by_calculus = replay(mutant, CrashAs::Crash);
+        let by_lift = lift(mutant);
+        // The lift accepts nothing the calculus refuses: every lifted step is one.
+        if let Err((_, fault)) = &by_calculus {
+            calculus_rejects += 1;
+            unknown_handle += usize::from(*fault == ReplayFault::UnknownHandle);
+            if by_lift.conforming().is_some() {
+                failures.push(format!("{what}: the calculus refuses, the lift conforms"));
+            }
+        }
+        match &by_lift {
+            // The calculus accepts nothing the lift refuses as a calculus fault.
+            // ... at the same event, and for the same fault.
+            LiftVerdict::Violates {
+                seq,
+                reason: Nonconformance::Refused(fault),
+            } => {
+                lift_refused_by_calculus += 1;
+                let same = matches!(
+                    &by_calculus,
+                    Err((at, ReplayFault::Calculus(f)))
+                        if f == fault && mutant.events()[*at].seq() == *seq
+                );
+                if !same {
+                    failures.push(format!(
+                        "{what}: the lift's calculus refuses {fault} at {seq}, the replay says {:?}",
+                        by_calculus.as_ref().err()
+                    ));
+                }
+            }
+            LiftVerdict::Conforms(_) => lift_conforms += 1,
+            _ => lift_rejects_on_its_own_checks += 1,
+        }
+    }
+    eprintln!(
+        "{} mutants: calculus refuses {calculus_rejects} ({unknown_handle} naming no opened \
+         handle); the lift refuses \
+         {lift_refused_by_calculus} as a calculus fault and {lift_rejects_on_its_own_checks} \
+         on its own cross-checks or as inconclusive, and conforms on {lift_conforms}",
+        mutants.len()
+    );
+    assert!(
+        failures.is_empty(),
+        "{} disagreements:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(20)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    // Pinned, as the RFC 0026 correction 59 evidence states them.
+    assert_eq!(
+        (
+            mutants.len(),
+            calculus_rejects,
+            unknown_handle,
+            lift_refused_by_calculus,
+            lift_rejects_on_its_own_checks,
+            lift_conforms,
+        ),
+        (13_373, 7_585, 381, 4_984, 4_984, 3_405)
+    );
 }

@@ -1,0 +1,46 @@
+[change]
+bone = "bn-fxxf2"
+author = "continuum-dev"
+summary = "continuum-task: the region calculus gains a fail-stop crash step, WorkerStep::Crash, from any non-terminal state and cancellation phase; the PR-14 lift takes it in place of correction 58's injected Resume (RFC 0026 correction 59)"
+
+[semantic]
+covers = [
+  "crates/continuum-task/src/",
+]
+reference_tests = [
+  "crates/continuum-task/tests/region_crash.rs::a_crash_stops_a_worker_in_every_non_terminal_state_and_cancellation_phase",
+  "crates/continuum-task/tests/region_crash.rs::fail_still_leaves_only_created_or_running_and_not_a_cancelling_worker",
+  "crates/continuum-task/tests/region_crash.rs::a_terminal_worker_does_not_crash",
+  "crates/continuum-task/tests/region_crash.rs::a_crashed_worker_takes_no_later_step",
+  "crates/continuum-task/tests/region_crash.rs::a_crash_discards_every_staged_publication_and_keeps_committed_evidence",
+  "crates/continuum-task/tests/region_crash.rs::a_crashed_holders_obligations_are_fenced_owed_and_out_of_reach",
+  "crates/continuum-task/tests/region_crash.rs::a_crash_inside_a_cancelling_region_leaves_the_drain_nothing_to_cancel",
+  "crates/continuum-task/tests/region_crash.rs::a_crash_in_a_finalized_region_is_refused",
+  "crates/continuum-task/tests/region_crash.rs::the_crash_step_renders_with_its_reason",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-task/tests/region_crash.rs::independent_event_swap_of_two_crashes_preserves_the_finalization", relation = "independent-event swap" },
+]
+differential_tests = [
+  { test = "crates/continuumd/tests/region_staging_differential.rs::the_calculus_and_an_independent_reference_model_agree_on_every_staging_transition", oracle = "continuum-engine-reference", subject = "continuum-task" },
+  { test = "crates/continuumd/tests/region_staging_differential.rs::a_mutated_reference_guard_is_told_apart", oracle = "continuum-engine-reference", subject = "continuum-task" },
+  { test = "crates/continuum-asupersync/tests/fail_stop_crash.rs::every_lifted_crash_is_a_legal_calculus_step_sequence", oracle = "continuum-asupersync", subject = "continuum-task" },
+  { test = "crates/continuum-asupersync/tests/fail_stop_crash.rs::on_the_mutation_corpus_the_calculus_and_the_lift_agree_on_the_calculus_steps", oracle = "continuum-asupersync", subject = "continuum-task" },
+]
+
+[semantic.claim_impact]
+claims = ["C004", "C023"]
+reason = "C004 (the asupersync adapter captures all supported nondeterminism) and C023 (the triptych's A7 arrow) both rest on the calculus admitting what the substrate does: the lift no longer injects a Resume the task never took to express a fail-stop crash of a parked task. Neither row changes state or wording: C004 stays TARGET and C023 stays OBSERVED, and no count in docs/18 moves"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the region calculus is an in-process value with no wire schema, and the PR-14 journal, its encoding (version 3) and the A7 model are unchanged; the lift reaches the same calculus state on every crash journal, so no campaign identity or golden moves"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-task: WorkerStep gains the Crash variant, token crash; every step sequence the calculus admitted before it admits unchanged, and the lift's calculus state on every crash journal is the one correction 58's Resume-then-Fail reached; continuum-asupersync's lift and in-repo tests are the only callers. WorkerStep is not non_exhaustive, so the new variant is source-compatible for in-repo callers only; no exhaustive match on it exists outside continuum-task"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-1oh39s"
+verdict = "approved"

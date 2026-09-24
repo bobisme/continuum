@@ -1,7 +1,7 @@
-//! Differential: the region calculus's staging, abort, adapter-obligation and per-task
-//! cancellation rules against an independent transition model explored by
-//! `continuum_engine_reference` (RFC 0026 corrections 51 and 53; bn-2318t, cr-1ckhmw,
-//! bn-36wy3).
+//! Differential: the region calculus's staging, abort, adapter-obligation, per-task
+//! cancellation and fail-stop crash rules against an independent transition model
+//! explored by `continuum_engine_reference` (RFC 0026 corrections 51, 53 and 59;
+//! bn-2318t, cr-1ckhmw, bn-36wy3, bn-fxxf2).
 //!
 //! The oracle is written from the corrections' text, not from `region.rs`. It models two
 //! workers in the root region:
@@ -11,7 +11,10 @@
 //! - each worker's own cancellation: request, acknowledgement, cancelled completion;
 //! - the root region's cancellation, which requests both workers' cancellation;
 //! - one adapter obligation, opened by A, discharged by its holder as committed or
-//!   aborted, and handed between A and B, including the refused self-transfer.
+//!   aborted, and handed between A and B, including the refused self-transfer;
+//! - each worker's fail-stop crash (correction 59): from created, running or parked, in
+//!   any cancellation phase, to failed, discarding A's staged slots and leaving the
+//!   obligation owed by its crashed holder.
 //!
 //! Each step is a guarded action in `continuum_engine_reference`'s programmatic model
 //! language. The subject is `continuum_task::region::RegionTree`, driven through its
@@ -23,9 +26,11 @@
 //!
 //! The two share no code: the oracle never names a calculus type, and the subject's side
 //! observes the tree only through `worker_state`, `cancel_phase`, `evidence`,
-//! `ledger().holds` and `substrate_holder`. Nine mutated oracle guards are told apart,
-//! so agreement is not vacuous. One of them is correction 51's region-level strictness,
-//! which correction 53 relaxed.
+//! `ledger().holds` and `substrate_holder`. Fourteen mutated oracle guards are told
+//! apart, so agreement is not vacuous. One of them is correction 51's region-level
+//! strictness, which correction 53 relaxed; five are a crash step that is not
+//! correction 59's, one of them correction 58's approximation (a crash with `Fail`'s
+//! guard, so no parked crash).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -53,6 +58,7 @@ const VARIABLES: [&str; 13] = [
 const B: usize = 0;
 const CX: usize = 2;
 const H: usize = 3;
+const KA: usize = 4;
 const KB: usize = 5;
 const P0: usize = 6;
 const ST: usize = 11;
@@ -68,7 +74,7 @@ const CANCELLED: i64 = 5;
 
 /// The steps, named once for both sides. `OpenSub` in a state where the obligation was
 /// already opened is the identity-reuse mutant; `TransferAA` is the self-transfer.
-const ACTIONS: [&str; 36] = [
+const ACTIONS: [&str; 38] = [
     "Begin",
     "Reserve",
     "ReserveSlot0",
@@ -105,6 +111,8 @@ const ACTIONS: [&str; 36] = [
     "TransferAB",
     "TransferBA",
     "TransferAA",
+    "Crash",
+    "CrashB",
 ];
 
 // --- the oracle: RFC 0026 corrections 51 and 53 as a guarded transition model ----------
@@ -171,6 +179,19 @@ struct Guards {
     ack_needs_request: bool,
     /// An acknowledged worker takes no ordinary step (it only drains).
     acknowledged_only_drains: bool,
+    /// A crash stops a parked worker (correction 59). False is correction 58's
+    /// approximation: a crash with `Fail`'s guard, `Created | Running` only.
+    crash_admits_parked: bool,
+    /// A crash stops a worker that acknowledged its cancellation: a crash is not a step
+    /// of the worker's cleanup.
+    crash_admits_cancelling: bool,
+    /// A crash discards what the worker staged.
+    crash_discards_staging: bool,
+    /// A crash leaves a terminal worker as it is.
+    crash_refuses_terminal: bool,
+    /// A crash leaves the crashed holder's obligation owed. False discharges it at the
+    /// crash: the laundering correction 59 item 2 forbids.
+    crash_keeps_obligation_owed: bool,
 }
 
 impl Guards {
@@ -184,6 +205,11 @@ impl Guards {
         region_cancel_blocks_transfer: false,
         ack_needs_request: true,
         acknowledged_only_drains: true,
+        crash_admits_parked: true,
+        crash_admits_cancelling: true,
+        crash_discards_staging: true,
+        crash_refuses_terminal: true,
+        crash_keeps_obligation_owed: true,
     };
 }
 
@@ -431,6 +457,44 @@ fn oracle(guards: Guards) -> Model {
     ) {
         builder = builder.action(action);
     }
+    // The fail-stop crash (correction 59): from any non-terminal state and any
+    // cancellation phase, to failed. A's staged slots are discarded; the obligation's
+    // variables do not move, so a crashed holder still owes it.
+    let crash = |name: &str, party: Party| {
+        let mut guard = if !guards.crash_refuses_terminal {
+            le(party.lifecycle, COMPLETED)
+        } else if guards.crash_admits_parked {
+            le(party.lifecycle, SUSPENDED)
+        } else {
+            le(party.lifecycle, RUNNING)
+        };
+        if !guards.crash_admits_cancelling {
+            guard = BoolExpr::and(guard, eq(party.acknowledged, 0));
+        }
+        let mut effect = vec![set(party.lifecycle, FAILED)];
+        if party.lifecycle == "st" && guards.crash_discards_staging {
+            effect.extend(clear());
+        }
+        if !guards.crash_keeps_obligation_owed {
+            // Discharge the obligation when this party holds it: `sub` 1 → 2 and `h` → 0
+            // exactly when `sub == 1` and `h` names the party, stated arithmetically.
+            let open = IntExpr::times(var("sub"), IntExpr::minus(IntExpr::constant(2), var("sub")));
+            let mine = if party.lifecycle == "st" {
+                IntExpr::minus(IntExpr::constant(1), var("h"))
+            } else {
+                var("h")
+            };
+            let hit = IntExpr::times(mine, open);
+            effect.push(("sub", IntExpr::plus(var("sub"), hit.clone())));
+            if party.lifecycle == "b" {
+                effect.push(("h", IntExpr::minus(var("h"), hit)));
+            }
+        }
+        ActionDecl::deterministic(name, guard, effect)
+    };
+    builder = builder
+        .action(crash("Crash", PARTY_A))
+        .action(crash("CrashB", PARTY_B));
     let self_transfer = if guards.transfer_refuses_self {
         BoolExpr::constant(false)
     } else {
@@ -539,6 +603,14 @@ fn apply(tree: &mut RegionTree, action: &str) -> Result<(), RegionFault> {
         "RequestCancelB" => (WB, WorkerStep::RequestCancel),
         "AckCancelB" => (WB, WorkerStep::AcknowledgeCancel),
         "CompleteCancelledB" => (WB, WorkerStep::CompleteCancelled),
+        "Crash" => (
+            A,
+            WorkerStep::Crash(FailureReason::new("crashed").expect("canonical")),
+        ),
+        "CrashB" => (
+            WB,
+            WorkerStep::Crash(FailureReason::new("crashed").expect("canonical")),
+        ),
         "Cancel" => {
             let root = tree.root();
             return tree.cancel(root);
@@ -756,10 +828,13 @@ fn explore_oracle(model: &Model) -> BTreeMap<Vec<i64>, Row> {
     rows
 }
 
-/// The reachable abstract states.
-const STATES: usize = 8_020;
-/// Admitted transitions over those states (of 8,020 × 36 = 288,720 checked).
-const ADMITTED: usize = 58_455;
+/// The reachable abstract states. 8,020 before the crash steps (bn-fxxf2): the crash
+/// adds failed states `Fail` does not reach, A failed after its acknowledgement and B
+/// failed at all (the oracle gives B no `Fail`).
+const STATES: usize = 10_575;
+/// Admitted transitions over those states (of 10,575 × 38 = 401,850 checked). 58,455
+/// over 8,020 × 36 before the crash steps.
+const ADMITTED: usize = 86_331;
 
 #[test]
 fn the_calculus_and_an_independent_reference_model_agree_on_every_staging_transition() {
@@ -812,6 +887,39 @@ fn the_calculus_and_an_independent_reference_model_agree_on_every_staging_transi
             .iter()
             .any(|s| s[ST] == CANCELLED && s[CX] == 0)
     );
+    // Correction 59: A crashes from its park while it holds the obligation, and the
+    // crash leaves it failed with the obligation still owed, by A, out of every reach.
+    let parked = calculus
+        .iter()
+        .find(|(s, _)| s[ST] == SUSPENDED && s[SUB] == 1 && s[H] == 0)
+        .expect("A parks holding the obligation");
+    let crashed = parked.1["Crash"].as_ref().expect("a parked worker crashes");
+    assert_eq!((crashed[ST], crashed[SUB], crashed[H]), (FAILED, 1, 0));
+    assert!(
+        parked.1["Fail"].is_none(),
+        "a parked worker does not fail on its own"
+    );
+    let after = &calculus[crashed];
+    for step in [
+        "DischargeCommitA",
+        "DischargeAbortA",
+        "TransferAB",
+        "Resume",
+        "Crash",
+    ] {
+        assert!(after[step].is_none(), "{step} after A crashed");
+    }
+    // A crash reaches a worker that acknowledged its cancellation, and discards A's
+    // staged slots.
+    assert!(calculus.iter().any(|(s, row)| {
+        s[KA] == 1 && s[ST] <= SUSPENDED && row["Crash"].is_some() && row["Fail"].is_none()
+    }));
+    assert!(calculus.iter().any(|(s, row)| {
+        s[P0] + s[P0 + 1] + s[P0 + 2] > 0
+            && row["Crash"]
+                .as_ref()
+                .is_some_and(|t| t[P0] + t[P0 + 1] + t[P0 + 2] == 0)
+    }));
 }
 
 /// How many states the calculus and the mutant disagree on.
@@ -890,6 +998,42 @@ fn a_mutated_reference_guard_is_told_apart() {
             "an ordinary step after the acknowledgement",
             Guards {
                 acknowledged_only_drains: false,
+                ..c
+            },
+        ),
+        // Correction 58's approximation: the calculus had no crash of a parked worker.
+        (
+            "no crash of a parked worker",
+            Guards {
+                crash_admits_parked: false,
+                ..c
+            },
+        ),
+        (
+            "no crash of a worker that acknowledged its cancellation",
+            Guards {
+                crash_admits_cancelling: false,
+                ..c
+            },
+        ),
+        (
+            "a crash that keeps what was staged",
+            Guards {
+                crash_discards_staging: false,
+                ..c
+            },
+        ),
+        (
+            "a crash of a completed worker",
+            Guards {
+                crash_refuses_terminal: false,
+                ..c
+            },
+        ),
+        (
+            "a crash that discharges the crashed holder's obligation",
+            Guards {
+                crash_keeps_obligation_owed: false,
                 ..c
             },
         ),

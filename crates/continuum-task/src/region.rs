@@ -149,6 +149,23 @@
 //! - **a subtree's ledger** — [`Finalization::ledger`] sums only the finalized
 //!   subtree's own obligations, so a child's teardown is judged by what it owes.
 //!
+//! RFC 0026 correction 59 (bn-fxxf2) adds the fail-stop crash, and keeps the argument:
+//!
+//! - **a crash is one step** — [`WorkerStep::Crash`] moves a worker from any non-terminal
+//!   state, parked included, and from any cancellation phase, to
+//!   [`WorkerState::Failed`], and runs none of its code. It discards what is staged, as a
+//!   failure does, so the unresolved-publication conjunct is unchanged, and it discharges
+//!   the termination obligation through the one private transition function;
+//! - **what a crashed worker held is fenced, not absorbed** — its adapter obligations stay
+//!   open in the ledger with a terminal holder, so no discharge or hand-off reaches them,
+//!   and a finalization over them is not total. The calculus reports them; it does not
+//!   pretend they were met.
+//!
+//! The crash step's instrumented half is `crates/continuum-task/tests/region_crash.rs`,
+//! with `continuumd`'s `tests/region_staging_differential.rs` and
+//! `continuum-asupersync`'s `tests/fail_stop_crash.rs`; the schedule sweeps below do not
+//! inject it.
+//!
 //! `crates/continuum-task/tests/region_no_orphan.rs` is the instrumented half: it
 //! enumerates schedule spaces, tears each one down, and asserts the post-condition over
 //! every worker the tree ever admitted.
@@ -1096,6 +1113,8 @@ impl RegionTree {
         let phase = self.cancel_phase(worker)?;
         // docs/02 §7: `Cancelling` only drains and finalizes. After its acknowledgement a
         // worker may abort what it staged and complete as cancelled, and nothing else.
+        // A fail-stop crash is not a step the worker takes, so it is not a step of its
+        // cleanup either: it may stop a cancelling worker too (correction 59).
         if phase == CancelPhase::Acknowledged
             && !from.is_terminal()
             && !matches!(
@@ -1105,6 +1124,7 @@ impl RegionTree {
                     | WorkerStep::RequestCancel
                     | WorkerStep::AcknowledgeCancel
                     | WorkerStep::CompleteCancelled
+                    | WorkerStep::Crash(_)
             )
         {
             return Err(RegionFault::WorkerCancelling { worker, step });
@@ -1207,6 +1227,17 @@ impl RegionTree {
                 WorkerState::Completed
             }
             (WorkerState::Created | WorkerState::Running, WorkerStep::Fail(reason)) => {
+                self.discard_provisional(worker)?;
+                WorkerState::Failed(reason.clone())
+            }
+            // A fail-stop crash (RFC 0026 correction 59): from any non-terminal state and
+            // any cancellation phase. It discards what is staged and leaves the worker's
+            // adapter obligations open, owed by a terminal holder that can never
+            // discharge or hand them on: fenced.
+            (
+                WorkerState::Created | WorkerState::Running | WorkerState::Suspended,
+                WorkerStep::Crash(reason),
+            ) => {
                 self.discard_provisional(worker)?;
                 WorkerState::Failed(reason.clone())
             }

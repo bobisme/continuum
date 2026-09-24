@@ -266,6 +266,31 @@ pub enum WorkerStep {
     /// for this one worker: it discards what is still staged, records the
     /// [`CancelOutcome`], and settles the worker as [`WorkerState::Cancelled`].
     CompleteCancelled,
+    /// A fail-stop crash stops the worker where it is, naming why: `Created | Running |
+    /// Suspended → Failed`, in any cancellation phase (RFC 0026 correction 59; bn-fxxf2).
+    ///
+    /// No code of the worker runs at the step or after it: not its cancellation handler,
+    /// not a cleanup, not a resume. That is what sets it apart from [`Self::Fail`], which
+    /// is the worker's own failure and so leaves only `Created | Running`. A parked worker
+    /// crashes from its park; a worker whose cancellation is requested or acknowledged
+    /// crashes from there, because a crash is not a step of its cleanup. The process
+    /// profile's row `fail-stop-crash` is the source: no finalizer, cancellation handler
+    /// or cleanup runs at the crash.
+    ///
+    /// What the worker held is fenced (correction 58's row `late-completion`):
+    ///
+    /// - each staged publication is discarded, as a failure's is: nothing a reader can
+    ///   observe exists, and it can never be committed. The discard discharges its
+    ///   `provisional-publication` obligation, so nothing staged survives the step;
+    /// - each adapter obligation the worker holds stays open in the ledger. It is owed,
+    ///   and no one can discharge it or hand it on, because its holder is terminal. So a
+    ///   region that finalizes over it is not total, and reports it as outstanding;
+    /// - no [`CancelOutcome`] is recorded: the worker did not complete as cancelled.
+    ///
+    /// A binding may refuse a crash the calculus admits, when it gives that crash no
+    /// fail-stop semantics (correction 58 item 1). The calculus states what a crash is; a
+    /// binding states which crashes it realizes.
+    Crash(FailureReason),
 }
 
 impl WorkerStep {
@@ -287,6 +312,7 @@ impl WorkerStep {
             Self::RequestCancel => "request-cancel",
             Self::AcknowledgeCancel => "acknowledge-cancel",
             Self::CompleteCancelled => "complete-cancelled",
+            Self::Crash(_) => "crash",
         }
     }
 
@@ -304,6 +330,7 @@ impl fmt::Display for WorkerStep {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Fail(reason) => write!(f, "fail({reason})"),
+            Self::Crash(reason) => write!(f, "crash({reason})"),
             Self::ReserveSlot(slot) | Self::CommitSlot(slot) | Self::AbortSlot(slot) => {
                 write!(f, "{}({slot})", self.token())
             }

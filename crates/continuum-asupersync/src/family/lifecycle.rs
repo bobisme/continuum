@@ -16,7 +16,7 @@
 //! | [`LifecycleEvent::RegionCancelRequested`] | `RegionTree::cancel` |
 //! | [`LifecycleEvent::RegionDrained`] | `RegionTree::drain`, with the tasks the drain cancelled |
 //! | [`LifecycleEvent::RegionFinalized`] | `RegionTree::finalize` |
-//! | [`LifecycleEvent::RegionCrashed`] | a fail-stop crash of the region's subtree (bn-20d8u): each live task `Fail(crashed)` (a parked one taken off its park first, `Resume`), then `RegionTree::close` on the subtree's open regions |
+//! | [`LifecycleEvent::RegionCrashed`] | a fail-stop crash of the region's subtree (bn-20d8u): each live task the calculus's `Crash(crashed)`, parked or not (RFC 0026 correction 59), then `RegionTree::close` on the subtree's open regions |
 //!
 //! Two steps of the calculus are deliberately **not** here. `Reserve` and `Commit` are
 //! the reserve/commit/abort family's (PR-14-IMPL-02), and the cancellation *phases* a
@@ -37,7 +37,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use continuum_task::region::worker::{
-    CancelPhase, FailureReason, NonResumableReason, Resumability, WorkerId, WorkerState, WorkerStep,
+    CancelPhase, FailureReason, NonResumableReason, Resumability, WorkerId, WorkerStep,
 };
 use continuum_task::region::{DrainCause, RegionId, RegionState};
 
@@ -543,12 +543,12 @@ fn crashed_reason() -> FailureReason {
 ///    acknowledged), under a budget deadline, or holding a channel's receiver or a
 ///    blocked send has no crash semantics here: [`LiftStop::Unsupported`] of the family
 ///    that shows it, never a conformance. The binding refuses those crashes too.
-/// 4. The calculus has no crash step, so each stopped worker fails with the reason
-///    `crashed` (`Fail` discards what it staged, which publishes nothing), a parked one
-///    taken off its park first because `Fail` leaves `Created | Running` only; then the
-///    subtree's open regions are closed. The adapter obligations the workers held stay
-///    open in the calculus's ledger: they are owed, and the region's finalization is not
-///    total.
+/// 4. Each stopped worker takes the calculus's crash step, `Crash` with the reason
+///    `crashed` (RFC 0026 correction 59, bn-fxxf2), from wherever it is, parked
+///    included: it discards what it staged, which publishes nothing, and no step the
+///    task did not take is lifted. Then the subtree's open regions are closed. The
+///    adapter obligations the workers held stay open in the calculus's ledger with a
+///    terminal holder: they are owed, and the region's finalization is not total.
 /// 5. What the stopped tasks held is owed as fences, per family the journal carries
 ///    ([`FencesDue`]); nothing of theirs happens after the crash, because every family
 ///    refuses a step of a terminal task.
@@ -620,13 +620,11 @@ fn lift_crash(cx: &mut LiftContext, region: u32, fenced: &TaskSet) -> Result<(),
             return Err(LiftStop::Unsupported(crate::family::Family::Channel));
         }
     }
+    // The calculus's own crash step (RFC 0026 correction 59, bn-fxxf2): each stopped
+    // worker, parked or not, fails where it is, and nothing of it runs.
     for task in &model {
-        let worker = WorkerId::at(*task);
-        if *cx.tree.worker_state(worker)? == WorkerState::Suspended {
-            cx.tree.advance(worker, WorkerStep::Resume)?;
-        }
         cx.tree
-            .advance(worker, WorkerStep::Fail(crashed_reason()))?;
+            .advance(WorkerId::at(*task), WorkerStep::Crash(crashed_reason()))?;
     }
     if state == RegionState::Open {
         cx.tree.close(id)?;
