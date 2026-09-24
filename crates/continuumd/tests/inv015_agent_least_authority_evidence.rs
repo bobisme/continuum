@@ -13,7 +13,7 @@
 //! | alter evidence status | `daemon/evidence.rs` — [`Promotion`] has private fields and no public constructor, so producer code (`daemon/observe.rs`, a *different module*) can name the type and never build one; `observe.ingest`'s wire shape declares no status field, so an append lands at the lattice's bottom as a property of the request's *type* | `daemon_evidence.rs`: `a_producers_append_lands_at_the_lattices_bottom`, `the_producers_request_body_has_no_field_that_could_name_a_status`, `the_status_written_is_what_the_checker_established_not_what_the_caller_named`, `no_operation_in_either_family_removes_or_edits_an_appended_node` — cited via [`status_authority`], plus this file's own registry-grain sweep [`privileged_perimeter::positive_no_mutation_request_admits_a_caller_supplied_status`] |
 //! | sign receipts | `evidence.link` — the checker is the *admitted capability's* actor (there is no checker request field), the actor must be a `service:` scheme, and self-certification is refused before the receipt is read (RFC 0038 D3) | `daemon_evidence.rs`: `only_a_service_actor_may_append_a_check_edge`, `a_checker_may_not_record_a_check_of_its_own_production` — cited via [`receipt_authority`]; cryptographic signing (plan §18.6, bn-1hape): the daemon holds the key, installed only by the deployment, and signs only inside `evidence.link` after the service gate; no wire type carries key material — [`receipt_authority::positive_only_the_daemon_holds_the_receipt_key_and_only_a_service_check_signs`] |
 //! | access ungranted production traces | `daemon/admission.rs` — R-4: `observe.ingest` requires `DataGrant::ProductionTrace` beyond its `execute` level, decided by [`required_grant`] *before* any family runs; the denial is the zero-bit [`Denied`] (X1) and precedes the index (X3), so a refused caller learns nothing (X2) | live here: [`trace_grant::positive_exactly_one_operation_requires_a_data_grant_and_it_is_the_production_trace`], [`trace_grant::positive_a_denial_carries_zero_bits`]; cited: `the_production_trace_grant_is_required_beyond_the_execute_level`, `every_admission_failure_is_one_byte_identical_answer`, `a_promotion_of_a_claim_that_does_not_exist_is_byte_identical_to_one_that_does` |
-//! | execute unrestricted host effects | structurally: the 83-operation registry has **no host-execution verb and no `capability` namespace** (RFC 0026 correction 20: "no operation in this protocol can widen the authority of the connection that invokes it"); `ReferenceStore::mint`/`revoke` have no wire caller (swept live over every `continuumd` source); every remaining host-effect crate (`continuum-effects-{process,storage,time}`, `continuum-proof-client`, `continuum-security`) is a zero-pub-item scaffold, pinned to go red when the substance arrives; `continuum-effects-network` grew its Lab pack at bn-3ohe and is audited like Forge — a recorded public inventory, zero host-effect facilities, no dependencies, and no route from a connection into it; `continuum-forge` grew its first public surface at bn-1dsih and is audited rather than grandfathered — a recorded public inventory, zero host-effect facilities named in its code, one verifier-side dependency, and no route from a connection into it: the declared `forge.*` vocabulary has no registered family and answers `UnsupportedSemanticFeature`, the daemon does not link the crate, and no `continuumd` source names it | live here: [`privileged_perimeter::positive_the_namespace_set_is_closed_and_contains_no_capability_namespace`], [`no_widening`] |
+//! | execute unrestricted host effects | structurally: the 83-operation registry has **no host-execution verb and no `capability` namespace** (RFC 0026 correction 20: "no operation in this protocol can widen the authority of the connection that invokes it"); `ReferenceStore::mint`/`revoke` have no wire caller (swept live over every `continuumd` source); every remaining host-effect crate (`continuum-effects-{storage,time}`, `continuum-proof-client`, `continuum-security`) is a zero-pub-item scaffold, pinned to go red when the substance arrives; `continuum-effects-network` grew its Lab pack at bn-3ohe, and `continuum-effects-process` its Lab pack at bn-3mmf, and each is audited like Forge — a recorded public inventory, no host effect by the compiler (`#![no_std]` and a live compiler lane), no dependencies, and no route from a connection into it; `continuum-forge` grew its first public surface at bn-1dsih and is audited rather than grandfathered — a recorded public inventory, zero host-effect facilities named in its code, one verifier-side dependency, and no route from a connection into it: the declared `forge.*` vocabulary has no registered family and answers `UnsupportedSemanticFeature`, the daemon does not link the crate, and no `continuumd` source names it | live here: [`privileged_perimeter::positive_the_namespace_set_is_closed_and_contains_no_capability_namespace`], [`no_widening`] |
 //!
 //! Cross-cutting, because "no ambient authority" is a property of the *admission
 //! predicate* rather than of any one clause: the `@privileged` set is exactly the five
@@ -178,6 +178,10 @@ const SECURITY_MANIFEST: &str = include_str!("../../continuum-security/Cargo.tom
 /// the crate is its declared dependency set rather than its emptiness.
 const EFFECTS_NETWORK_MANIFEST: &str = include_str!("../../continuum-effects-network/Cargo.toml");
 
+/// `continuum-effects-process`'s manifest — the same posture: bn-3mmf landed the
+/// `process/crash-restart-v0` Lab pack there.
+const EFFECTS_PROCESS_MANIFEST: &str = include_str!("../../continuum-effects-process/Cargo.toml");
+
 /// `continuumd`'s own manifest — the other end of the same edge: whether the daemon
 /// links Forge at all.
 const CONTINUUMD_MANIFEST: &str = include_str!("../Cargo.toml");
@@ -339,8 +343,31 @@ fn effects_network_sources() -> Vec<(PathBuf, String)> {
 const EFFECTS_NETWORK_NO_STD_LANE: &str =
     include_str!("../../continuum-effects-network/tests/pr15_no_std_lane.rs");
 
-/// The name of the lane's test.
-const NO_STD_LANE_TEST: &str = "fn the_compiler_refuses_a_host_facility_in_the_network_pack()";
+/// The name of the network lane's test.
+const NETWORK_NO_STD_LANE_TEST: &str =
+    "fn the_compiler_refuses_a_host_facility_in_the_network_pack()";
+
+/// Every source file of `continuum-effects-process`, walked rather than listed — the
+/// same device as [`effects_network_sources`] (bn-3mmf).
+fn effects_process_sources() -> Vec<(PathBuf, String)> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../continuum-effects-process/src");
+    let mut sources = Vec::new();
+    rust_sources(&root, &mut sources);
+    assert!(
+        !sources.is_empty(),
+        "the walk found no continuum-effects-process source; the crate moved and this \
+         sweep is reporting nothing rather than checking something"
+    );
+    sources
+}
+
+/// The process pack's compiler lane (bn-3mmf), the network lane applied to that crate.
+const EFFECTS_PROCESS_NO_STD_LANE: &str =
+    include_str!("../../continuum-effects-process/tests/pr15_no_std_lane.rs");
+
+/// The name of the process lane's test.
+const PROCESS_NO_STD_LANE_TEST: &str =
+    "fn the_compiler_refuses_a_host_facility_in_the_process_pack()";
 
 /// Whether a crate's sources, manifest and compiler lane make "links no `std`" a
 /// compiler fact for every build (bn-3ohe, cr-1dl1d7). The structure rules close every
@@ -356,6 +383,7 @@ fn no_std_unconditional(
     sources: &[(PathBuf, String)],
     manifest: &str,
     lane: &str,
+    lane_test: &str,
 ) -> Result<(), String> {
     let code = |text: &str| -> Vec<String> {
         text.lines()
@@ -454,7 +482,7 @@ fn no_std_unconditional(
         return Err("the manifest does not inherit the workspace lints".to_owned());
     }
     let at = lane
-        .find(NO_STD_LANE_TEST)
+        .find(lane_test)
         .ok_or("the compiler lane test is missing")?;
     let attrs = &lane[..at];
     let attrs = &attrs[attrs.rfind("\n\n").unwrap_or(0)..];
@@ -1039,12 +1067,13 @@ mod no_widening {
     use super::{
         ADMISSION, CAPABILITY, CONTINUUMD_MANIFEST, DAEMON_OPERATIONS_TESTS, EFFECTS_NETWORK_LIB,
         EFFECTS_NETWORK_MANIFEST, EFFECTS_NETWORK_NO_STD_LANE, EFFECTS_PROCESS_LIB,
-        EFFECTS_STORAGE_LIB, EFFECTS_TIME_LIB, FORGE_MANIFEST, NON_FILESYSTEM_FACILITIES,
-        PROOF_CLIENT_LIB, PUBLICATION, SECURITY_LIB, SECURITY_MANIFEST, SIGNER_ADMINISTRATION,
-        SIGNING_SOURCE_FACILITIES, administrative_callers, continuumd_sources,
-        declared_dependencies, effects_network_sources, forge_sources, host_effect_lines,
-        is_signing_source, no_std_unconditional, pin, pub_items, security_sources,
-        unexempted_callers,
+        EFFECTS_PROCESS_MANIFEST, EFFECTS_PROCESS_NO_STD_LANE, EFFECTS_STORAGE_LIB,
+        EFFECTS_TIME_LIB, FORGE_MANIFEST, NETWORK_NO_STD_LANE_TEST, NON_FILESYSTEM_FACILITIES,
+        PROCESS_NO_STD_LANE_TEST, PROOF_CLIENT_LIB, PUBLICATION, SECURITY_LIB, SECURITY_MANIFEST,
+        SIGNER_ADMINISTRATION, SIGNING_SOURCE_FACILITIES, administrative_callers,
+        continuumd_sources, declared_dependencies, effects_network_sources,
+        effects_process_sources, forge_sources, host_effect_lines, is_signing_source,
+        no_std_unconditional, pin, pub_items, security_sources, unexempted_callers,
     };
 
     /// Correction 20's property, stated and then swept: capability administration is
@@ -1129,13 +1158,15 @@ mod no_widening {
     /// [`boundary_security_grew_an_injection_corpus_and_it_reaches_no_host_effect`].
     /// `continuum-effects-network` left when bn-3ohe landed its Lab pack, and is
     /// re-established in
-    /// [`boundary_effects_network_grew_a_lab_pack_and_it_reaches_no_host_effect`]. The
-    /// four rows below keep the original, stricter form because their substance genuinely
-    /// has not arrived.
+    /// [`boundary_effects_network_grew_a_lab_pack_and_it_reaches_no_host_effect`].
+    /// `continuum-effects-process` left when bn-3mmf landed its Lab pack, and is
+    /// re-established in
+    /// [`boundary_effects_process_grew_a_lab_pack_and_it_reaches_no_host_effect`]. The
+    /// three rows below keep the original, stricter form because their substance
+    /// genuinely has not arrived.
     #[test]
     fn boundary_the_host_effect_surface_has_not_arrived_and_its_crates_are_scaffolds() {
         let scaffolds = [
-            ("continuum-effects-process", EFFECTS_PROCESS_LIB),
             ("continuum-effects-storage", EFFECTS_STORAGE_LIB),
             ("continuum-effects-time", EFFECTS_TIME_LIB),
             ("continuum-proof-client", PROOF_CLIENT_LIB),
@@ -1647,6 +1678,112 @@ mod no_widening {
         "pub(crate) fn u32_len(len: usize) -> u32 {",
     ];
 
+    /// `continuum-effects-process`'s recorded public surface, sorted — every `pub` item
+    /// across every source file of the crate, as `pub_items` reads them (bn-3mmf).
+    const EFFECTS_PROCESS_PUBLIC_SURFACE: [&str; 101] = [
+        "pub class: FidelityClass,",
+        "pub const ALL: [Self; 11] = [",
+        "pub const ASSUMPTIONS: [(&str, &str); 3] = [",
+        "pub const CANCELLATION_CONTRACT: [(&str, &str); 8] = [",
+        "pub const COMPOSITION: [(&str, &str); 3] = [",
+        "pub const CRASH_RESTART_V0: FidelityProfile = FidelityProfile {",
+        "pub const JOURNAL_HEADER_BYTES: u64 =",
+        "pub const MAX_CRASHES_CAP: u32 = 1 << 16;",
+        "pub const MAX_NODES: u8 = 64;",
+        "pub const MAX_PENDING_CAP: u32 = 1 << 16;",
+        "pub const MAX_RETAINED_CAP: u64 = 1 << 28;",
+        "pub const MAX_STEPS: usize = 1 << 20;",
+        "pub const PROFILE_NAME: &str = \"process/crash-restart-v0\";",
+        "pub const PROFILE_VERSION: ProfileVersion = ProfileVersion {",
+        "pub const fn all(n: u8) -> Self {",
+        "pub const fn as_str(self) -> &'static str {",
+        "pub const fn chooser(&self) -> Chooser {",
+        "pub const fn class(&self) -> RefusalClass {",
+        "pub const fn config(&self) -> &ProcessConfig {",
+        "pub const fn config(&self) -> &ProcessConfig {",
+        "pub const fn contains(self, node: NodeId) -> bool {",
+        "pub const fn crashes(&self) -> u32 {",
+        "pub const fn inconclusive_reason(&self) -> Option<&'static str> {",
+        "pub const fn is_up(&self, node: NodeId) -> bool {",
+        "pub const fn max_crashes(&self) -> u32 {",
+        "pub const fn max_pending(&self) -> u32 {",
+        "pub const fn max_retained_bytes(&self) -> u64 {",
+        "pub const fn new(",
+        "pub const fn new(config: ProcessConfig) -> Self {",
+        "pub const fn nodes(&self) -> u8 {",
+        "pub const fn replicated_register_scenario(",
+        "pub const fn restart(&self) -> bool {",
+        "pub const fn retained_bytes(&self) -> u64 {",
+        "pub const fn retained_bytes(&self) -> u64 {",
+        "pub const fn statement(self) -> &'static str {",
+        "pub const fn step(&self) -> Step {",
+        "pub const fn support(self) -> Support {",
+        "pub const fn token(self) -> &'static str {",
+        "pub const fn unsupported_semantic(&self) -> Option<Semantic> {",
+        "pub const fn up(&self) -> NodeSet {",
+        "pub const fn with(self, node: NodeId) -> Self {",
+        "pub const fn without(self, node: NodeId) -> Self {",
+        "pub enum Bound {",
+        "pub enum Chooser {",
+        "pub enum ConfigRefusal {",
+        "pub enum Event {",
+        "pub enum FidelityClass {",
+        "pub enum HostQualification {",
+        "pub enum IndependenceClaim {",
+        "pub enum Malformed {",
+        "pub enum NotEnabled {",
+        "pub enum Refusal {",
+        "pub enum RefusalClass {",
+        "pub enum Semantic {",
+        "pub enum Step {",
+        "pub enum Support {",
+        "pub fn apply(&mut self, step: &Step) -> Result<&Event, Refusal> {",
+        "pub fn canonical_bytes(&self) -> Vec<u8> {",
+        "pub fn check(&self, step: &Step) -> Result<(), Refusal> {",
+        "pub fn choice_log(&self) -> impl Iterator<Item = Step> + '_ {",
+        "pub fn enabled_choices(&self) -> Vec<Step> {",
+        "pub fn encode(&self) -> Vec<u8> {",
+        "pub fn encode(&self) -> Vec<u8> {",
+        "pub fn epoch(&self, node: NodeId) -> Option<Epoch> {",
+        "pub fn events(&self) -> &[Event] {",
+        "pub fn events(&self) -> &[Event] {",
+        "pub fn into_journal(self) -> Journal {",
+        "pub fn pending(&self) -> impl Iterator<Item = TicketId> + '_ {",
+        "pub fn replay(&self) -> Result<Self, RunRefusal> {",
+        "pub fn run(config: ProcessConfig, steps: &[Step]) -> Result<Journal, RunRefusal> {",
+        "pub fn ticket(&self, ticket: TicketId) -> Option<(NodeId, Epoch)> {",
+        "pub fn ticket_count(&self) -> usize {",
+        "pub host: HostQualification,",
+        "pub independence: IndependenceClaim,",
+        "pub index: usize,",
+        "pub major: u16,",
+        "pub minor: u16,",
+        "pub mod lab;",
+        "pub mod profile;",
+        "pub mod refusal;",
+        "pub mod step;",
+        "pub name: &'static str,",
+        "pub patch: u16,",
+        "pub refusal: Refusal,",
+        "pub struct Epoch(pub u32);",
+        "pub struct FidelityProfile {",
+        "pub struct Journal {",
+        "pub struct NodeId(pub u8);",
+        "pub struct NodeSet(pub u64);",
+        "pub struct Process {",
+        "pub struct ProcessConfig {",
+        "pub struct ProfileVersion {",
+        "pub struct RunRefusal {",
+        "pub struct TicketId(pub u32);",
+        "pub use lab::{Journal, Process, run};",
+        "pub use profile::{CRASH_RESTART_V0, FidelityClass, FidelityProfile, Semantic, Support};",
+        "pub use refusal::{Refusal, RefusalClass, RunRefusal};",
+        "pub use step::{Epoch, Event, NodeId, NodeSet, ProcessConfig, Step, TicketId};",
+        "pub version: ProfileVersion,",
+        "pub(crate) fn put_str(out: &mut Vec<u8>, text: &str) {",
+        "pub(crate) fn u32_len(len: usize) -> u32 {",
+    ];
+
     /// `continuum-effects-network` stopped being a zero-pub-item scaffold when bn-3ohe
     /// landed the `network/adversarial-v0` Lab pack (PR-15 / IMPL-01). The property the
     /// scaffold sweep guards — no crate on that list can execute a host effect on an
@@ -1698,6 +1835,7 @@ mod no_widening {
             &effects_network_sources(),
             EFFECTS_NETWORK_MANIFEST,
             EFFECTS_NETWORK_NO_STD_LANE,
+            NETWORK_NO_STD_LANE_TEST,
         ) {
             panic!("continuum-effects-network is not provably free of host effects: {why}");
         }
@@ -1743,6 +1881,100 @@ mod no_widening {
         pin(
             "continuum-effects-network/src/lib.rs",
             EFFECTS_NETWORK_LIB,
+            &[
+                "**No host semantics** (docs/09 T06)",
+                "This crate has no dependencies.",
+            ],
+        );
+    }
+
+    /// `continuum-effects-process` stopped being a zero-pub-item scaffold when bn-3mmf
+    /// landed the `process/crash-restart-v0` Lab pack (PR-15 / IMPL-02). The property
+    /// the scaffold sweep guards is re-established against the surface that now exists,
+    /// with the same four legs as the network pack:
+    ///
+    /// 1. the audited surface is exactly [`EFFECTS_PROCESS_PUBLIC_SURFACE`];
+    /// 2. no host effect is possible, by the compiler: the crate is `#![no_std]`
+    ///    unconditionally, and its compiler lane `tests/pr15_no_std_lane.rs` — a copy with
+    ///    a planted `std::net` use must not compile — exists and is not ignored;
+    /// 3. no declared dependency and no build script;
+    /// 4. it is unreachable from an agent connection: `continuumd` does not declare it,
+    ///    and no `continuumd` source names it.
+    ///
+    /// A process pack is where "spawn a worker" or "kill a process" would land; any leg
+    /// turning red means it has acquired authority the docs/49 audit has never examined.
+    #[test]
+    fn boundary_effects_process_grew_a_lab_pack_and_it_reaches_no_host_effect() {
+        // 1. The audited surface, exactly.
+        let mut items: Vec<String> = effects_process_sources()
+            .iter()
+            .flat_map(|(_, text)| {
+                pub_items(text)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<String>>()
+            })
+            .collect();
+        items.sort();
+        let audited: Vec<String> = EFFECTS_PROCESS_PUBLIC_SURFACE
+            .iter()
+            .map(|it| (*it).to_owned())
+            .collect();
+        assert_eq!(
+            items, audited,
+            "continuum-effects-process's public surface is not the one INV-015 audited; \
+             record the new items here and re-derive this test's four legs against them"
+        );
+
+        // 2. No host effect, by the compiler rather than by a source scan.
+        if let Err(why) = no_std_unconditional(
+            &effects_process_sources(),
+            EFFECTS_PROCESS_MANIFEST,
+            EFFECTS_PROCESS_NO_STD_LANE,
+            PROCESS_NO_STD_LANE_TEST,
+        ) {
+            panic!("continuum-effects-process is not provably free of host effects: {why}");
+        }
+
+        // 3. No declared dependency, no build script, no build dependency.
+        assert!(
+            declared_dependencies(EFFECTS_PROCESS_MANIFEST).is_empty(),
+            "continuum-effects-process gained a dependency; re-derive what it can reach"
+        );
+        assert!(
+            !EFFECTS_PROCESS_MANIFEST.contains("build"),
+            "continuum-effects-process declares a build script or build dependency"
+        );
+        assert!(
+            !std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../continuum-effects-process/build.rs")
+                .exists(),
+            "continuum-effects-process grew a build.rs"
+        );
+
+        // 4. Unreachable from an agent connection.
+        assert!(
+            !CONTINUUMD_MANIFEST.contains("continuum-effects-process"),
+            "continuumd now declares continuum-effects-process"
+        );
+        for (path, text) in continuumd_sources() {
+            let callers: Vec<&str> = text
+                .lines()
+                .map(str::trim_start)
+                .filter(|line| !line.starts_with("//"))
+                .filter(|line| line.contains("continuum_effects_process"))
+                .collect();
+            assert!(
+                callers.is_empty(),
+                "{} names continuum_effects_process: {callers:?}",
+                path.display()
+            );
+        }
+
+        // And the crate still declares the contract this file holds it to.
+        pin(
+            "continuum-effects-process/src/lib.rs",
+            EFFECTS_PROCESS_LIB,
             &[
                 "**No host semantics** (docs/09 T06)",
                 "This crate has no dependencies.",
@@ -2023,7 +2255,7 @@ mod mutants {
     use std::collections::BTreeSet;
 
     use super::{
-        ADMISSION, CAPABILITY, DOCS_49, EFFECTS_PROCESS_LIB, EVIDENCE, FORGE_MANIFEST,
+        ADMISSION, CAPABILITY, DOCS_49, EFFECTS_STORAGE_LIB, EVIDENCE, FORGE_MANIFEST,
         NON_FILESYSTEM_FACILITIES, SECURITY_MANIFEST, administrative_callers,
         declared_dependencies, forge_sources, host_effect_lines, is_signing_source,
         isolation_bullets, missing_pin, pub_items, security_sources, unexempted_callers,
@@ -2131,10 +2363,10 @@ mod mutants {
     #[test]
     fn negative_the_scaffold_sweep_detects_a_grown_crate() {
         assert!(
-            pub_items(EFFECTS_PROCESS_LIB).is_empty(),
+            pub_items(EFFECTS_STORAGE_LIB).is_empty(),
             "the real scaffold is clean"
         );
-        let grown = format!("{EFFECTS_PROCESS_LIB}\npub fn spawn_worker() {{}}\n");
+        let grown = format!("{EFFECTS_STORAGE_LIB}\npub fn spawn_worker() {{}}\n");
         assert_eq!(pub_items(&grown), vec!["pub fn spawn_worker() {}"]);
     }
 
@@ -2268,8 +2500,9 @@ mod no_std_leg_mutants {
     use std::path::PathBuf;
 
     use super::{
-        EFFECTS_NETWORK_MANIFEST, EFFECTS_NETWORK_NO_STD_LANE, effects_network_sources,
-        no_std_unconditional,
+        EFFECTS_NETWORK_MANIFEST, EFFECTS_NETWORK_NO_STD_LANE, EFFECTS_PROCESS_MANIFEST,
+        EFFECTS_PROCESS_NO_STD_LANE, NETWORK_NO_STD_LANE_TEST, PROCESS_NO_STD_LANE_TEST,
+        effects_network_sources, effects_process_sources, no_std_unconditional,
     };
 
     /// A named doctored copy: sources, manifest, lane.
@@ -2295,7 +2528,12 @@ mod no_std_leg_mutants {
     fn negative_the_no_std_leg_detects_each_way_around_it() {
         let real = effects_network_sources();
         assert_eq!(
-            no_std_unconditional(&real, EFFECTS_NETWORK_MANIFEST, EFFECTS_NETWORK_NO_STD_LANE),
+            no_std_unconditional(
+                &real,
+                EFFECTS_NETWORK_MANIFEST,
+                EFFECTS_NETWORK_NO_STD_LANE,
+                NETWORK_NO_STD_LANE_TEST
+            ),
             Ok(())
         );
         let mutants: Vec<Mutant> = vec![
@@ -2401,8 +2639,82 @@ mod no_std_leg_mutants {
         ];
         for (name, sources, manifest, lane) in mutants {
             assert!(
-                no_std_unconditional(&sources, &manifest, &lane).is_err(),
+                no_std_unconditional(&sources, &manifest, &lane, NETWORK_NO_STD_LANE_TEST).is_err(),
                 "{name} passed the no_std leg"
+            );
+        }
+    }
+
+    /// The process pack's leg is the same predicate over that crate's inputs: the real
+    /// crate passes it, and the lane is bound to the process lane's own test name, so
+    /// the network lane's text cannot stand in for it.
+    #[test]
+    fn negative_the_process_no_std_leg_detects_its_mutants() {
+        let real = effects_process_sources();
+        assert_eq!(
+            no_std_unconditional(
+                &real,
+                EFFECTS_PROCESS_MANIFEST,
+                EFFECTS_PROCESS_NO_STD_LANE,
+                PROCESS_NO_STD_LANE_TEST
+            ),
+            Ok(())
+        );
+        let with_process_lib = |edit: &dyn Fn(&str) -> String| -> Vec<(PathBuf, String)> {
+            real.iter()
+                .map(|(path, text)| {
+                    let text = if path.ends_with("lib.rs") {
+                        edit(text)
+                    } else {
+                        text.clone()
+                    };
+                    (path.clone(), text)
+                })
+                .collect()
+        };
+        let mutants: Vec<Mutant> = vec![
+            (
+                "cfg_attr(no_std)",
+                with_process_lib(&|t| {
+                    t.replacen("\n#![no_std]\n", "\n#![cfg_attr(not(test), no_std)]\n", 1)
+                }),
+                EFFECTS_PROCESS_MANIFEST.to_owned(),
+                EFFECTS_PROCESS_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "extern crate std",
+                with_process_lib(&|t| {
+                    t.replace(
+                        "extern crate alloc;",
+                        "extern crate alloc;\nextern crate std;",
+                    )
+                }),
+                EFFECTS_PROCESS_MANIFEST.to_owned(),
+                EFFECTS_PROCESS_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "a std feature",
+                real.clone(),
+                format!("{EFFECTS_PROCESS_MANIFEST}\n[features]\nstd = []\n"),
+                EFFECTS_PROCESS_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "the lane ignored",
+                real.clone(),
+                EFFECTS_PROCESS_MANIFEST.to_owned(),
+                EFFECTS_PROCESS_NO_STD_LANE.replace("#[test]", "#[test]\n#[ignore]"),
+            ),
+            (
+                "the network lane in its place",
+                real.clone(),
+                EFFECTS_PROCESS_MANIFEST.to_owned(),
+                EFFECTS_NETWORK_NO_STD_LANE.to_owned(),
+            ),
+        ];
+        for (name, sources, manifest, lane) in mutants {
+            assert!(
+                no_std_unconditional(&sources, &manifest, &lane, PROCESS_NO_STD_LANE_TEST).is_err(),
+                "{name} passed the process no_std leg"
             );
         }
     }

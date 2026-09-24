@@ -1,0 +1,42 @@
+[change]
+bone = "bn-3mmf"
+author = "continuum-dev"
+summary = "PR-15/IMPL-02: the process/crash-restart-v0 fidelity profile and its deterministic Lab handler for fail-stop crash, restart with a new incarnation epoch, and fenced late completions"
+
+[pack]
+covers = ["crates/continuum-effects-process/src/"]
+
+# `crash` is the fail-stop crash row. `delay` is the adversary's explicit, journalled
+# `Delay` step, as in the network pack: it holds a pending completion back one step
+# with no duration. The test drives it 500 times while the incarnation runs, where the
+# completion is still delivered, and across a crash and a restart, where it is fenced
+# (docs/17 §10: "delayed completion from old epoch is rejected").
+fault_coverage_tests = [
+  { test = "crates/continuum-effects-process/tests/pr15_impl02_process.rs::fault_crash_stops_an_incarnation_and_fences_its_pending_completions", fault = "crash" },
+  { test = "crates/continuum-effects-process/tests/pr15_impl02_process.rs::fault_delay_a_completion_delayed_past_its_incarnation_is_fenced_never_delivered", fault = "delay" },
+]
+
+# GOV-4-13: no host path exists. The crate is #![no_std]; its lane test (the network
+# pack's lane applied unchanged) runs the compiler on the dev and release host builds
+# and demands the unresolved-std error for a planted std use, and the structure rules
+# keep those the only builds. The profile test asserts HostQualification::None. The
+# obligation applies in full once a production handler lands.
+[pack.host_conformance]
+status = "not-applicable"
+reason = "continuum-effects-process is no_std and declares process/crash-restart-v0 with HostQualification::None: there is no production handler, no operating-system process and no host path, so there is nothing for the Lab handler to conform to"
+profile_test = "crates/continuum-effects-process/tests/pr15_impl02_process.rs::profile_declares_host_qualification_none"
+no_std_lane_test = "crates/continuum-effects-process/tests/pr15_no_std_lane.rs::the_compiler_refuses_a_host_facility_in_the_process_pack"
+
+[pack.fidelity_profile]
+profile = "adversarial-envelope"
+note = "continuum-effects-process declares process/crash-restart-v0 0.1.0: it permits every behaviour its modelled rows do not forbid, makes no host claim, states what a crash does to in-flight state, and refuses every unmodelled process semantic as Unsupported"
+
+[pack.version_bump]
+from = "0.0.0"
+to = "0.1.0"
+note = "continuum-effects-process goes from a scaffold with no contract to process/crash-restart-v0 0.1.0; the first profile version, so no consumer pins an earlier one"
+
+[pack.independence_review]
+reviewer = "continuum-security"
+review = "cr-35lmwz"
+verdict = "approved"
