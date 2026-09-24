@@ -1,0 +1,78 @@
+# PR-16/IMPL-04 correct version of the replicated register (bn-5fpl): the protocol rule,
+# the program with its shutdown, and the baseline campaign in
+# crates/continuum-asupersync/tests/support/register_baseline.rs.
+# Regenerate: PR16_IMPL04_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl04_correct_version
+
+[pr16-impl04-pos-01-baseline]
+campaign pr16-correct-baseline seed 104729 (scenario cancel-after-submit-before-sync); bounds nodes=3 values=2 epochs<=2 crashes<=2 cancellations<=3
+group 0 scenario: 2 plans, logs per plan 400 (all when fewer), 800 runs, 0 plans exhaustive
+group 1 sweep-one-epoch: 307 plans, logs per plan 6 (all when fewer), 1837 runs, 3 plans exhaustive
+group 2 sample-two-epochs: 48 plans, logs per plan 6 (all when fewer), 288 runs, 0 plans exhaustive
+plans digest 612f58fd830a5a4ee4c6e49397accf77ab0eb252ccf909369611b47596fa6d2d
+campaign identity 65f82bbde578dad46296b1fe687ad470cc8c1c5d4086164cb7868a2ccfb4e1c9
+runs 2925; protocol breaches 0; findings: abstract_register::Agreement=0 RuntimeToAbstract=0 asupersync::Quiescence=0 asupersync::ObligationConservation=0 run=0
+
+[pr16-impl04-pos-02-coverage]
+steps 405782 observed, 367134 stutters
+durable-register steps: Abort=1332 Ack=2804 Lose/reserved=1140 Lose/volatile=1510 Reserve=12772 Submit=10300 Sync=8790
+abstract chooses: Choose(epoch=0,value=v0)=1720 Choose(epoch=0,value=v1)=850 Choose(epoch=1,value=v0)=126 Choose(epoch=1,value=v1)=108
+projected states: 222 of 248 one-epoch reachable, 2283 of 61504 two-epoch reachable
+one-epoch reachable state orbits under replica renaming and value swap: 38 of 38 visited
+targets: cancellation after Submitted in 1330 runs, crash after an ack in 225 runs, both values durable in one epoch in 1822 runs
+obligations opened: IoOp=10300 SendPermit=8790 Transaction=15576; committed=28622 aborted=6044; tasks=19433 cancelled=4652; regions finalized=18809; confirmations sent=8790
+
+[pr16-impl04-pos-03-scenario]
+plan epochs=1 | a[v0,v1]: reserve0 submit0 crash-repropose0=v1 reserve0 submit0 sync0 release0 confirm0 | b[v0]: reserve0 submit0 sync0 release0 confirm0 | c[v1]: reserve0 submit0 sync0 release0 confirm0
+400 runs; chooses Choose(epoch=0,value=v1)=400; Lose/volatile=400; findings 0; identity b1031ee10e2bdb61a44b64dd67ce31db330baf88acc545e07c5da06f11f7a118
+
+[pr16-impl04-pos-04-bounds]
+notes/plan/examples/replicated_register.scenario.toml: domains, max_crashes, max_cancellations, seed, name and check list equal the campaign's: abstract_register::Agreement, RuntimeToAbstract, asupersync::Quiescence, asupersync::ObligationConservation; not modeled: [network] faults, max_partitions, [storage] torn tails
+
+[pr16-impl04-pos-05-sweep]
+one-epoch options 17, orbits under replica renaming and value swap with <= 2 crashes: 307
+
+[pr16-impl04-neg-01-root-open]
+scenario log 0 without the root's close
+quiescence [RegionUnfinalized(0)] conservation []
+
+[pr16-impl04-neg-02-undischarged]
+scenario log 0 without the discharge of o8
+conservation [ObligationOpen(8)]
+scenario log 0 with its first discharge twice: conservation [DischargedTwice(2)]
+scenario log 0 with r1 settled holding an obligation: conservation [SettledWithObligations(1)]
+
+[pr16-impl04-neg-03-unreceived]
+scenario log 0 without the last receive
+conservation [MessageUnreceived(1, 2)]
+
+[pr16-impl04-neg-04-crafted-states]
+two acks for epoch 0: Agreement fails; an ack over one durable record or over volatile bytes: AckedIsDurable fails
+
+[pr16-impl04-neg-05-protocol-rules]
+epoch-out-of-range: EpochOutOfRange at replica Some(0) act 0
+value-out-of-range: ValueOutOfRange at replica Some(0) act 0
+reserve-held: ReserveHeld at replica Some(0) act 1
+rewrite-durable: RewriteDurable at replica Some(0) act 5
+repropose-durable: RewriteDurable at replica Some(0) act 5
+submit-without-permit: NoPermit at replica Some(0) act 0
+submit-twice: SubmitTwice at replica Some(0) act 2
+sync-without-bytes: SyncWithoutBytes at replica Some(0) act 1
+release-before-sync: ReleaseBeforeSync at replica Some(0) act 2
+abort-after-bytes: AbortAfterBytes at replica Some(0) act 2
+confirm-before-sync: ConfirmBeforeSync at replica Some(0) act 2
+confirm-twice: ConfirmTwice at replica Some(0) act 6
+unfinished-at-end: UnfinishedAtEnd at replica Some(0) act 2
+crash-bound: CrashBound at replica None act 0
+cancellation-bound: CancellationBound at replica None act 0
+
+[pr16-impl04-bnd-01-no-shutdown]
+IMPL-03's build of the scenario plan, 20 logs: findings by property Quiescence=200
+
+[pr16-impl04-bnd-02-scope]
+plans exhaustive=3 sampled=354
+
+[pr16-impl04-bnd-03-agreement-scope]
+plan epochs with two values confirmed to a majority: 0; runs with both values durable in one epoch: 1822
+
+[pr16-impl04-bnd-04-crash-bound]
+sweep plans by crashes: 0=19 1=90 2=198; three crashes: CrashBound

@@ -20,6 +20,7 @@
 //! | [`Act::Abort`] | `Abort` of the permit | a cancelled writer releases its permit |
 //! | [`Act::Confirm`] | `Send` on the coordinator's channel | a stable confirmation |
 //! | [`Act::Crash`] | `Cancel` of the replica's region | a crash: in-flight obligations abort, the incarnation ends |
+//! | [`Act::CrashRepropose`] | as [`Act::Crash`] | a crash, and the next incarnation is proposed another value for one epoch |
 //!
 //! Each replica incarnation is a region under the root, with one writer task per
 //! epoch. A crash cancels the region; the next incarnation is a region and writers
@@ -107,9 +108,13 @@
 //!   step is, as a typed [`Mismatch`]. The mutants that need process epochs, timers or
 //!   checksums need new acts, and the projection rules above say which step each new
 //!   event must be.
-//! - bn-5fpl (the correct-version exit): [`build`], [`admissible_logs`],
-//!   [`sample_logs`], [`observe`] and [`check`] are the whole pipeline; the correct
-//!   plans are in `pr16_impl03_replicated_register.rs`.
+//! - bn-5fpl (IMPL-04, the correct version) added [`Act::CrashRepropose`], so an
+//!   incarnation's value can differ from the one before it ([`incarnation_values`]),
+//!   and [`build_with_shutdown`], whose runs end quiescent. The coordinators now count
+//!   confirmations, which is the replica count for every plan that confirms each epoch
+//!   at most once per replica, as every IMPL-03 plan does. The correct protocol, the
+//!   baseline campaign and the four scenario properties are in
+//!   `support/register_baseline.rs`; a mutant is run beside that campaign.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -147,6 +152,10 @@ pub enum Act {
     Confirm(u8),
     /// The replica crashes: its incarnation's region is cancelled.
     Crash,
+    /// The replica crashes as [`Act::Crash`] does, and a client proposes `value` for
+    /// `epoch` to its next incarnation: that incarnation's writer for `epoch` writes
+    /// `value` (PR-16/IMPL-04, bn-5fpl). Every other epoch keeps its value.
+    CrashRepropose(u8, u8),
 }
 
 /// The correct write of one slot: reserve, submit, sync, release, confirm.
@@ -219,6 +228,8 @@ struct Meta {
     feeds: Option<usize>,
     /// Whether it is a receive.
     recv: bool,
+    /// Whether it waits for every other actor to finish: the shutdown's operations.
+    last: bool,
 }
 
 /// A built plan: the binding programs, the roles, and what the log generators need.
@@ -243,18 +254,48 @@ impl Labels {
     }
 }
 
+/// Each incarnation's values, by epoch: `plan.values[n]` for the first incarnation of
+/// replica `n`, and the one before it, with a re-proposal applied, for each later one.
+pub fn incarnation_values(plan: &Plan, n: usize) -> Vec<[u8; 2]> {
+    let mut out = vec![plan.values[n]];
+    for act in &plan.replicas[n] {
+        let mut next = *out.last().expect("one incarnation");
+        match *act {
+            Act::Crash => {}
+            Act::CrashRepropose(e, v) => next[usize::from(e)] = v,
+            _ => continue,
+        }
+        out.push(next);
+    }
+    out
+}
+
+/// The confirmations of a plan: `(epoch, value)` of each `Confirm`, in script order,
+/// replica by replica. The value is the confirming incarnation's.
+fn confirmations(plan: &Plan) -> Vec<(u8, u8)> {
+    let mut out = Vec::new();
+    for n in 0..3 {
+        let values = incarnation_values(plan, n);
+        let mut inc = 0;
+        for act in &plan.replicas[n] {
+            match *act {
+                Act::Crash | Act::CrashRepropose(..) => inc += 1,
+                Act::Confirm(e) => out.push((e, values[inc][usize::from(e)])),
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
 /// The coordinators of a plan: every `(epoch, value)` some replica confirms, with how
-/// many replicas confirm it.
+/// many confirmations it gets.
 fn coordinators(plan: &Plan) -> Vec<(u8, u8, usize)> {
+    let confirmed = confirmations(plan);
     let mut out = Vec::new();
     for e in 0..plan.epochs {
         for v in 0..u8::try_from(VALUES.len()).expect("two values") {
-            let writers = (0..3)
-                .filter(|n| {
-                    plan.values[*n][usize::from(e)] == v
-                        && plan.replicas[*n].contains(&Act::Confirm(e))
-                })
-                .count();
+            let writers = confirmed.iter().filter(|c| **c == (e, v)).count();
             if writers > 0 {
                 out.push((e, v, writers));
             }
@@ -270,6 +311,41 @@ fn coordinators(plan: &Plan) -> Vec<(u8, u8, usize)> {
 /// On a plan that is not well formed: an epoch out of range, or an act on a permit or
 /// bytes that the same incarnation has not taken.
 pub fn build(plan: &Plan) -> Built {
+    build_inner(plan, false)
+}
+
+/// The binding programs of `plan` with the service's shutdown (PR-16/IMPL-04, bn-5fpl):
+/// [`build`], plus one last actor whose operations wait until every other actor has
+/// finished. It drains each coordinator's channel of the confirmations left after its
+/// majority, finishes each coordinator, finishes each writer of each replica's last
+/// incarnation, closes those regions and the coordinators' region, and closes the root.
+/// A cancelled incarnation's writers and region ended with its crash. So a run of it
+/// ends quiescent: every task ended, every region finalized, and nothing queued. The
+/// shutdown uses no label that [`build`] does not bind, so the other actors' programs
+/// are [`build`]'s, operation for operation.
+///
+/// # Panics
+///
+/// As [`build`].
+pub fn build_with_shutdown(plan: &Plan) -> Built {
+    build_inner(plan, true)
+}
+
+/// `built` without operation `index` of actor `actor`, its admissibility facts kept in
+/// step: a program mutant for bn-28oa, such as a shutdown with one `Finish` missing.
+///
+/// # Panics
+///
+/// When the actor or the operation does not exist.
+#[must_use]
+pub fn without_op(built: &Built, actor: usize, index: usize) -> Built {
+    let mut out = built.clone();
+    out.programs[actor].remove(index);
+    out.meta[actor].remove(index);
+    out
+}
+
+fn build_inner(plan: &Plan, shutdown: bool) -> Built {
     assert!((1..=2).contains(&plan.epochs), "one or two epochs");
     assert!(
         plan.values
@@ -287,14 +363,20 @@ pub fn build(plan: &Plan) -> Built {
     let incarnations: Vec<usize> = plan
         .replicas
         .iter()
-        .map(|s| 1 + s.iter().filter(|a| **a == Act::Crash).count())
+        .map(|s| {
+            1 + s
+                .iter()
+                .filter(|a| matches!(a, Act::Crash | Act::CrashRepropose(..)))
+                .count()
+        })
         .collect();
     // writer[(n, inc, e)] = task label; region[(n, inc)] = region label
     let mut writer: BTreeMap<(u8, usize, u8), TaskLabel> = BTreeMap::new();
     let mut region: BTreeMap<(u8, usize), RegionLabel> = BTreeMap::new();
     let mut spawns = Vec::new();
     for n in 0..3_u8 {
-        for inc in 0..incarnations[usize::from(n)] {
+        let values = incarnation_values(plan, usize::from(n));
+        for (inc, values) in values.iter().enumerate() {
             let r = RegionLabel(labels.take());
             setup.push(SubstrateOp::OpenRegion {
                 parent: RegionLabel::ROOT,
@@ -305,7 +387,7 @@ pub fn build(plan: &Plan) -> Built {
             for e in 0..plan.epochs {
                 let t = TaskLabel(labels.take());
                 writer.insert((n, inc, e), t);
-                let value = plan.values[usize::from(n)][usize::from(e)];
+                let value = values[usize::from(e)];
                 tasks.push((
                     Role::Writer {
                         node: n,
@@ -356,12 +438,14 @@ pub fn build(plan: &Plan) -> Built {
         commands: None,
         feeds: None,
         recv: false,
+        last: false,
     };
     let mut programs = vec![setup.clone()];
     let mut meta = vec![vec![none; setup.len()]];
 
     // Replicas.
     for n in 0..3_u8 {
+        let values = incarnation_values(plan, usize::from(n));
         let mut inc = 0;
         let mut permit: BTreeMap<u8, ReservationLabel> = BTreeMap::new();
         let mut bytes: BTreeMap<u8, ReservationLabel> = BTreeMap::new();
@@ -415,7 +499,7 @@ pub fn build(plan: &Plan) -> Built {
                     None,
                 ),
                 Act::Confirm(e) => {
-                    let value = plan.values[usize::from(n)][usize::from(e)];
+                    let value = values[inc][usize::from(e)];
                     let (i, c) = channel[&(e, value)];
                     (
                         SubstrateOp::Send {
@@ -425,7 +509,7 @@ pub fn build(plan: &Plan) -> Built {
                         Some(i),
                     )
                 }
-                Act::Crash => {
+                Act::Crash | Act::CrashRepropose(..) => {
                     let r = region[&(n, inc)];
                     inc += 1;
                     permit.clear();
@@ -434,11 +518,7 @@ pub fn build(plan: &Plan) -> Built {
                 }
             };
             ops.push(op);
-            m.push(Meta {
-                commands: None,
-                feeds,
-                recv: false,
-            });
+            m.push(Meta { feeds, ..none });
         }
         programs.push(ops);
         meta.push(m);
@@ -451,8 +531,7 @@ pub fn build(plan: &Plan) -> Built {
         let mut m = Vec::new();
         let at = Meta {
             commands: Some(i),
-            feeds: None,
-            recv: false,
+            ..none
         };
         for _ in 0..writers.min(2) {
             ops.push(SubstrateOp::Recv { channel: c });
@@ -467,6 +546,50 @@ pub fn build(plan: &Plan) -> Built {
             ops.push(SubstrateOp::Commit { reservation: a });
             m.push(at);
             m.push(at);
+        }
+        programs.push(ops);
+        meta.push(m);
+    }
+
+    if shutdown {
+        let mut ops = Vec::new();
+        let mut m = Vec::new();
+        let last = Meta { last: true, ..none };
+        for (i, &(e, v, writers)) in coords.iter().enumerate() {
+            for _ in 0..writers.saturating_sub(2) {
+                ops.push(SubstrateOp::Recv {
+                    channel: channel[&(e, v)].1,
+                });
+                m.push(Meta {
+                    commands: Some(i),
+                    recv: true,
+                    ..last
+                });
+            }
+            ops.push(SubstrateOp::Finish {
+                task: coord_task[i],
+            });
+            m.push(Meta {
+                commands: Some(i),
+                ..last
+            });
+        }
+        let mut live = Vec::new();
+        for n in 0..3_u8 {
+            let inc = incarnations[usize::from(n)] - 1;
+            for e in 0..plan.epochs {
+                ops.push(SubstrateOp::Finish {
+                    task: writer[&(n, inc, e)],
+                });
+                m.push(last);
+            }
+            live.push(region[&(n, inc)]);
+        }
+        live.push(coord_region);
+        live.push(RegionLabel::ROOT);
+        for r in live {
+            ops.push(SubstrateOp::Close { region: r });
+            m.push(last);
         }
         programs.push(ops);
         meta.push(m);
@@ -510,10 +633,14 @@ impl Sched {
             .collect()
     }
 
-    /// Whether `actor`'s next operation commands a task that is not parked.
+    /// Whether `actor`'s next operation commands a task that is not parked, and, for
+    /// the shutdown, whether every other actor has finished.
     fn admissible(&self, built: &Built, actor: usize) -> bool {
         let m = built.meta[actor][self.cursors[actor]];
         m.commands.is_none_or(|k| self.received[k] <= self.sent[k])
+            && (!m.last
+                || (0..built.programs.len())
+                    .all(|a| a == actor || self.cursors[a] == built.programs[a].len()))
     }
 
     fn take(&mut self, built: &Built, actor: usize) {
@@ -1292,6 +1419,23 @@ pub fn raw_of(log: &[(u8, u8, u8)], pending: &[(u8, u8)], acks: &[(u8, u8)]) -> 
 /// A projected state's acknowledgements, `(epoch, value)`.
 pub fn acks_of(raw: &Raw) -> &BTreeSet<(u8, u8)> {
     &raw.acks
+}
+
+/// A projected state's sets, by position, as [`raw_of`] takes them: `log`, `pending`,
+/// `acks`.
+#[allow(clippy::type_complexity)]
+pub fn parts_of(raw: &Raw) -> (Vec<(u8, u8, u8)>, Vec<(u8, u8)>, Vec<(u8, u8)>) {
+    (
+        raw.log.iter().copied().collect(),
+        raw.pending.iter().copied().collect(),
+        raw.acks.iter().copied().collect(),
+    )
+}
+
+/// A projected state's durable records, `(node, epoch, value)`: the log entries whose
+/// slot has no write in flight.
+pub fn durable_of(raw: &Raw) -> BTreeSet<(u8, u8, u8)> {
+    raw.durable()
 }
 
 /// Render a projected state as IMPL-02's evidence does: one slot per replica and epoch.

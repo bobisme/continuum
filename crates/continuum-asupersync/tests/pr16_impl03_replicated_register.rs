@@ -969,6 +969,9 @@ fn script(acts: &[Act]) -> String {
             Act::Abort(e) => format!("abort{e}"),
             Act::Confirm(e) => format!("confirm{e}"),
             Act::Crash => "crash".to_owned(),
+            Act::CrashRepropose(e, v) => {
+                format!("crash-repropose{e}={}", register::VALUES[usize::from(*v)])
+            }
         })
         .collect();
     if parts.is_empty() {
