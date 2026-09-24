@@ -1,0 +1,38 @@
+[change]
+bone = "bn-5p7c1"
+author = "continuum-dev"
+summary = "continuum-cml-elab::Unsupported gains ALL, with each variant pinned to its slot by a compile-time const assertion in ordinal, the completeness continuum_cml_syntax::Unsupported already had; bn-1nmq's law (c) semantic half now iterates ALL instead of a hand-kept copy"
+
+[semantic]
+covers = [
+  "crates/continuum-cml-elab/src/error.rs",
+]
+reference_tests = [
+  "crates/continuum-cml-elab/src/error.rs::unsupported_all_is_the_full_variant_set",
+  "crates/continuum-cml-elab/src/error.rs::unsupported_all_codes_are_distinct",
+  "crates/continuum-cml-elab/tests/cml_laws.rs::law_c_every_semantic_out_of_fragment_construct_is_refused_everywhere",
+  "crates/continuum-cml-elab/tests/cml_laws.rs::law_c_the_semantic_construct_table_has_no_duplicate_code",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-cml-elab/tests/cml_laws.rs::law_c_every_semantic_out_of_fragment_construct_is_refused_everywhere", relation = "stable reordering of declarations" },
+]
+differential_tests = [
+  { test = "crates/continuum-cml-elab/tests/cml_laws.rs::law_c_the_syntactic_and_semantic_out_of_fragment_codes_are_nonempty_and_disjoint", oracle = "continuum-cml-syntax", subject = "continuum-cml-elab" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers the CML front end's out-of-fragment refusal completeness; this change only lets law (c) prove a completeness property of the elaborator's own table, it moves no claim's evidence state"
+
+[semantic.schemas]
+updated = []
+reason = "Unsupported and its codes are in-process typed values with no wire schema; ElabError's code field is unchanged shape, and every code Unsupported::ALL now enumerates already existed and was already reachable through ElabErrorKind::Unsupported"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-cml-elab: every elaboration that accepted or refused a model before still does, with the same ElabError; ALL and the private ordinal are new surface, added not changed, so no caller's behaviour moves"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-16vbm2"
+verdict = "approved"

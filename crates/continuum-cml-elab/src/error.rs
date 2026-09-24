@@ -84,6 +84,77 @@ pub enum Unsupported {
 }
 
 impl Unsupported {
+    /// Every [`Unsupported`] variant, in declaration order.
+    ///
+    /// Completeness is checked at compile time, by [`Unsupported::ordinal`], not just
+    /// hoped for in this comment. A `match` with no wildcard arm only forces an arm to
+    /// exist per variant; it does not check that the arm's claimed position agrees with
+    /// `ALL`. `ordinal` closes that gap: each arm asserts, in a `const` evaluated
+    /// whether or not `ordinal` is ever called, that `ALL` names exactly that variant
+    /// at exactly that index. So a variant added without a matching slot in `ALL` — an
+    /// omitted variant, a reused index, or an index past `ALL`'s length — fails to
+    /// build the crate, not just this function.
+    pub const ALL: [Unsupported; 5] = [
+        Unsupported::MutualRecursion,
+        Unsupported::NoDecreasingMeasure,
+        Unsupported::RecursionBoundNotConstant,
+        Unsupported::PrimedExpression,
+        Unsupported::IntegerBeyondI64,
+    ];
+
+    /// This variant's position in [`Self::ALL`], compile-time checked against `ALL`
+    /// itself.
+    ///
+    /// Never called at runtime (see the `dead_code` allowance below): the point of this
+    /// function is to be compiled, not invoked. Each arm names a fixed index and pins it
+    /// with a `const` assertion against `Self::ALL[index]`. Add a variant with no arm,
+    /// and the `match` fails to compile (no wildcard). Add an arm whose index is out of
+    /// range for `ALL`, or that names an index some other variant already owns, and the
+    /// assertion in that arm fails to evaluate, which is also a compile error. The only
+    /// way to add a variant here without failing the build is to give it a fresh index
+    /// and add it to [`Self::ALL`] at that same index.
+    #[allow(
+        dead_code,
+        reason = "load-bearing at compile time only: every arm's `const` assertion is \
+                  evaluated while building this crate whether or not `ordinal` is ever \
+                  called, so the check holds even though nothing calls it at runtime"
+    )]
+    const fn ordinal(self) -> usize {
+        match self {
+            Unsupported::MutualRecursion => {
+                const I: usize = 0;
+                const _: () = assert!(matches!(Unsupported::ALL[I], Unsupported::MutualRecursion));
+                I
+            }
+            Unsupported::NoDecreasingMeasure => {
+                const I: usize = 1;
+                const _: () = assert!(matches!(
+                    Unsupported::ALL[I],
+                    Unsupported::NoDecreasingMeasure
+                ));
+                I
+            }
+            Unsupported::RecursionBoundNotConstant => {
+                const I: usize = 2;
+                const _: () = assert!(matches!(
+                    Unsupported::ALL[I],
+                    Unsupported::RecursionBoundNotConstant
+                ));
+                I
+            }
+            Unsupported::PrimedExpression => {
+                const I: usize = 3;
+                const _: () = assert!(matches!(Unsupported::ALL[I], Unsupported::PrimedExpression));
+                I
+            }
+            Unsupported::IntegerBeyondI64 => {
+                const I: usize = 4;
+                const _: () = assert!(matches!(Unsupported::ALL[I], Unsupported::IntegerBeyondI64));
+                I
+            }
+        }
+    }
+
     /// A stable, machine-readable code.
     #[must_use]
     pub fn code(self) -> &'static str {
@@ -96,6 +167,40 @@ impl Unsupported {
             Unsupported::PrimedExpression => "cml.elab.unsupported.primed_expression",
             Unsupported::IntegerBeyondI64 => "cml.elab.unsupported.integer_beyond_i64",
         }
+    }
+}
+
+#[cfg(test)]
+mod unsupported_all_tests {
+    use super::Unsupported;
+
+    /// `ALL`'s ordinals are `0..ALL.len()`, each exactly once.
+    ///
+    /// The real completeness proof is [`Unsupported::ordinal`]'s own per-arm `const`
+    /// assertions, checked while this crate builds, whether or not this test runs
+    /// (see `ordinal`'s doc comment: an omitted variant, a reused index, or an index
+    /// past `ALL`'s length is a compile error there, not a test failure here). This
+    /// test is a second, human-readable witness of the same fact, with a normal test
+    /// failure message instead of a `const`-eval panic, in case `ordinal`'s compile-time
+    /// checks are ever weakened without this test being noticed.
+    #[test]
+    fn unsupported_all_is_the_full_variant_set() {
+        let mut ordinals: Vec<usize> = Unsupported::ALL.iter().map(|u| u.ordinal()).collect();
+        ordinals.sort_unstable();
+        let expected: Vec<usize> = (0..Unsupported::ALL.len()).collect();
+        assert_eq!(
+            ordinals, expected,
+            "Unsupported::ALL omits or repeats a variant"
+        );
+    }
+
+    /// Every code is distinct, so a caller can switch on it.
+    #[test]
+    fn unsupported_all_codes_are_distinct() {
+        let mut codes: Vec<&str> = Unsupported::ALL.iter().map(|u| u.code()).collect();
+        codes.sort_unstable();
+        codes.dedup();
+        assert_eq!(codes.len(), Unsupported::ALL.len(), "a code is repeated");
     }
 }
 

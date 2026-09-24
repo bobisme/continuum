@@ -4,7 +4,7 @@
 //! |---|---|
 //! | (a) parse → print → parse is the identity; there is no formatter yet, so the printer is the pinned witness | [`law_a_print_then_parse_is_the_identity_on_every_corpus_entry`], [`law_a_the_formatter_is_absent_so_the_printer_is_the_witness`] |
 //! | (b) elaboration is deterministic: one source, one semantic identity, whatever the layout, the thread, or the process | [`law_b_layout_does_not_change_the_identity`], [`law_b_concurrent_elaboration_agrees_with_sequential`], and in `cml_fuzz.rs` `identities_are_reproduced_by_independent_processes` and the manifest |
-//! | (c) out-of-fragment rejection is total: every out-of-fragment construct, anywhere a declaration may stand, is a typed refusal naming that construct, never a panic and never an acceptance | [`law_c_every_syntactic_out_of_fragment_construct_is_refused_everywhere`], [`law_c_every_semantic_out_of_fragment_construct_is_refused_everywhere`], [`law_c_a_parameterized_header_is_refused_in_both_styles`] |
+//! | (c) out-of-fragment rejection is total: every out-of-fragment construct, anywhere a declaration may stand, is a typed refusal naming that construct, never a panic and never an acceptance | [`law_c_every_syntactic_out_of_fragment_construct_is_refused_everywhere`], [`law_c_every_semantic_out_of_fragment_construct_is_refused_everywhere`], [`law_c_a_parameterized_header_is_refused_in_both_styles`], [`law_c_the_semantic_construct_table_has_no_duplicate_code`], [`law_c_the_syntactic_and_semantic_out_of_fragment_codes_are_nonempty_and_disjoint`] |
 //!
 //! The hosts are the fuzz corpus's seeds and hand-written cases
 //! (`tests/cml-fuzz-corpus/`), so every law runs over every repository CML source and
@@ -309,53 +309,44 @@ fn law_c_a_parameterized_header_is_refused_in_both_styles() {
 }
 
 /// One declaration per semantic out-of-fragment construct: well-formed syntax the
-/// elaborator refuses as outside the Finite core, and that construct's position in
-/// [`ELAB_UNSUPPORTED`]. The `match` makes a new variant a compile error here until it
-/// has a snippet and a position, and the position is the reminder to add it to the
-/// table. That last step is not mechanical: `continuum_cml_elab::Unsupported` has no
-/// `ALL` constant (the syntax crate's has one), so the table test checks order and
-/// uniqueness, not completeness.
-fn elab_snippet(u: ElabUnsupported) -> (usize, &'static str) {
+/// elaborator refuses as outside the Finite core. The `match` has no wildcard arm, so
+/// a variant added to [`ElabUnsupported`] without a snippet here is a compile error.
+///
+/// Completeness against the *enum*, not just against this `match`, comes from
+/// [`ElabUnsupported::ALL`] (bn-5p7c1): `continuum-cml-elab/src/error.rs`'s `ordinal`
+/// pins each variant, at compile time, to its own slot in `ALL` (an omitted variant, a
+/// reused index, or an index past `ALL`'s length fails to build the crate — see its doc
+/// comment for the exact mechanism). The loop below in
+/// [`law_c_every_semantic_out_of_fragment_construct_is_refused_everywhere`] iterates
+/// `ElabUnsupported::ALL` itself, not a hand-kept copy, so it inherits that guarantee.
+fn elab_snippet(u: ElabUnsupported) -> &'static str {
     match u {
-        ElabUnsupported::MutualRecursion => (
-            0,
+        ElabUnsupported::MutualRecursion => {
             "def oof_even(n: Nat): Bool = if n == 0 then true else oof_odd(n - 1)\n\
-             def oof_odd(n: Nat): Bool = if n == 0 then false else oof_even(n - 1)",
-        ),
-        ElabUnsupported::NoDecreasingMeasure => (1, "def oof_spin(n: Nat): Nat = oof_spin(n + 1)"),
-        ElabUnsupported::RecursionBoundNotConstant => (
-            2,
-            "def oof_down(n: Nat): Nat = if n == 0 then 0 else oof_down(n - 1)\n\
-             def oof_call(m: Nat): Nat = oof_down(m)",
-        ),
-        ElabUnsupported::PrimedExpression => (3, "action OofPrimed {\n  require (0 + 1)' == 1\n}"),
-        ElabUnsupported::IntegerBeyondI64 => {
-            (4, "def oof_big(n: Nat): Bool = n < 9223372036854775808")
+             def oof_odd(n: Nat): Bool = if n == 0 then false else oof_even(n - 1)"
         }
+        ElabUnsupported::NoDecreasingMeasure => "def oof_spin(n: Nat): Nat = oof_spin(n + 1)",
+        ElabUnsupported::RecursionBoundNotConstant => {
+            "def oof_down(n: Nat): Nat = if n == 0 then 0 else oof_down(n - 1)\n\
+             def oof_call(m: Nat): Nat = oof_down(m)"
+        }
+        ElabUnsupported::PrimedExpression => "action OofPrimed {\n  require (0 + 1)' == 1\n}",
+        ElabUnsupported::IntegerBeyondI64 => "def oof_big(n: Nat): Bool = n < 9223372036854775808",
     }
 }
 
-/// Every [`ElabUnsupported`] variant, at the position [`elab_snippet`] gives it.
-const ELAB_UNSUPPORTED: [ElabUnsupported; 5] = [
-    ElabUnsupported::MutualRecursion,
-    ElabUnsupported::NoDecreasingMeasure,
-    ElabUnsupported::RecursionBoundNotConstant,
-    ElabUnsupported::PrimedExpression,
-    ElabUnsupported::IntegerBeyondI64,
-];
-
-/// The table is in `elab_snippet`'s order, with no variant listed twice.
+/// A lightweight, integration-test-side echo of `error.rs`'s own
+/// `unsupported_all_codes_are_distinct`: every code in [`ElabUnsupported::ALL`] is
+/// distinct, so a caller can switch on it. The completeness of `ALL` itself is a
+/// compile-time fact of `ordinal`, not this test's job (see `elab_snippet`'s doc).
 #[test]
-fn law_c_the_semantic_construct_table_is_exhaustive() {
-    for (i, u) in ELAB_UNSUPPORTED.iter().enumerate() {
-        assert_eq!(elab_snippet(*u).0, i, "{u:?} is out of place");
-    }
-    let mut codes: Vec<&str> = ELAB_UNSUPPORTED.iter().map(|u| u.code()).collect();
+fn law_c_the_semantic_construct_table_has_no_duplicate_code() {
+    let mut codes: Vec<&str> = ElabUnsupported::ALL.iter().map(|u| u.code()).collect();
     codes.sort_unstable();
     codes.dedup();
     assert_eq!(
         codes.len(),
-        ELAB_UNSUPPORTED.len(),
+        ElabUnsupported::ALL.len(),
         "a variant is listed twice"
     );
 }
@@ -363,13 +354,18 @@ fn law_c_the_semantic_construct_table_is_exhaustive() {
 /// Law (c), semantic half: each construct in [`ElabUnsupported`], spliced at every
 /// declaration boundary of every host that elaborates, is refused, typed as out of
 /// fragment, with exactly its own code. Never an acceptance, never another error.
+///
+/// Metamorphic relation: stable reordering of declarations (docs/19 §3). Each
+/// `boundaries()` position slots the construct in as the first declaration, the last,
+/// or anywhere between: moving every other declaration around it this way never
+/// changes which code is reported, only where the span lands.
 #[test]
 fn law_c_every_semantic_out_of_fragment_construct_is_refused_everywhere() {
     let hosts = elaborated_hosts();
     assert!(hosts.len() >= 10, "only {} hosts elaborate", hosts.len());
     let mut checked = 0;
-    for u in ELAB_UNSUPPORTED {
-        let (_, snippet) = elab_snippet(u);
+    for u in ElabUnsupported::ALL {
+        let snippet = elab_snippet(u);
         for (e, _) in &hosts {
             let file = parse(&e.source).expect("parses");
             for at in boundaries(&e.source, &file) {
@@ -396,4 +392,29 @@ fn law_c_every_semantic_out_of_fragment_construct_is_refused_everywhere() {
         }
     }
     assert!(checked >= 200, "only {checked} splices checked");
+}
+
+/// Differential: `continuum_cml_syntax::Unsupported::ALL` and
+/// `continuum_cml_elab::Unsupported::ALL` are each closed lists of out-of-fragment
+/// construct codes for their own pipeline stage. This pins that the two lists never
+/// collide (a caller cannot mistake a syntactic refusal for a semantic one by code)
+/// and that bn-5p7c1 did not leave `continuum_cml_elab::Unsupported::ALL` empty.
+#[test]
+fn law_c_the_syntactic_and_semantic_out_of_fragment_codes_are_nonempty_and_disjoint() {
+    assert!(
+        !Unsupported::ALL.is_empty(),
+        "continuum_cml_syntax::Unsupported::ALL is empty"
+    );
+    assert!(
+        !ElabUnsupported::ALL.is_empty(),
+        "continuum_cml_elab::Unsupported::ALL is empty"
+    );
+    let syntax_codes: std::collections::BTreeSet<&str> =
+        Unsupported::ALL.iter().map(|u| u.code()).collect();
+    let elab_codes: std::collections::BTreeSet<&str> =
+        ElabUnsupported::ALL.iter().map(|u| u.code()).collect();
+    assert!(
+        syntax_codes.is_disjoint(&elab_codes),
+        "a code is shared between continuum_cml_syntax's and continuum_cml_elab's out-of-fragment tables"
+    );
 }
