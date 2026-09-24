@@ -1,0 +1,53 @@
+# PR-16/IMPL-02 claim A with at most two counted atomic crashes (bn-2ri63):
+# notes/plan/examples/durable_register.ctm with Lose replaced by a counted atomic Crash,
+# lowered on the pinned init path (RFC 0003 correction 6), checked by continuum-engine-reference.
+# Regenerate: CML_BLESS=1 cargo test -p continuum-cml-elab --test pr16_impl02_durable_register
+
+[pr16-impl02-pos-04-claim-a-counted-atomic-crash]
+claim A: nodes {a,b,c}, majority quorums, epochs {0,1}, values {v0,v1}, at most two counted atomic crashes; pinned init, default budget
+init path: pinned, initial states=1
+model: slots=23 actions=46 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 184512 }
+AckedIsDurable: established states=184512
+Agreement: established states=184512
+OneValuePerSlot: established states=184512
+deadlock established states=184512
+crashes: 0=61504 1=61504 2=61504; distinct (log, pending, acks)=61504
+literal atomic-crash closure of pos-01: pairs=184512 equal to the engine's=true
+correspondence: steps=1482048 stutters=1434432 chooses=47616 realized=4 covered=9 failures=0
+  failing steps from projectable states: 0
+durability step violations: 0
+
+[pr16-impl02-pos-05-one-epoch-counted-atomic-crash]
+one epoch, at most two counted atomic crashes: both init paths lower the same model
+init path: pinned, initial states=1
+whole-domain init path: same model=true
+model: slots=12 actions=23 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 744 }
+AckedIsDurable: established states=744
+Agreement: established states=744
+OneValuePerSlot: established states=744
+deadlock established states=744
+correspondence: steps=3732 stutters=3636 chooses=96 realized=2 covered=3 failures=0
+  failing steps from projectable states: 0
+durability step violations: 0
+
+[pr16-impl02-neg-07-crash-loses-durable]
+seeded bug: the atomic crash drops durable records too; one epoch, at most two counted crashes
+init path: pinned, initial states=1
+model: slots=12 actions=23 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 1356 }
+AckedIsDurable: refuted state=(0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0) depth=8 violations=612
+  witness: Reserve(n=c,epoch=0) ; Reserve(n=b,epoch=0) ; Submit(n=c,epoch=0,value=v1) ; Sync(n=c,epoch=0) ; Submit(n=b,epoch=0,value=v1) ; Sync(n=b,epoch=0) ; Ack(epoch=0,value=v1) ; Crash(n=b,flight={})
+Agreement: refuted state=(1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0) depth=15 violations=62
+  witness: Reserve(n=c,epoch=0) ; Reserve(n=b,epoch=0) ; Reserve(n=a,epoch=0) ; Submit(n=c,epoch=0,value=v0) ; Sync(n=c,epoch=0) ; Submit(n=b,epoch=0,value=v1) ; Sync(n=b,epoch=0) ; Submit(n=a,epoch=0,value=v0) ; Sync(n=a,epoch=0) ; Ack(epoch=0,value=v0) ; Crash(n=a,flight={}) ; Reserve(n=a,epoch=0) ; Submit(n=a,epoch=0,value=v1) ; Sync(n=a,epoch=0) ; Ack(epoch=0,value=v1)
+OneValuePerSlot: established states=1356
+deadlock established states=1356
+correspondence: steps=5968 stutters=5706 chooses=96 realized=2 covered=3 failures=166
+  failing steps from projectable states: 38
+  first: NotAnEnabledChoose Ack(epoch=0,value=v0) from log[a0=v0 b0=v0] reserved[] acks[0=v1] to log[a0=v0 b0=v0] reserved[] acks[0=v0 0=v1]
+durability step violations: 804
+
+[pr16-impl02-bnd-06-counted-crash-whole-domain]
+the pos-04 model on the whole-domain init path: 3 * 2^22 flat states
+lowering: refused Unlowerable(InitDomainTooLarge)

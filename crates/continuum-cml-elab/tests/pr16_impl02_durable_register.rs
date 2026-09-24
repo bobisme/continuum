@@ -34,6 +34,14 @@
 //!   engine's own steps — is computed here and is the established set
 //!   ([`atomic_crash_reachable`]). At one epoch, where `Lose` is the atomic crash, the
 //!   counted model lowers and the engine establishes it directly (`pos-03`).
+//! - Counted, on the pinned init path (bn-2ri63, RFC 0003 correction 6). The variant
+//!   [`counted_atomic_crashes`] replaces `Lose` with an atomic `Crash(n, flight)` that
+//!   loses every write in flight at `n` at once and counts it, at most two. Its init
+//!   pins every slot, so the pinned path lowers it under the default budget, where the
+//!   whole-domain enumeration refuses it (`bnd-06`). The engine establishes all three
+//!   invariants over its 184,512 states (`pos-04`), and those states, read as
+//!   `(crashes, log, pending, acks)`, are exactly the pairs of the literal closure
+//!   ([`atomic_crash_pairs`]).
 //! - The init domain is exactly `2^22 = MAX_INIT_ENUMERATION` flat states, and its
 //!   enumeration costs more work than `Limits::default()`. The claim-A lowering runs
 //!   under the explicit budget [`CLAIM_A_LIMITS`]; the default budget is a typed
@@ -83,6 +91,13 @@
 //!   typed refusals at the claim-A scope; without crashes, ack-before-sync keeps
 //!   `Agreement`; disjoint quorums break it; a depth bound is inconclusive for a hold.
 //!
+//! The counted-crash evidence (bn-2ri63) is its own artifact,
+//! `tests/golden/pr16_impl02_counted_crash.evidence.txt`, so the one above keeps its
+//! bytes: `pr16-impl02-pos-04-claim-a-counted-atomic-crash`,
+//! `pos-05-one-epoch-counted-atomic-crash` (both init paths lower the same model),
+//! `neg-07-crash-loses-durable` (a crash that drops durable records, refuted within two
+//! crashes), and `bnd-06-counted-crash-whole-domain` (the whole-domain path's refusal).
+//!
 //! Not modelled here, so they stay with IMPL-05 or later: lost-abort as M02 states it
 //! (a cancelled sender that loses a reserved message) needs writer tasks; M03 and M08
 //! need process epochs and timers; M04 needs `Commit` messages; M05 as stated (one
@@ -104,7 +119,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use continuum_cml_elab::config::RunConfig;
 use continuum_cml_elab::lower::{
-    Configured, MAX_INIT_ENUMERATION, identity_encodings_on_this_thread, lower_configured,
+    Configured, InitPath, MAX_INIT_ENUMERATION, identity_encodings_on_this_thread,
+    lower_configured, lower_configured_with_init, pinned_inits_on_this_thread,
 };
 use continuum_cml_elab::{Limits, LowerErrorKind, Unlowerable, elaborate_source};
 use continuum_engine_reference::bfs::{self, Bound, Bounds, Exploration};
@@ -194,14 +210,34 @@ fn lower_with(src: &str, config: &str, limits: Limits) -> Result<Configured, Low
         .map_err(|e| e.kind)
 }
 
+/// [`lower_with`] on the init path `path` (bn-2ri63).
+fn lower_on(
+    src: &str,
+    config: &str,
+    limits: Limits,
+    path: InitPath,
+) -> Result<Configured, LowerErrorKind> {
+    let model = elaborate_source(src).unwrap_or_else(|e| panic!("elaborates: {e}"));
+    let config = RunConfig::parse(config.as_bytes()).unwrap_or_else(|e| panic!("reads: {e}"));
+    lower_configured_with_init(&model, &config, limits, path)
+        .0
+        .map_err(|e| e.kind)
+}
+
 type Lowered = Arc<Result<Model, LowerErrorKind>>;
 
-/// Lower once per source, configuration, and budget: the claim-A scope enumerates
-/// `2^22` init candidates, and several tests read the same models.
-fn lowered_cached(src: &str, config: &str, limits: Limits) -> Lowered {
-    type Key = (String, String, usize, u64);
+/// Lower once per source, configuration, budget, and init path: the claim-A scope
+/// enumerates `2^22` init candidates, and several tests read the same models.
+fn lowered_cached(src: &str, config: &str, limits: Limits, path: InitPath) -> Lowered {
+    type Key = (String, String, usize, u64, InitPath);
     static CACHE: OnceLock<Mutex<BTreeMap<Key, Arc<OnceLock<Lowered>>>>> = OnceLock::new();
-    let key = (src.to_owned(), config.to_owned(), limits.nodes, limits.work);
+    let key = (
+        src.to_owned(),
+        config.to_owned(),
+        limits.nodes,
+        limits.work,
+        path,
+    );
     let cell = Arc::clone(
         CACHE
             .get_or_init(Mutex::default)
@@ -211,12 +247,14 @@ fn lowered_cached(src: &str, config: &str, limits: Limits) -> Lowered {
             .or_default(),
     );
     Arc::clone(
-        cell.get_or_init(|| Arc::new(lower_with(src, config, limits).map(|c| c.model().clone()))),
+        cell.get_or_init(|| {
+            Arc::new(lower_on(src, config, limits, path).map(|c| c.model().clone()))
+        }),
     )
 }
 
 fn lowered(src: &str, config: &str) -> Model {
-    lowered_cached(src, config, CLAIM_A_LIMITS)
+    lowered_cached(src, config, CLAIM_A_LIMITS, InitPath::Enumerate)
         .as_ref()
         .clone()
         .unwrap_or_else(|e| panic!("lowers: {e:?}"))
@@ -389,6 +427,101 @@ fn counted_config(epochs: &[&str]) -> String {
         );
     assert!(out.contains("Epoch") && out.contains(r#""max":2"#));
     out
+}
+
+// ---------------------------------------------------------------------------
+// claim A with a counted atomic crash (bn-2ri63)
+// ---------------------------------------------------------------------------
+
+/// The atomic crash of the counted model. It replaces `Lose` in [`counted_crashes`].
+const ATOMIC_CRASH: &str =
+    "// An atomic crash of replica `n`: it loses every write in flight at `n` at once,
+// the permits and the bytes of those submitted, and nothing durable. `flight` names
+// the epochs with a write in flight at `n`, so one instance per replica is enabled.
+// It is the counted fault: at most two crashes. A crash with nothing in flight is a
+// crash too, and is counted.
+action Crash(n: Node, flight: Set[Epoch]) {
+  require crashes < 2
+  require forall e: (n, e) in pending <=> e in flight
+  next pending = pending \\ {(n, e) | e in flight}
+  next log = log \\ {(n, e, v) | e in flight, v}
+  next crashes = crashes + 1
+  unchanged acks
+}
+
+";
+
+/// Claim A literally, as a variant model: the committed register with `Lose` replaced
+/// by the counted atomic [`ATOMIC_CRASH`], crashes at most two. Its init pins every
+/// slot, so the pinned init path lowers it under the default budget; the whole-domain
+/// enumeration refuses it (`3 * 2^22` flat states).
+fn counted_atomic_crashes() -> String {
+    let src = counted_crashes();
+    let lose = lose_action(&src);
+    let out = mutate_text(&src, &lose, ATOMIC_CRASH);
+    assert!(!out.contains("action Lose"), "no partial loss is left");
+    out
+}
+
+/// A seeded crash bug: the atomic crash also drops the durable records of `n`.
+fn crash_loses_durable() -> String {
+    mutate_text(
+        &counted_atomic_crashes(),
+        "  next log = log \\ {(n, e, v) | e in flight, v}\n",
+        "  next log = log \\ {(n, e, v) | e, v}\n",
+    )
+}
+
+/// The claim-A lowering of the counted model: the pinned init path under the default
+/// budget.
+fn counted_lowered(src: &str, config: &str) -> Model {
+    lowered_cached(src, config, Limits::default(), InitPath::Pinned)
+        .as_ref()
+        .clone()
+        .unwrap_or_else(|e| panic!("lowers: {e:?}"))
+}
+
+/// Claim A with at most two counted atomic crashes: `3 * 61,504` states.
+const COUNTED_STATES: usize = 3 * CLAIM_A_STATES;
+
+/// The counted model at the claim-A scope and its complete exploration, built once.
+fn counted_claim_a() -> &'static (Model, Exploration) {
+    static CELL: OnceLock<(Model, Exploration)> = OnceLock::new();
+    CELL.get_or_init(|| {
+        let model = counted_lowered(&counted_atomic_crashes(), &counted_config(&["0", "1"]));
+        let exploration = complete(&model);
+        assert_eq!(exploration.reachable().len(), COUNTED_STATES);
+        (model, exploration)
+    })
+}
+
+/// The counted model's crash count at `state`.
+fn crashes_at(model: &Model, state: &State) -> u8 {
+    u8::try_from(model.binding(state, "crashes").expect("counted")).expect("0..=2")
+}
+
+/// States read as `(crashes, raw)`.
+type Pairs = BTreeSet<(u8, Raw)>;
+
+/// The counted model's reachable states as `(crashes, raw)`, and the literal closure
+/// over the uncounted claim-A model as the same pairs.
+fn counted_pairs() -> &'static (Pairs, Pairs) {
+    static CELL: OnceLock<(Pairs, Pairs)> = OnceLock::new();
+    CELL.get_or_init(|| {
+        let (model, exploration) = counted_claim_a();
+        let engine = exploration
+            .reachable()
+            .states()
+            .iter()
+            .map(|s| (crashes_at(model, s), decode(model, s)))
+            .collect();
+        let (uncounted, _) = claim_a();
+        let closure = atomic_crash_pairs(uncounted)
+            .into_iter()
+            .map(|(c, s)| (c, decode(uncounted, &s)))
+            .collect();
+        (engine, closure)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -761,6 +894,19 @@ fn claim_a_steps() -> &'static (Correspondence, Vec<Labelled>) {
     })
 }
 
+/// [`correspondence`] and [`durability_violations`] over the counted claim-A
+/// exploration (bn-2ri63), computed once.
+fn counted_steps() -> &'static (Correspondence, Vec<Labelled>) {
+    static CELL: OnceLock<(Correspondence, Vec<Labelled>)> = OnceLock::new();
+    CELL.get_or_init(|| {
+        let (model, exploration) = counted_claim_a();
+        (
+            correspondence(model, exploration),
+            durability_violations(model, exploration),
+        )
+    })
+}
+
 /// Every engine step that loses or changes a durable record, withdraws an
 /// acknowledgement, or ends a write in flight while its bytes stay without being a
 /// `Sync` — the durability claim as a transition property.
@@ -797,6 +943,19 @@ fn durability_violations(model: &Model, exploration: &Exploration) -> Vec<Labell
 /// enabled at `n`; every other step is taken as it is. Returns, per state, the fewest
 /// crashes that reach it.
 fn atomic_crash_reachable(model: &Model) -> BTreeMap<State, u8> {
+    let mut best: BTreeMap<State, u8> = BTreeMap::new();
+    for (crashes, s) in atomic_crash_pairs(model) {
+        let entry = best.entry(s).or_insert(crashes);
+        *entry = (*entry).min(crashes);
+    }
+    best
+}
+
+/// The closure behind [`atomic_crash_reachable`]: every `(crashes, state)` pair it
+/// reaches, a crash of a replica with nothing in flight counted too. This is the
+/// oracle of the counted model (bn-2ri63): its reachable states, read as
+/// `(crashes, log, pending, acks)`, must be exactly these pairs.
+fn atomic_crash_pairs(model: &Model) -> BTreeSet<(u8, State)> {
     let mut successors: BTreeMap<State, Vec<(String, State)>> = BTreeMap::new();
     let mut next = |s: &State| -> Vec<(String, State)> {
         successors
@@ -811,7 +970,6 @@ fn atomic_crash_reachable(model: &Model) -> BTreeMap<State, u8> {
             })
             .clone()
     };
-    let mut best: BTreeMap<State, u8> = BTreeMap::new();
     let mut seen: BTreeSet<(u8, State)> = BTreeSet::new();
     let mut work: Vec<(u8, State)> = model
         .initial_states()
@@ -820,8 +978,6 @@ fn atomic_crash_reachable(model: &Model) -> BTreeMap<State, u8> {
         .collect();
     seen.extend(work.iter().cloned());
     while let Some((crashes, s)) = work.pop() {
-        let entry = best.entry(s.clone()).or_insert(crashes);
-        *entry = (*entry).min(crashes);
         let mut out: Vec<(u8, State)> = next(&s)
             .into_iter()
             .filter(|(l, _)| !l.starts_with("Lose("))
@@ -844,7 +1000,7 @@ fn atomic_crash_reachable(model: &Model) -> BTreeMap<State, u8> {
             }
         }
     }
-    best
+    seen
 }
 
 // ---------------------------------------------------------------------------
@@ -936,6 +1092,7 @@ struct Scenario {
     config: String,
     limits: Limits,
     bounds: Bounds,
+    path: InitPath,
 }
 
 fn scenarios() -> Vec<Scenario> {
@@ -946,6 +1103,7 @@ fn scenarios() -> Vec<Scenario> {
         config,
         limits: CLAIM_A_LIMITS,
         bounds: Bounds::CERTIFIABLE,
+        path: InitPath::Enumerate,
     };
     vec![
         s(
@@ -1009,6 +1167,7 @@ fn scenarios() -> Vec<Scenario> {
             config: committed_config(),
             limits: Limits::default(),
             bounds: Bounds::CERTIFIABLE,
+            path: InitPath::Enumerate,
         },
         s(
             "pr16-impl02-bnd-02-counted-crashes-claim-a",
@@ -1035,9 +1194,59 @@ fn scenarios() -> Vec<Scenario> {
             config: one_epoch(),
             limits: CLAIM_A_LIMITS,
             bounds: Bounds::CERTIFIABLE.with_depth(6),
+            path: InitPath::Enumerate,
         },
     ]
 }
+
+/// The counted-crash evidence (bn-2ri63), in its own artifact so the bn-2rsp artifact
+/// keeps its bytes.
+fn counted_scenarios() -> Vec<Scenario> {
+    let s = |id, what, src, config, path| Scenario {
+        id,
+        what,
+        src,
+        config,
+        limits: Limits::default(),
+        bounds: Bounds::CERTIFIABLE,
+        path,
+    };
+    vec![
+        s(
+            POS_04,
+            "claim A: nodes {a,b,c}, majority quorums, epochs {0,1}, values {v0,v1}, at most two counted atomic crashes; pinned init, default budget",
+            counted_atomic_crashes(),
+            counted_config(&["0", "1"]),
+            InitPath::Pinned,
+        ),
+        s(
+            POS_05,
+            "one epoch, at most two counted atomic crashes: both init paths lower the same model",
+            counted_atomic_crashes(),
+            counted_config(&["0"]),
+            InitPath::Pinned,
+        ),
+        s(
+            NEG_07,
+            "seeded bug: the atomic crash drops durable records too; one epoch, at most two counted crashes",
+            crash_loses_durable(),
+            counted_config(&["0"]),
+            InitPath::Pinned,
+        ),
+        s(
+            BND_06,
+            "the pos-04 model on the whole-domain init path: 3 * 2^22 flat states",
+            counted_atomic_crashes(),
+            counted_config(&["0", "1"]),
+            InitPath::Enumerate,
+        ),
+    ]
+}
+
+const POS_04: &str = "pr16-impl02-pos-04-claim-a-counted-atomic-crash";
+const POS_05: &str = "pr16-impl02-pos-05-one-epoch-counted-atomic-crash";
+const NEG_07: &str = "pr16-impl02-neg-07-crash-loses-durable";
+const BND_06: &str = "pr16-impl02-bnd-06-counted-crash-whole-domain";
 
 fn render_raw(raw: &Raw) -> String {
     let values = ["v0", "v1"];
@@ -1078,13 +1287,27 @@ fn render_raw(raw: &Raw) -> String {
 
 fn render(sc: &Scenario) -> String {
     let mut out = format!("[{}]\n{}\n", sc.id, sc.what);
-    let model = match lowered_cached(&sc.src, &sc.config, sc.limits).as_ref() {
+    let model = match lowered_cached(&sc.src, &sc.config, sc.limits, sc.path).as_ref() {
         Ok(m) => m.clone(),
         Err(e) => {
             out.push_str(&format!("lowering: refused {e:?}\n"));
             return out;
         }
     };
+    if sc.path == InitPath::Pinned {
+        out.push_str(&format!(
+            "init path: pinned, initial states={}\n",
+            model.initial_states().len()
+        ));
+    }
+    if sc.id == POS_05 {
+        let whole = lower_on(&sc.src, &sc.config, sc.limits, InitPath::Enumerate)
+            .expect("the whole domain lowers at one epoch");
+        out.push_str(&format!(
+            "whole-domain init path: same model={}\n",
+            whole.model() == &model
+        ));
+    }
     out.push_str(&format!(
         "model: slots={} actions={} predicates={}\n",
         model.variables().len(),
@@ -1100,6 +1323,9 @@ fn render(sc: &Scenario) -> String {
     let exploration = if sc.id == "pr16-impl02-pos-01-claim-a" {
         assert_eq!(&model, &claim_a().0);
         &claim_a().1
+    } else if sc.id == POS_04 {
+        assert_eq!(&model, &counted_claim_a().0);
+        &counted_claim_a().1
     } else {
         owned = bfs::explore(&model, sc.bounds).expect("evaluates");
         &owned
@@ -1135,11 +1361,34 @@ fn render(sc: &Scenario) -> String {
             ));
         }
     }
+    if sc.id == POS_04 {
+        let (engine, closure) = counted_pairs();
+        let mut per = [0_usize; 3];
+        for (c, _) in engine {
+            per[usize::from(*c)] += 1;
+        }
+        let raws: BTreeSet<&Raw> = engine.iter().map(|(_, r)| r).collect();
+        out.push_str(&format!(
+            "crashes: 0={} 1={} 2={}; distinct (log, pending, acks)={}\n",
+            per[0],
+            per[1],
+            per[2],
+            raws.len()
+        ));
+        out.push_str(&format!(
+            "literal atomic-crash closure of pos-01: pairs={} equal to the engine's={}\n",
+            closure.len(),
+            engine == closure
+        ));
+    }
     if matches!(rep.scope(), checking::Scope::Complete { .. }) {
         let claim = sc.id == "pr16-impl02-pos-01-claim-a";
         let owned_steps;
         let (c, bad) = if claim {
             let steps = claim_a_steps();
+            (&steps.0, &steps.1)
+        } else if sc.id == POS_04 {
+            let steps = counted_steps();
             (&steps.0, &steps.1)
         } else {
             owned_steps = (
@@ -1187,11 +1436,16 @@ fn render(sc: &Scenario) -> String {
 }
 
 fn evidence(rendered: &[String]) -> String {
-    let mut out = String::from(
+    evidence_under(
         "# PR-16/IMPL-02 operational durable register (bn-2rsp): notes/plan/examples/durable_register.ctm\n\
          # checked by continuum-engine-reference, steps related to abstract_register.ctm.\n\
          # Regenerate: CML_BLESS=1 cargo test -p continuum-cml-elab --test pr16_impl02_durable_register\n",
-    );
+        rendered,
+    )
+}
+
+fn evidence_under(header: &str, rendered: &[String]) -> String {
+    let mut out = String::from(header);
     for r in rendered {
         out.push('\n');
         out.push_str(r);
@@ -1763,4 +2017,168 @@ fn the_evidence_artifacts_match_their_golden_and_render_distinctly() {
     }
     let ids: BTreeSet<&str> = all.iter().map(|sc| sc.id).collect();
     assert_eq!(ids.len(), all.len(), "artifact IDs are unique");
+}
+
+// ---------------------------------------------------------------------------
+// claim A with at most two counted atomic crashes (bn-2ri63)
+// ---------------------------------------------------------------------------
+
+/// Claim A with the crash counted: at most two atomic crashes, lowered by the pinned
+/// init path under the default budget and established by the engine over its complete
+/// reachable set, `3 * 61,504` states.
+#[test]
+fn claim_a_with_at_most_two_counted_atomic_crashes_is_established() {
+    let (model, exploration) = counted_claim_a();
+    assert_eq!(model.variables().len(), 23, "22 slots and the counter");
+    assert_eq!(model.initial_states().len(), 1);
+    let crashes: Vec<String> = model
+        .actions()
+        .iter()
+        .map(|a| a.name().to_string())
+        .filter(|n| n.starts_with("Crash("))
+        .collect();
+    assert_eq!(
+        crashes.len(),
+        12,
+        "3 replicas, 4 in-flight sets: {crashes:?}"
+    );
+    assert!(
+        model
+            .actions()
+            .iter()
+            .all(|a| !a.name().to_string().starts_with("Lose(")),
+        "no partial loss"
+    );
+    let counter = model
+        .variables()
+        .iter()
+        .find(|v| v.name().to_string() == "crashes")
+        .expect("counted");
+    assert_eq!(counter.domain().cardinality(), 3, "0..=2");
+    let rep = report(model, exploration);
+    assert_eq!(
+        rep.scope(),
+        checking::Scope::Complete {
+            states: COUNTED_STATES
+        }
+    );
+    for name in ["Agreement", "AckedIsDurable", "OneValuePerSlot"] {
+        assert_eq!(
+            outcome(model, &rep, name),
+            &CheckOutcome::Holds {
+                states: COUNTED_STATES
+            },
+            "{name}"
+        );
+    }
+    assert_eq!(
+        rep.deadlock(),
+        &DeadlockOutcome::Free {
+            states: COUNTED_STATES
+        }
+    );
+    assert_eq!(rep.verdict(), checking::Verdict::Established);
+}
+
+/// The engine's counted states are exactly the literal claim-A set: the pairs
+/// `(crashes, state)` of [`atomic_crash_pairs`], built from the uncounted model's own
+/// `Lose` steps. So the counted model loses nothing and adds nothing, and every
+/// crash count reaches every state of pos-01.
+#[test]
+fn the_counted_states_are_the_literal_atomic_crash_closure() {
+    let (engine, closure) = counted_pairs();
+    assert_eq!(engine.len(), COUNTED_STATES);
+    assert_eq!(engine, closure);
+    let raws: BTreeSet<&Raw> = engine.iter().map(|(_, r)| r).collect();
+    assert_eq!(raws.len(), CLAIM_A_STATES);
+    for c in 0..=2 {
+        assert_eq!(
+            engine.iter().filter(|(k, _)| *k == c).count(),
+            CLAIM_A_STATES,
+            "crash count {c}"
+        );
+    }
+}
+
+/// Every counted step is a stutter or an enabled `Choose` of the abstract register,
+/// and no step, a crash included, loses a durable record or an acknowledgement.
+#[test]
+fn every_counted_step_corresponds_and_keeps_durability() {
+    let (c, bad) = counted_steps();
+    assert!(c.failures.is_empty(), "{:?}", c.failures.first());
+    assert!(bad.is_empty(), "{:?}", bad.first());
+    assert!(c.chooses > 0 && c.steps > c.chooses);
+}
+
+/// The whole-domain init path, the oracle, lowers the counted model to the same model
+/// at one epoch, where its domain fits; at the claim-A scope it refuses before
+/// enumerating (`bnd-06`), and the pinned path lowers it under the default budget.
+#[test]
+fn the_two_init_paths_agree_on_the_counted_model() {
+    let src = counted_atomic_crashes();
+    let one = counted_config(&["0"]);
+    let before = pinned_inits_on_this_thread();
+    let pinned = lower_on(&src, &one, Limits::default(), InitPath::Pinned).expect("lowers");
+    assert!(
+        pinned_inits_on_this_thread() > before,
+        "the pinned path ran"
+    );
+    let whole = lower_on(&src, &one, Limits::default(), InitPath::Enumerate).expect("lowers");
+    assert_eq!(pinned, whole, "the same model and run identity");
+
+    let two = counted_config(&["0", "1"]);
+    assert_eq!(
+        lower_on(&src, &two, CLAIM_A_LIMITS, InitPath::Enumerate).expect_err("too wide"),
+        LowerErrorKind::Unlowerable(Unlowerable::InitDomainTooLarge),
+        "3 * 2^22 flat states"
+    );
+    let model = elaborate_source(&src).expect("elaborates");
+    let config = RunConfig::parse(two.as_bytes()).expect("reads");
+    let (result, usage) =
+        lower_configured_with_init(&model, &config, Limits::default(), InitPath::Pinned);
+    assert_eq!(result.expect("lowers").model(), &counted_claim_a().0);
+    assert!(
+        usage.work < 1 << 24,
+        "a scan, not an enumeration: {usage:?}"
+    );
+}
+
+/// A crash that also drops durable records is refuted with at most two counted
+/// crashes, by a shortest witness that replays. At one epoch: at the claim-A scope the
+/// bug's reachable set passes the certifiable bounds, so its witness would not be
+/// known to be shortest.
+#[test]
+fn a_crash_that_drops_durable_records_is_refuted_within_two_crashes() {
+    let model = counted_lowered(&crash_loses_durable(), &counted_config(&["0"]));
+    let exploration = complete(&model);
+    let rep = report(&model, &exploration);
+    let durable = outcome(&model, &rep, "AckedIsDurable");
+    replays(&model, durable);
+    let labels = witness_labels(durable);
+    let crashes = labels.iter().filter(|l| l.starts_with("Crash(")).count();
+    assert!((1..=2).contains(&crashes), "{labels:?}");
+    assert_eq!(rep.verdict(), checking::Verdict::Refuted);
+}
+
+/// The counted evidence artifact, compared byte for byte, with unique IDs that differ
+/// from the bn-2rsp artifact's.
+#[test]
+fn the_counted_evidence_matches_its_golden() {
+    let all = counted_scenarios();
+    let rendered: Vec<String> = all.iter().map(render).collect();
+    golden(
+        "pr16_impl02_counted_crash.evidence.txt",
+        &evidence_under(
+            "# PR-16/IMPL-02 claim A with at most two counted atomic crashes (bn-2ri63):\n\
+             # notes/plan/examples/durable_register.ctm with Lose replaced by a counted atomic Crash,\n\
+             # lowered on the pinned init path (RFC 0003 correction 6), checked by continuum-engine-reference.\n\
+             # Regenerate: CML_BLESS=1 cargo test -p continuum-cml-elab --test pr16_impl02_durable_register\n",
+            &rendered,
+        ),
+    );
+    let mut ids: BTreeSet<&str> = all.iter().map(|sc| sc.id).collect();
+    assert_eq!(ids.len(), all.len());
+    for sc in scenarios() {
+        assert!(ids.insert(sc.id), "{} is not reused", sc.id);
+    }
 }

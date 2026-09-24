@@ -99,6 +99,8 @@ use crate::budget::{Budget, Fuel, Limits, Usage, lookup_cost, sort_cost};
 
 mod collections;
 mod layout;
+mod pinned;
+pub use pinned::{PinnedTrace, pinned_trace_on_this_thread};
 
 use crate::config::{ConfigIdentity, ConfigValue, RunConfig, RunIdentity};
 use crate::norm::{BinOp, Builtin, Expr, ExprKind, Next, NormModel, Temporal};
@@ -110,6 +112,30 @@ pub use collections::{DEFINED_SUFFIX, definedness_subject};
 /// This bounds the *time* of the enumeration: each candidate state is one evaluation
 /// over one reused value vector, with no allocation.
 pub const MAX_INIT_ENUMERATION: u128 = 1 << 22;
+
+/// How a lowering finds the initial states (RFC 0003 correction 6, bn-2ri63).
+///
+/// Both paths give the same initial states in the same order and the same evaluation,
+/// undefined-read, initial-state-count, and builder outcomes. They differ only in which
+/// candidates they enumerate, and so in what they charge and in which resource bound a
+/// large init domain meets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum InitPath {
+    /// Enumerate every canonical state of the whole slot domain against the init
+    /// predicate: the oracle, and what [`lower`], [`lower_with`], and
+    /// [`lower_configured`] do.
+    #[default]
+    Enumerate,
+    /// Enumerate only the product of the values the init predicate's pinning conjuncts
+    /// admit (`x == c`, or a disjunction of such equalities over one variable), each
+    /// candidate checked as [`InitPath::Enumerate`] checks it. It applies only where no
+    /// evaluation of the predicate or the canonicity constraint can fail at any state, the
+    /// predicate has no definedness condition (no partial map read `m[k]`), and every
+    /// state variable has its own name; otherwise the lowering enumerates the whole domain.
+    /// The candidates are bounded by [`MAX_INIT_ENUMERATION`] and charged by
+    /// [`init_work`] as the whole domain is, after the analysis is charged.
+    Pinned,
+}
 
 /// The most candidate post-states one relational action may enumerate: the product of
 /// its relational variables' domains. Each candidate becomes one programmatic action.
@@ -461,6 +487,8 @@ pub fn lower(model: &NormModel) -> Result<Model, LowerError> {
 /// variable reference costs a scan of the declared variables in the builder and the
 /// evaluator, so it is charged that much work).
 struct Meter {
+    /// How the initial states are found.
+    init: InitPath,
     nodes: Budget,
     fuel: Fuel,
     vars: usize,
@@ -515,6 +543,7 @@ struct Meter {
 impl Meter {
     fn new(limits: Limits, model: &NormModel) -> Self {
         Self {
+            init: InitPath::Enumerate,
             nodes: Budget::new(limits.nodes),
             fuel: Fuel::new(limits.work),
             vars: model.state.len(),
@@ -625,7 +654,17 @@ fn burn(meter: &mut Meter, n: u64, span: Span) -> R<()> {
 /// [`lower`] under explicit resource limits, reporting what it spent (whether or not
 /// it succeeds).
 pub fn lower_with(model: &NormModel, limits: Limits) -> (Result<Model, LowerError>, Usage) {
+    lower_with_init(model, limits, InitPath::Enumerate)
+}
+
+/// [`lower_with`], finding the initial states by `init` ([`InitPath`]).
+pub fn lower_with_init(
+    model: &NormModel,
+    limits: Limits,
+    init: InitPath,
+) -> (Result<Model, LowerError>, Usage) {
     let mut meter = Meter::new(limits, model);
+    meter.init = init;
     let result = enum_tables(model, &mut meter).and_then(|()| lower_metered(model, &mut meter));
     let usage = Usage {
         nodes: meter.nodes.used(),
@@ -669,6 +708,19 @@ thread_local! {
     static IDENTITY_ENCODINGS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
+thread_local! {
+    /// How many lowerings on this thread found their initial states by the pinned space
+    /// ([`InitPath::Pinned`] where it applies): the test seam that shows which path ran.
+    static PINNED_INITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many lowerings on the calling thread enumerated a pinned init space rather than
+/// the whole domain. A test reads it before and after a lowering to show which path ran.
+#[must_use]
+pub fn pinned_inits_on_this_thread() -> u64 {
+    PINNED_INITS.with(std::cell::Cell::get)
+}
+
 /// How many model identities [`lower_configured`] has encoded on the calling thread.
 /// A test reads it before and after a refused lowering to show the identity was never
 /// built.
@@ -693,7 +745,19 @@ pub fn lower_configured(
     config: &RunConfig,
     limits: Limits,
 ) -> (Result<Configured, LowerError>, Usage) {
+    lower_configured_with_init(model, config, limits, InitPath::Enumerate)
+}
+
+/// [`lower_configured`], finding the initial states by `init` ([`InitPath`]). The
+/// lowered model, and so its identities, do not depend on `init`.
+pub fn lower_configured_with_init(
+    model: &NormModel,
+    config: &RunConfig,
+    limits: Limits,
+    init: InitPath,
+) -> (Result<Configured, LowerError>, Usage) {
     let mut meter = Meter::new(limits, model);
+    meter.init = init;
     let result = enum_tables(model, &mut meter)
         .and_then(|()| bindings(model, config, &mut meter))
         .and_then(|bind| {
@@ -1484,9 +1548,32 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
     } else {
         Some(conjoin(canon, &mut *budget, init.span)?)
     };
-    let cardinality = variables.iter().fold(1_u128, |acc, v| {
-        acc.saturating_mul(v.domain().cardinality())
-    });
+    // The pinned path (bn-2ri63): its candidates, where it applies. It needs every
+    // slot's variable (else `build` reports the missing one, as below) and no
+    // definedness condition (the whole-domain enumeration refuses an undefined read at
+    // any canonical state, which only the whole domain can find).
+    let mut pinned = if budget.init == InitPath::Pinned
+        && defined.is_none()
+        && variables.len() as u128 == slot_count
+    {
+        pinned::space(
+            &init_pred,
+            predicate_size,
+            canon.as_ref(),
+            canon_size,
+            &variables,
+            &mut *budget,
+            init.span,
+        )?
+    } else {
+        None
+    };
+    let cardinality = match &pinned {
+        Some(space) => space.cardinality(),
+        None => variables.iter().fold(1_u128, |acc, v| {
+            acc.saturating_mul(v.domain().cardinality())
+        }),
+    };
     if cardinality > MAX_INIT_ENUMERATION {
         return no(Unlowerable::InitDomainTooLarge, init.span);
     }
@@ -1509,7 +1596,17 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
     // `build` below reports it, so the enumeration is skipped rather than run over a
     // partial state.
     if variables.len() as u128 == slot_count {
-        let mut values: Vec<i64> = variables.iter().map(|v| v.domain().lo()).collect();
+        // The first candidate: the whole domain's lowest state, or the pinned space's
+        // first (none when the space is empty, and then nothing is enumerated).
+        let first = match &mut pinned {
+            Some(space) => {
+                PINNED_INITS.with(|n| n.set(n.get().saturating_add(1)));
+                space.start()
+            }
+            None => Some(variables.iter().map(|v| v.domain().lo()).collect()),
+        };
+        let mut more = first.is_some();
+        let mut values: Vec<i64> = first.unwrap_or_default();
         let mut bindings_held: usize = 0;
         // Per accepted state: the names' bytes (for the work of the copy), and the output
         // the builder holds — the state's record, and per variable a binding with its own
@@ -1523,7 +1620,7 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
             kind: LowerErrorKind::Evaluation(e),
             span: init.span,
         };
-        loop {
+        while more {
             let env = Environment::new(&variables, &values);
             // A flat state that is not canonical is no value: skipped before the
             // predicate is evaluated, so the predicate adds no error there. At a
@@ -1563,9 +1660,10 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
                     builder = builder.initial_state(&bindings);
                 }
             }
-            if !advance(&mut values, &variables) {
-                break;
-            }
+            more = match &mut pinned {
+                Some(space) => space.advance(&mut values),
+                None => advance(&mut values, &variables),
+            };
         }
     }
 

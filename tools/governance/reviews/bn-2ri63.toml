@@ -1,0 +1,51 @@
+[change]
+bone = "bn-2ri63"
+author = "continuum-dev"
+summary = "continuum-cml-elab: RFC 0003 correction 6 — the pinned init path (InitPath::Pinned, lower_with_init, lower_configured_with_init) enumerates only the product of the values the init predicate's pinning conjuncts admit, never the whole slot domain, when no evaluation of the predicate or the canonicity constraint can fail, the predicate has no definedness condition, and the slot names are distinct; it is exact against the whole-domain enumeration (same initial states in the same order, same evaluation, undefined-read, initial-state-count, and builder outcomes), planned and charged before the analysis runs, and bounded by the same MAX_INIT_ENUMERATION and init_work over the pinned product; with it, PR-16 claim A is established with at most two counted atomic crashes (184,512 states) under the default budget"
+
+[semantic]
+covers = [
+  "crates/continuum-cml-elab/src/",
+]
+reference_tests = [
+  "crates/continuum-cml-elab/tests/init_pinned.rs::a_pin_does_not_hide_an_error_of_the_whole_domain",
+  "crates/continuum-cml-elab/tests/init_pinned.rs::a_map_read_without_arithmetic_still_runs_the_whole_domain",
+  "crates/continuum-cml-elab/tests/init_pinned.rs::the_pinned_product_meets_the_enumeration_bound",
+  "crates/continuum-cml-elab/tests/init_pinned.rs::a_repeated_slot_name_takes_the_whole_domain",
+  "crates/continuum-cml-elab/tests/init_pinned.rs::pinned_allocations_stay_within_their_precharge_around_powers_of_two",
+  "crates/continuum-cml-elab/tests/init_pinned.rs::equivalent_guard_normalization_keeps_the_pinned_model",
+  "crates/continuum-cml-elab/tests/init_pinned.rs::a_pinned_lowering_replays_under_the_limits_it_reported",
+  "crates/continuum-cml-elab/tests/init_pinned.rs::the_pinned_path_spends_far_less_than_the_whole_domain",
+  "crates/continuum-cml-elab/tests/init_pinned.rs::every_corpus_model_lowers_the_same_on_both_paths",
+  "crates/continuum-cml-elab/tests/init_pinned.rs::every_configured_example_lowers_the_same_on_both_paths",
+  "crates/continuum-cml-elab/tests/init_pinned.rs::generated_init_predicates_lower_the_same_on_both_paths",
+  "crates/continuum-cml-elab/tests/pr16_impl02_durable_register.rs::the_two_init_paths_agree_on_the_counted_model",
+  "crates/continuum-cml-elab/tests/pr16_impl02_durable_register.rs::the_counted_evidence_matches_its_golden",
+  "crates/continuum-cml-elab/tests/pr16_impl02_durable_register.rs::the_evidence_artifacts_match_their_golden_and_render_distinctly",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-cml-elab/tests/init_pinned.rs::equivalent_guard_normalization_keeps_the_pinned_model", relation = "equivalent guard normalization" },
+]
+differential_tests = [
+  { test = "crates/continuum-cml-elab/tests/pr16_impl02_durable_register.rs::the_counted_states_are_the_literal_atomic_crash_closure", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+  { test = "crates/continuum-cml-elab/tests/pr16_impl02_durable_register.rs::claim_a_with_at_most_two_counted_atomic_crashes_is_established", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+  { test = "crates/continuum-cml-elab/tests/pr16_impl02_durable_register.rs::every_counted_step_corresponds_and_keeps_durability", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+  { test = "crates/continuum-cml-elab/tests/pr16_impl02_durable_register.rs::a_crash_that_drops_durable_records_is_refuted_within_two_crashes", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+]
+
+[semantic.claim_impact]
+claims = ["C021", "C022"]
+reason = "an init that pins its state no longer costs an enumeration of the whole slot domain, so wider finite scopes of corpus models reach an engine (C021) and the durable register's claim A is checked with its crash bound counted in the model, as the scenario states it (C022); this adds evidence toward both and promotes neither: both stay TARGET"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the run configuration is read unchanged, and the lowered Model and its continuum-model/1 identity are the same on both init paths (the pinned path only chooses which candidates to evaluate)"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-cml-elab: lower, lower_with, and lower_configured keep the whole-domain enumeration (InitPath::Enumerate), so every existing lowering, its usage figures, and its refusals are unchanged. The pinned path is opt-in through the new lower_with_init and lower_configured_with_init; it gives the same model, and so the same model and run identities, wherever both paths complete. New public surface: InitPath, lower_with_init, lower_configured_with_init, and the test seams pinned_inits_on_this_thread, pinned_trace_on_this_thread, and PinnedTrace. continuum-model-core and continuum-engine-reference are unchanged"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-1s123d"
+verdict = "approved"

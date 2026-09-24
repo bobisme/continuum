@@ -123,6 +123,7 @@
 //! | `lower`: `shallow` (pre-recursion depth check) | none | iterative | the clause's size |
 //! | `lower`: refinements (`domain_of`, `constant`) | none | normalized-tree depth | the refinement's size, twice |
 //! | `lower`: behaviors (`standard_behavior`) | none | flat | the covering choices computed once (linear in the choices); one lookup per behavior |
+//! | `lower`: the pinned init path (`pinned::space`, [`crate::lower::InitPath::Pinned`], bn-2ri63) | the position table (an entry per variable) charged before it is built; per variable a pin entry, an axis, a cursor, and a candidate value, and two copies of each pinning leaf the totality scan counted, charged before the pin scan allocates any | iterative scans with explicit stacks; the totality scan refuses the path past `MAX_EXPR_DEPTH`, counted as the evaluator counts it | `pinned::analysis_work` (the totality scan over the canonicity constraint and the predicate, the pin scan over the predicate, a position lookup per node, and a sort of at most one value per predicate node) spent before the first scan, with the table's sort; the enumeration over the product of the axes is then charged as the next row charges the whole domain, under the same [`crate::lower::MAX_INIT_ENUMERATION`] |
 //! | `lower`: init enumeration | bindings counted before each state is added ([`crate::lower::MAX_INIT_BINDINGS`]) | flat vectors | `lower::init_work` (candidates × (predicate size × (variables + 1) + 2 × variables + 1)) charged *before* enumerating; candidates ≤ [`crate::lower::MAX_INIT_ENUMERATION`]; per accepted state, its copy, placement, and sort in the builder charged before the copy |
 //! | `lower`: `ModelBuilder::build` | what was charged above | bounded above | `sort_cost` for the variable, action, and predicate sorts, and for the fairness members and assumptions; one binary search per fairness member; its validation scans charged per variable-naming node |
 //! | `norm`: dump, identity, `scoped_key` | output text proportional to a tree whose every node, text, and type was charged | trees bounded above | linear, with bound-variable depths from `BinderScope`'s index; these are not called during elaboration except through `sort_keys` |
@@ -160,7 +161,7 @@ pub mod types;
 pub use budget::{Limits, Usage};
 pub use elab::{elaborate, elaborate_with};
 pub use error::{ElabError, ElabErrorKind, Unsupported};
-pub use lower::{LowerError, LowerErrorKind, Unlowerable, lower, lower_with};
+pub use lower::{InitPath, LowerError, LowerErrorKind, Unlowerable, lower, lower_with};
 pub use norm::{NormIdentity, NormModel};
 pub use types::Type;
 
