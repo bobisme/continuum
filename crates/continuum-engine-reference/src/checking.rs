@@ -121,7 +121,10 @@
 use core::fmt;
 use std::collections::BTreeSet;
 
+use continuum_model_core::definedness::Definedness;
+
 use crate::bfs::{Bound, Exploration, Reachable};
+use crate::definedness::{self, Undefined};
 use crate::ident::Ident;
 use crate::model::{EvaluationError, Model, State};
 use crate::witness::{self, NoWitness, Target, Witness};
@@ -495,7 +498,7 @@ pub enum Evidence {
 
 impl Evidence {
     /// Wrap what [`crate::witness::shortest`] returned.
-    fn of(extracted: Result<Witness, NoWitness>) -> Self {
+    pub(crate) fn of(extracted: Result<Witness, NoWitness>) -> Self {
         match extracted {
             Ok(found) => Self::Shortest(found),
             Err(reason) => Self::Unwitnessed(reason),
@@ -563,16 +566,34 @@ pub enum CheckOutcome {
     },
     /// The claim was not decided, and this is why (INV-008).
     Inconclusive(Unresolved),
+    /// A read is undefined at an explored state: an action's (`A#defined` is false),
+    /// or the invariant's own (`I#defined` is false). RFC 0003, "Definedness": that
+    /// state is the typed outcome "undefined read in `X`", never a verdict of the
+    /// invariant, and RFC 0013 makes it an error that invalidates the model. So
+    /// neither [`CheckOutcome::Holds`] nor [`CheckOutcome::Violated`] is reported.
+    ///
+    /// Precedence, per [`crate::definedness`]: an evaluation error, then an undefined
+    /// action read anywhere explored, then an undefined read in the invariant, then a
+    /// violation. Reported from a bounded exploration too, because the state was
+    /// genuinely reached.
+    Undefined(Box<Undefined>),
 }
 
 impl CheckOutcome {
     /// The assurance-result verdict this outcome is.
+    ///
+    /// [`CheckOutcome::Undefined`] is [`Verdict::Inconclusive`]: the invariant was not
+    /// decided, and it must not fold into an established report. No
+    /// `InconclusiveReason` member names an invalid model, so a caller that lifts a
+    /// report onto the wire reads [`CheckReport::undefined`] and refuses the campaign
+    /// rather than invent a reason (as `continuumd` does for a transition relation
+    /// that is undefined at a reachable state).
     #[must_use]
     pub const fn verdict(&self) -> Verdict {
         match self {
             Self::Holds { .. } => Verdict::Established,
             Self::Violated { .. } => Verdict::Refuted,
-            Self::Inconclusive(_) => Verdict::Inconclusive,
+            Self::Inconclusive(_) | Self::Undefined(_) => Verdict::Inconclusive,
         }
     }
 }
@@ -591,6 +612,7 @@ impl fmt::Display for CheckOutcome {
                 "refuted state={state} depth={depth} violations={violations}"
             ),
             Self::Inconclusive(reason) => write!(f, "inconclusive {reason}"),
+            Self::Undefined(undefined) => write!(f, "inconclusive {undefined}"),
         }
     }
 }
@@ -630,8 +652,10 @@ impl InvariantResult {
 impl fmt::Display for InvariantResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "invariant {} {} {}", self.index, self.name, self.outcome)?;
-        if let CheckOutcome::Violated { evidence, .. } = &self.outcome {
-            write!(f, "\n  {evidence}")?;
+        match &self.outcome {
+            CheckOutcome::Violated { evidence, .. } => write!(f, "\n  {evidence}")?,
+            CheckOutcome::Undefined(undefined) => write!(f, "\n  {}", undefined.evidence())?,
+            CheckOutcome::Holds { .. } | CheckOutcome::Inconclusive(_) => {}
         }
         Ok(())
     }
@@ -718,6 +742,13 @@ pub enum DeadlockOutcome {
     /// The policy is [`DeadlockPolicy::Defect`], the exploration stopped at a bound,
     /// and no *explored* state is terminal — which is not deadlock freedom (INV-008).
     Inconclusive(Unresolved),
+    /// An action's read is undefined at an explored state (`A#defined` is false), under
+    /// either policy. The lowered guard is false there only so that no successor is
+    /// computed from the undefined read, so an empty row at such a state is not a
+    /// terminal state of the CML model, and a count of terminal states is not a fact
+    /// about it (RFC 0003, "Definedness"; RFC 0013). Its verdict is
+    /// [`Verdict::Inconclusive`].
+    Undefined(Box<Undefined>),
 }
 
 impl DeadlockOutcome {
@@ -732,7 +763,7 @@ impl DeadlockOutcome {
         match self {
             Self::NotJudged { .. } | Self::Free { .. } => Verdict::Established,
             Self::Deadlocked { .. } => Verdict::Refuted,
-            Self::Inconclusive(_) => Verdict::Inconclusive,
+            Self::Inconclusive(_) | Self::Undefined(_) => Verdict::Inconclusive,
         }
     }
 
@@ -741,7 +772,10 @@ impl DeadlockOutcome {
     pub fn deadlocks(&self) -> &[Deadlock] {
         match self {
             Self::Deadlocked { states } => states,
-            Self::NotJudged { .. } | Self::Free { .. } | Self::Inconclusive(_) => &[],
+            Self::NotJudged { .. }
+            | Self::Free { .. }
+            | Self::Inconclusive(_)
+            | Self::Undefined(_) => &[],
         }
     }
 }
@@ -759,6 +793,11 @@ impl fmt::Display for DeadlockOutcome {
                 Ok(())
             }
             Self::Inconclusive(reason) => write!(f, "deadlock inconclusive {reason}"),
+            Self::Undefined(undefined) => write!(
+                f,
+                "deadlock inconclusive {undefined}\n  {}",
+                undefined.evidence()
+            ),
         }
     }
 }
@@ -883,6 +922,27 @@ impl CheckReport {
         }
     }
 
+    /// The first undefined read the report carries, when there is one: the deadlock
+    /// outcome's (an undefined action read), else the first invariant's in ascending
+    /// index order (RFC 0003, "Definedness"; RFC 0013 — it invalidates the model).
+    ///
+    /// Read this before [`Self::verdict`] when lifting a report onto a wire whose
+    /// inconclusive reasons have no member for an invalid model.
+    #[must_use]
+    pub fn undefined(&self) -> Option<&Undefined> {
+        if let DeadlockOutcome::Undefined(undefined) = &self.deadlock {
+            return Some(undefined);
+        }
+        self.invariants
+            .iter()
+            .find_map(|result| match &result.outcome {
+                CheckOutcome::Undefined(undefined) => Some(&**undefined),
+                CheckOutcome::Holds { .. }
+                | CheckOutcome::Violated { .. }
+                | CheckOutcome::Inconclusive(_) => None,
+            })
+    }
+
     /// The result for one predicate index, or `None` when it was not upheld.
     #[must_use]
     pub fn invariant(&self, index: usize) -> Option<&InvariantResult> {
@@ -985,7 +1045,11 @@ pub fn check(
 
     let scope = Scope::of(exploration);
     let reachable = exploration.reachable();
+    let definedness = Definedness::of(model);
 
+    // The action-level outcome is the same for every obligation (the actions are read
+    // first at every state), so it and its witness are computed once.
+    let mut action_outcome: Option<CheckOutcome> = None;
     let mut invariants: Vec<InvariantResult> = Vec::with_capacity(obligations.invariants.len());
     for index in &obligations.invariants {
         let Some(predicate) = model.predicates().get(*index) else {
@@ -997,7 +1061,15 @@ pub fn check(
         invariants.push(InvariantResult {
             index: *index,
             name: predicate.name().clone(),
-            outcome: one_invariant(model, exploration, reachable, scope, *index),
+            outcome: one_invariant(
+                model,
+                exploration,
+                reachable,
+                scope,
+                &definedness,
+                &mut action_outcome,
+                *index,
+            ),
         });
     }
 
@@ -1005,27 +1077,57 @@ pub fn check(
         scope,
         policy: obligations.deadlock,
         invariants,
-        deadlock: deadlock_outcome(model, exploration, reachable, scope, obligations.deadlock),
+        deadlock: deadlock_outcome(
+            model,
+            exploration,
+            reachable,
+            scope,
+            &definedness,
+            obligations.deadlock,
+        ),
     })
 }
 
 /// The outcome for one already-validated predicate index.
+///
+/// One ascending scan ([`definedness::scan`]) reads, per state, the actions'
+/// definedness predicates, then the invariant's own, then the invariant. The
+/// precedence of the outcome is [`crate::definedness`]'s: evaluation error, undefined
+/// action read, undefined read in the invariant, violation, then the scope's answer.
 fn one_invariant(
     model: &Model,
     exploration: &Exploration,
     reachable: &Reachable,
     scope: Scope,
+    definedness: &Definedness,
+    action_outcome: &mut Option<CheckOutcome>,
     index: usize,
 ) -> CheckOutcome {
-    let falsifying = match falsifying(model, reachable, index) {
+    let definedness::Scan {
+        action,
+        subject,
+        falsified,
+    } = match definedness::scan(model, reachable, definedness, Some(index), true) {
         Ok(found) => found,
-        Err(reason) => return CheckOutcome::Inconclusive(reason),
+        Err(failed) => return CheckOutcome::Inconclusive(failed.into()),
     };
-    match falsifying.shallowest {
-        Some((state, depth)) => CheckOutcome::Violated {
-            state,
-            depth,
-            violations: falsifying.count,
+    let undefined = |first| match definedness::outcome(model, exploration, definedness, first) {
+        Ok(undefined) => CheckOutcome::Undefined(Box::new(undefined)),
+        Err(reason) => CheckOutcome::Inconclusive(reason),
+    };
+    if let Some(first) = action {
+        return action_outcome
+            .get_or_insert_with(|| undefined(first))
+            .clone();
+    }
+    if let Some(first) = subject {
+        return undefined(first);
+    }
+    match falsified {
+        Some(first) => CheckOutcome::Violated {
+            state: first.state,
+            depth: first.depth,
+            violations: first.count,
             evidence: Evidence::of(witness::shortest(model, exploration, &Target::Fails(index))),
         },
         None => match scope.unresolved() {
@@ -1037,61 +1139,33 @@ fn one_invariant(
     }
 }
 
-/// Where an invariant fails: the shallowest such state, and how many there are.
-struct Falsifying {
-    shallowest: Option<(State, usize)>,
-    count: usize,
-}
-
-/// Evaluate one predicate at every discovered state.
-///
-/// The scan runs over the ascending state table and only a *strictly* shallower state
-/// displaces the incumbent, so ties go to the canonically least — the same rule
-/// `witness::select` applies, which is why the state reported here and the endpoint
-/// of the witness extracted for it are the same state whenever both exist.
-/// `tests/checking_diehard.rs` asserts that agreement rather than assuming it.
-fn falsifying(
-    model: &Model,
-    reachable: &Reachable,
-    index: usize,
-) -> Result<Falsifying, Unresolved> {
-    let mut shallowest: Option<(State, usize)> = None;
-    let mut count: usize = 0;
-    for (state, depth) in reachable.states().iter().zip(reachable.depths().iter()) {
-        let holds =
-            model
-                .evaluate_predicate(index, state)
-                .map_err(|source| Unresolved::EngineError {
-                    state: state.clone(),
-                    source: Box::new(source),
-                })?;
-        if holds {
-            continue;
-        }
-        count = count.saturating_add(1);
-        let improves = match shallowest {
-            Some((_, incumbent)) => *depth < incumbent,
-            None => true,
-        };
-        if improves {
-            shallowest = Some((state.clone(), *depth));
-        }
-    }
-    Ok(Falsifying { shallowest, count })
-}
-
 /// The deadlock half of a report.
+///
+/// Precedence: an evaluation error (of a successor row, then of an action's
+/// definedness predicate), then an undefined action read at any explored state under
+/// either policy ([`DeadlockOutcome::Undefined`]), then the policy's answer.
 fn deadlock_outcome(
     model: &Model,
     exploration: &Exploration,
     reachable: &Reachable,
     scope: Scope,
+    definedness: &Definedness,
     policy: DeadlockPolicy,
 ) -> DeadlockOutcome {
     let terminal = match terminal_states(model, reachable) {
         Ok(found) => found,
         Err(reason) => return DeadlockOutcome::Inconclusive(reason),
     };
+    let scan = match definedness::scan(model, reachable, definedness, None, false) {
+        Ok(found) => found,
+        Err(failed) => return DeadlockOutcome::Inconclusive(failed.into()),
+    };
+    if let Some(first) = scan.undefined() {
+        return match definedness::outcome(model, exploration, definedness, first) {
+            Ok(undefined) => DeadlockOutcome::Undefined(Box::new(undefined)),
+            Err(reason) => DeadlockOutcome::Inconclusive(reason),
+        };
+    }
     match policy {
         DeadlockPolicy::Allowed => DeadlockOutcome::NotJudged {
             terminal: terminal.len(),

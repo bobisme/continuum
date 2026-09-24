@@ -853,3 +853,65 @@ fn boundary_incomplete_proof_search_has_no_engine_to_produce_it_yet() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------------------
+// an undefined read is refused, never a verdict (bn-24a5c)
+// ---------------------------------------------------------------------------------------
+
+/// **Negative.** A model whose action reads a partial map at an absent key at a state it
+/// reaches carries `Read#defined`, false at the initial state (RFC 0003, "Definedness").
+/// The reference engine reports that as `CheckOutcome::Undefined`, and no member of the
+/// wire's `InconclusiveReason` names an invalid model, so the daemon refuses the campaign
+/// as `UnsupportedSemanticFeature` — the refusal it already gives a transition relation
+/// that is undefined at a reachable state — rather than answer `established` for
+/// `TypeOK`, which is what the lowered model alone would have given.
+#[test]
+fn negative_an_undefined_read_at_a_reachable_state_is_refused_not_established() {
+    use continuum_engine_reference::{ActionDecl, BoolExpr, CmpOp, IntExpr, ModelBuilder};
+    let eq = |name: &str, value: i64| {
+        BoolExpr::compare(CmpOp::Eq, IntExpr::var(name), IntExpr::constant(value))
+    };
+    let partial = ModelBuilder::new()
+        .variable("x", 0, 1)
+        .variable("m?0", 0, 1)
+        .variable("m!0", 0, 1)
+        // `Read`: `require x == 0; x' = m[0]`, lowered with `D(U)` conjoined to the guard.
+        .action(ActionDecl::deterministic(
+            "Read",
+            BoolExpr::and(eq("x", 0), eq("m?0", 1)),
+            vec![("x", IntExpr::var("m!0"))],
+        ))
+        .predicate("Read#defined", BoolExpr::implies(eq("x", 0), eq("m?0", 1)))
+        .predicate(diehard::TYPE_OK, BoolExpr::constant(true))
+        .initial_state(&[("x", 0), ("m?0", 0), ("m!0", 0)])
+        .build()
+        .expect("the partial-map model builds");
+
+    // The engine half: the lowered model alone would establish `TypeOK`.
+    let exploration = bfs::explore(&partial, Bounds::CERTIFIABLE).expect("explores");
+    let type_ok = partial.predicate_index(diehard::TYPE_OK).expect("declared");
+    let report = checking::check(
+        &partial,
+        &exploration,
+        &Obligations::new(DeadlockPolicy::Defect).invariant(type_ok),
+    )
+    .expect("declared");
+    let undefined = report.undefined().expect("an undefined read is reported");
+    assert_eq!(undefined.subject(), "Read");
+    assert_eq!(report.verdict(), checking::Verdict::Inconclusive);
+
+    // The daemon half: the same model under the snapshot's source is refused, typed.
+    let mut fixture = fixture();
+    fixture
+        .daemon
+        .state_mut()
+        .models_mut()
+        .register(die_hard_source(), partial);
+    let started = start(&mut fixture, 1_000, "req_undefined", "idem-undefined");
+    assert_eq!(
+        started.error_code(),
+        Some(ErrorCode::UnsupportedSemanticFeature),
+        "{:?}",
+        started.envelope
+    );
+}

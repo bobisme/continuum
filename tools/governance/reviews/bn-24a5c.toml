@@ -1,0 +1,52 @@
+[change]
+bone = "bn-24a5c"
+author = "continuum-dev"
+summary = "definedness on every reference-engine checking path (RFC 0003 Definedness, RFC 0013 Undefined): continuum-model-core states the X#defined convention once (DEFINED_SUFFIX, definedness_subject, and a Definedness classifier over every predicate named with the #defined suffix, following a nested chain such as I#defined#defined to its base, cr-pt5h3a, and reading a chain whose base names no predicate, or names an action too, as an action's, fail closed), and continuum-cml-elab re-exports it; continuum-engine-reference reports a typed Undefined (undefined read in X) for an invariant, the deadlock question and a liveness goal with the precedence evaluation error, undefined action read, undefined invariant read, violation, then holds or inconclusive, a witness Target on a predicate ends only where its reads are defined, and both closure emitters refuse a closed set with an undefined read (EmissionError::Undefined); continuumd refuses such a campaign as UnsupportedSemanticFeature unless the report is refuted"
+
+[semantic]
+covers = [
+  "crates/continuum-model-core/src/",
+  "crates/continuum-cml-elab/src/",
+  "crates/continuum-engine-reference/src/",
+]
+reference_tests = [
+  "crates/continuum-engine-reference/tests/definedness_differential.rs::an_orphan_definedness_predicate_is_read_as_an_action_read",
+  "crates/continuum-engine-reference/tests/definedness_differential.rs::a_subject_that_names_an_action_and_a_predicate_is_read_as_the_action",
+  "crates/continuum-engine-reference/tests/definedness_nested.rs::a_false_guard_of_a_guard_is_an_undefined_read_in_the_invariant",
+  "crates/continuum-engine-reference/tests/definedness_nested.rs::a_false_guard_of_an_action_guard_is_an_undefined_action_read",
+  "crates/continuum-engine-reference/tests/definedness_nested.rs::a_chain_with_a_gap_fails_closed_as_an_action_read",
+  "crates/continuum-engine-reference/tests/definedness_nested.rs::a_chain_through_an_action_name_fails_closed",
+  "crates/continuum-engine-reference/tests/definedness_nested.rs::a_witness_to_an_action_guard_respects_its_deeper_guard",
+  "crates/continuum-engine-reference/tests/definedness_nested.rs::an_action_sharing_a_chain_members_full_name_fails_closed",
+  "crates/continuum-model-core/src/definedness.rs::a_collision_at_any_chain_name_reads_the_chain_as_an_action",
+  "crates/continuum-model-core/src/definedness.rs::a_chain_name_that_reads_as_an_instance_fails_closed",
+  "crates/continuum-engine-reference/tests/definedness_nested.rs::a_nested_guard_that_fails_to_evaluate_is_an_engine_error",
+  "crates/continuum-cml-elab/tests/register.rs::a_missing_key_is_a_typed_undefined_read_at_exactly_the_simulations_states",
+  "crates/continuumd/tests/inv008_typed_inconclusiveness_evidence.rs::negative_an_undefined_read_at_a_reachable_state_is_refused_not_established",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-engine-reference/tests/definedness_differential.rs::reordering_and_alpha_renaming_preserve_definedness_outcomes", relation = "stable reordering of declarations" },
+  { test = "crates/continuum-engine-reference/tests/definedness_differential.rs::reordering_and_alpha_renaming_preserve_definedness_outcomes", relation = "alpha-renaming" },
+]
+differential_tests = [
+  { test = "crates/continuum-incremental/tests/differential.rs::undefined_reads_agree_with_the_reference_engine_run_directly", oracle = "continuum-engine-reference", subject = "continuum-incremental" },
+  { test = "crates/continuum-engine-reference/tests/definedness_differential.rs::the_reference_engine_agrees_with_an_independent_partial_map_evaluator", oracle = "continuum-kernel-core", subject = "continuum-engine-reference" },
+  { test = "crates/continuum-cml-elab/tests/register.rs::a_missing_key_is_a_typed_undefined_read_at_exactly_the_simulations_states", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+]
+
+[semantic.claim_impact]
+claims = ["C018", "C012"]
+reason = "C018: continuum-engine-reference is a producer bound into the TCB audit evidence; it now refuses to emit a finite or invariant closure over a state with an undefined read, so it certifies nothing the RFC calls an error, and the audit evidence is regenerated; the claim state is unchanged (OBSERVED) and the kernel's own evaluator does not yet read definedness predicates, which is reported for a separate bone. C012: the reference liveness check now reports an undefined read before any fair-cycle search; the claim stays HYPOTHESIS"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the outcomes are in-crate Rust types; the certificate wire form, the model identity and the daemon wire vocabulary are unchanged (continuumd reuses the existing UnsupportedSemanticFeature refusal)"
+
+[semantic.migration]
+verdict = "Revalidate"
+note = "continuum-engine-reference: a model without a definedness predicate is checked, witnessed, emitted and judged for liveness exactly as before (no extra evaluation). A model with X#defined predicates that is false at an explored state now gets CheckOutcome::Undefined, DeadlockOutcome::Undefined or LivenessOutcome::Undefined instead of Holds or Violated, and emit_finite_closure and emit_invariant_closure refuse it with EmissionError::Undefined; earlier results over such models are revalidated. CheckOutcome, DeadlockOutcome, LivenessOutcome and EmissionError gain variants (exhaustive matches in callers must add an arm). continuum-model-core gains the definedness module; continuum-cml-elab's DEFINED_SUFFIX and definedness_subject are now re-exports with the same values. continuumd refuses a campaign whose report carries an undefined read as UnsupportedSemanticFeature, unless another obligation refutes it"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-32a6qi"
+verdict = "approved"

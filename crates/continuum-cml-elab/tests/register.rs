@@ -531,7 +531,9 @@ fn the_register_agrees_with_the_simulation_and_the_engine_establishes_its_invari
 /// undefined — `Stabilize(n=c, …)`'s guard (strict: even where `c` is not alive),
 /// `Choose` for every `q` that holds `c`, and `StableWitness` (strict: at every state,
 /// since two quorums hold `c`). The `#defined` predicates are false at exactly the
-/// simulation's undefined states, and the engine reports them as violated.
+/// simulation's undefined states. The engine reports a typed undefined read, never a
+/// violation (RFC 0003, "Definedness"; bn-24a5c): the undefined action read at depth 0
+/// dominates every obligation, the deadlock one included, and no invariant is decided.
 #[test]
 fn a_missing_key_is_a_typed_undefined_read_at_exactly_the_simulations_states() {
     let short = schema_config().replacen(
@@ -581,12 +583,32 @@ fn a_missing_key_is_a_typed_undefined_read_at_exactly_the_simulations_states() {
     ] {
         let i = model.predicate_index(name).expect("declared");
         let outcome = report.invariant(i).expect("checked").outcome();
-        assert!(
-            matches!(outcome, CheckOutcome::Violated { depth: 0, .. }),
-            "{name}: {outcome}"
+        let CheckOutcome::Undefined(undefined) = outcome else {
+            panic!("{name}: {outcome}");
+        };
+        assert_eq!(undefined.depth(), 0, "{name}");
+        assert_eq!(
+            undefined.read(),
+            continuum_engine_reference::Guarded::Action
         );
+        assert!(["Choose", "Stabilize"].contains(&undefined.subject()));
         assert!(definedness_subject(name).is_some());
     }
+    for result in report.invariants() {
+        assert!(
+            matches!(result.outcome(), CheckOutcome::Undefined(_)),
+            "{result}"
+        );
+    }
+    assert!(matches!(
+        report.deadlock(),
+        continuum_engine_reference::DeadlockOutcome::Undefined(_)
+    ));
+    assert!(report.undefined().is_some());
+    assert_eq!(
+        report.verdict(),
+        continuum_engine_reference::Verdict::Inconclusive
+    );
 }
 
 /// Anti-vacuity: without `Choose`'s stability requirement a value can be chosen with no
@@ -872,6 +894,7 @@ fn the_register_liveness_under_its_fairness_agrees_with_an_independent_search() 
                     }
                 }
                 LivenessOutcome::Inconclusive(why) => panic!("{label} {goal_name}: {why}"),
+                LivenessOutcome::Undefined(why) => panic!("{label} {goal_name}: {why}"),
             }
             verdicts.insert((*label, goal_name), !refuted);
         }

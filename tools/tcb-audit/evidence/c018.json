@@ -901,40 +901,42 @@
       "targets": "evaluation: a disabled action has no successor"
     }
   ],
-  "producer_inputs_sha256": "5d7f1f098654c126f79671b395aeacf73d29cded1e42a864561d17e32853a734",
+  "producer_inputs_sha256": "8a16ddc342f839c0cfdff635d8b86bc6d7758249b567fe3892bd8a521db0e952",
   "producer_measurement": {
     "producers": {
       "continuum-engine-reference": {
         "by_file": {
           "bfs.rs": 892,
-          "certificate.rs": 977,
-          "checking.rs": 1153,
+          "certificate.rs": 1058,
+          "checking.rs": 1227,
           "defect.rs": 339,
+          "definedness.rs": 328,
           "diehard.rs": 201,
           "generate.rs": 372,
-          "lib.rs": 157,
-          "liveness.rs": 780,
+          "lib.rs": 170,
+          "liveness.rs": 813,
           "mod.rs": 133,
           "oracle.rs": 1290,
           "prng.rs": 51,
           "system.rs": 786,
-          "witness.rs": 477
+          "witness.rs": 512
         },
-        "code_lines": 4597,
-        "lines": 7608
+        "code_lines": 4943,
+        "lines": 8172
       },
       "continuum-model-core": {
         "by_file": {
+          "definedness.rs": 303,
           "domain.rs": 152,
           "expr.rs": 555,
           "fairness.rs": 153,
           "ident.rs": 138,
           "identity.rs": 395,
-          "lib.rs": 76,
+          "lib.rs": 84,
           "model.rs": 1437
         },
-        "code_lines": 1779,
-        "lines": 2906
+        "code_lines": 1934,
+        "lines": 3217
       }
     },
     "scaffold_engines_code_lines": {
@@ -947,10 +949,10 @@
   "producer_residual": {
     "no_observed_escape": {
       "crates/continuum-engine-reference/src/bfs.rs": 892,
-      "crates/continuum-engine-reference/src/certificate.rs": 977,
+      "crates/continuum-engine-reference/src/certificate.rs": 1058,
       "crates/continuum-model-core/src/model.rs": 1437
     },
-    "no_observed_escape_lines": 3306,
+    "no_observed_escape_lines": 3387,
     "per_file": {
       "crates/continuum-engine-reference/src/bfs.rs": {
         "refused": 2

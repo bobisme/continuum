@@ -19,6 +19,10 @@
 //!   PR 15a). A second front end can produce the *same* model type only if that type
 //!   lives below both front ends and below every engine. `continuum-engine-reference`
 //!   re-exports these four modules under their old paths, so no caller changed.
+//! - the **definedness convention** ([`definedness`], bn-24a5c) — how a model names an
+//!   undefined read: the predicate `X#defined` of an action or invariant `X` (RFC 0003,
+//!   "Definedness"), and which declaration each such predicate guards. The elaborator
+//!   writes these predicates and every engine reads them through this one module.
 //! - the **semantic model identity** ([`identity`]) — the canonical encoding of a
 //!   [`Model`], compared exactly (ADR-0013). Two models are the same model exactly when
 //!   their identities are equal, whichever front end built them.
@@ -58,6 +62,7 @@
     clippy::arithmetic_side_effects
 )]
 
+pub mod definedness;
 pub mod domain;
 pub mod expr;
 pub mod fairness;
@@ -65,6 +70,9 @@ pub mod ident;
 pub mod identity;
 pub mod model;
 
+pub use definedness::{
+    DEFINED_SUFFIX, Definedness, Guarded, definedness_base, definedness_subject,
+};
 pub use domain::{Domain, DomainError, Variable};
 pub use expr::{ArithOp, BoolExpr, CmpOp, EvalError, IntExpr};
 pub use fairness::{Fairness, Strength};

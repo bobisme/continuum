@@ -178,7 +178,10 @@
 
 use core::fmt;
 
+use continuum_model_core::definedness::Definedness;
+
 use crate::bfs::{Exploration, MAX_STATES, MAX_TRANSITIONS, Reachable};
+use crate::definedness;
 use crate::ident::{Ident, IdentError};
 use crate::model::{EvaluationError, MAX_ACTIONS, MAX_VARIABLES, Model, State, Step};
 
@@ -549,8 +552,11 @@ impl<'a> ClosedSet<'a> {
 /// Why no certificate was written.
 ///
 /// No arm reports a *checking* failure: whether the certificate is true is the
-/// kernel's question, asked of the bytes. These are the four ways the bytes could not
-/// be produced at all.
+/// kernel's question, asked of the bytes. These are the ways the bytes could not be
+/// produced at all. One arm is a refusal rather than an inability:
+/// [`EmissionError::Undefined`] (bn-24a5c), because an undefined read is an error of
+/// the model that no certificate may cover, and the kernel does not yet read
+/// definedness predicates itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EmissionError {
     /// The claim envelope is not one the decoder would accept.
@@ -602,6 +608,35 @@ pub enum EmissionError {
         /// The state whose successor is missing.
         state: State,
     },
+    /// A read is undefined at a state of the closed set (bn-24a5c): some action's
+    /// definedness predicate `A#defined` is false there, or, for an invariant closure,
+    /// the invariant's own `I#defined` is (or the named invariant is itself a
+    /// definedness predicate that is false there).
+    ///
+    /// RFC 0003, "Definedness", makes such a state the typed outcome "undefined read
+    /// in `X`", and RFC 0013 makes it an error that invalidates the model. The lowered
+    /// guard of an undefined action is false only so that no successor is computed
+    /// from the read, so the set is closed under the lowered relation and not under
+    /// the CML one. Nothing is certified over it: neither the state-domain closure nor
+    /// an invariant, whose value there is not a CML verdict. An undefined action read
+    /// is named first; the state is the shallowest, ties to the canonically least.
+    /// Checked after every row is written, so the other arms keep their precedence.
+    Undefined {
+        /// The definedness predicate that is false, `X#defined`.
+        predicate: String,
+        /// The state.
+        state: State,
+    },
+    /// A definedness predicate could not be evaluated at a table state.
+    ///
+    /// Unreachable for a [`ClosedSet`] of the model that produced it, as
+    /// [`EmissionError::Evaluation`] is.
+    DefinednessEvaluation {
+        /// The state.
+        state: State,
+        /// What the model layer reported.
+        source: Box<EvaluationError>,
+    },
     /// The encoded certificate is larger than [`MAX_CERTIFICATE_BYTES`].
     Oversized {
         /// How many bytes were written.
@@ -639,6 +674,13 @@ impl fmt::Display for EmissionError {
             Self::NotClosed { state } => {
                 write!(f, "a successor of state {state} is not in the closed set")
             }
+            Self::Undefined { predicate, state } => write!(
+                f,
+                "`{predicate}` is false at state {state}: an undefined read is not certified"
+            ),
+            Self::DefinednessEvaluation { state, source } => {
+                write!(f, "definedness predicate at state {state}: {source}")
+            }
             Self::Oversized { bytes, max } => {
                 write!(f, "certificate is {bytes} bytes; the limit is {max}")
             }
@@ -650,10 +692,13 @@ impl core::error::Error for EmissionError {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
             Self::Envelope(source) => Some(source),
-            Self::Evaluation { source, .. } => Some(&**source),
+            Self::Evaluation { source, .. } | Self::DefinednessEvaluation { source, .. } => {
+                Some(&**source)
+            }
             Self::CountOutOfRange { .. }
             | Self::UnknownPredicate { .. }
             | Self::NotClosed { .. }
+            | Self::Undefined { .. }
             | Self::Oversized { .. } => None,
         }
     }
@@ -685,8 +730,11 @@ pub fn emit_finite_closure(
 /// property is the model's predicate `predicate`, established at every state of the
 /// set.
 ///
-/// This module does not evaluate the predicate: whether it holds is the kernel's
-/// question, asked of the bytes. It only refuses a name the model does not declare.
+/// This module does not decide the predicate: whether it holds is the kernel's
+/// question, asked of the bytes. It refuses a name the model does not declare, and a
+/// set where the predicate's reads (or an action's) are undefined (bn-24a5c); for the
+/// latter it evaluates the definedness predicates, and the named predicate itself only
+/// when that is a definedness predicate.
 ///
 /// # Errors
 ///
@@ -710,14 +758,15 @@ fn emit(
 
     let predicate = match predicate {
         Some(name) => {
-            let declared = model
+            let (index, declared) = model
                 .predicates()
                 .iter()
-                .find(|declared| declared.name().as_str() == name)
+                .enumerate()
+                .find(|(_, declared)| declared.name().as_str() == name)
                 .ok_or_else(|| EmissionError::UnknownPredicate {
                     name: name.to_owned(),
                 })?;
-            Some(declared.name().clone())
+            Some((index, declared.name().clone()))
         }
         None => None,
     };
@@ -796,7 +845,7 @@ fn emit(
     out.bytes(identity);
 
     match &predicate {
-        Some(name) => {
+        Some((_, name)) => {
             out.u16(PROPERTY_CLASS_INVARIANT);
             out.token(name);
         }
@@ -819,6 +868,12 @@ fn emit(
         }
     }
 
+    // No certificate over an undefined read (bn-24a5c): the actions' definedness
+    // predicates at every table state, then the invariant's own. Checked after every
+    // row is written, so a mismatched model is still reported as before, by the first
+    // row that fails to compute or leaves the set.
+    undefined_read(model, closed, predicate.as_ref().map(|(index, _)| *index))?;
+
     let bytes = out.into_bytes();
     if bytes.len() > MAX_CERTIFICATE_BYTES {
         return Err(EmissionError::Oversized {
@@ -827,6 +882,32 @@ fn emit(
         });
     }
     Ok(bytes)
+}
+
+/// Refuse a closed set with an undefined read at some state ([`EmissionError::Undefined`]),
+/// by the precedence of [`crate::definedness`]: an action's read first, then the
+/// invariant's.
+fn undefined_read(
+    model: &Model,
+    closed: ClosedSet<'_>,
+    invariant: Option<usize>,
+) -> Result<(), EmissionError> {
+    let definedness = Definedness::of(model);
+    let scan = definedness::scan(model, closed.reachable(), &definedness, invariant, false)
+        .map_err(|failed| EmissionError::DefinednessEvaluation {
+            state: failed.state,
+            source: failed.source,
+        })?;
+    match scan.undefined() {
+        None => Ok(()),
+        Some(first) => Err(EmissionError::Undefined {
+            predicate: model
+                .predicates()
+                .get(first.predicate)
+                .map_or_else(String::new, |p| p.name().as_str().to_owned()),
+            state: first.state,
+        }),
+    }
 }
 
 /// A step's target as its index in the canonical table.

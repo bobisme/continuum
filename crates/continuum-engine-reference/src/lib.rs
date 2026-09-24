@@ -56,6 +56,16 @@
 //! (`continuum-engine-liveness`, Phase D) will be measured against; it emits no
 //! certificate.
 //!
+//! Since bn-24a5c every checking path reads the model's **definedness predicates**
+//! ([`definedness`]): a state where an action's `A#defined` or an invariant's
+//! `I#defined` — or any deeper predicate of its chain, such as `I#defined#defined`
+//! (cr-pt5h3a) — is false is the typed outcome [`Undefined`] — "undefined read in `X`"
+//! (RFC 0003, "Definedness") — in [`checking`] (per invariant and for the deadlock
+//! question), in [`liveness`], and as a refusal of [`certificate`]'s emitters, never a
+//! verdict computed from the lowered value. A [`witness::Target`] on a predicate ends
+//! only where the predicate's reads are defined. A model with no definedness predicate
+//! is checked exactly as before.
+//!
 //! It also carries the **tiny exhaustive oracle** of docs/19 §2 ([`semantic`], bn-1zgs):
 //! a seeded generator of finite semantic systems (a [`model::Model`] plus footprints,
 //! conflicts, obligations, cancellation phases and fairness), an oracle that enumerates
@@ -120,6 +130,7 @@
 pub mod bfs;
 pub mod certificate;
 pub mod checking;
+pub mod definedness;
 pub mod diehard;
 pub mod liveness;
 pub mod semantic;
@@ -140,6 +151,8 @@ pub use checking::{
     CheckError, CheckOutcome, CheckReport, Deadlock, DeadlockOutcome, DeadlockPolicy, Evidence,
     InvariantResult, Obligations, Scope, Unresolved, Verdict, check,
 };
+pub use continuum_model_core::definedness::{Definedness, Guarded};
+pub use definedness::Undefined;
 pub use domain::{Domain, DomainError, Variable};
 pub use expr::{ArithOp, BoolExpr, CmpOp, EvalError, IntExpr};
 pub use fairness::{Fairness, Strength};

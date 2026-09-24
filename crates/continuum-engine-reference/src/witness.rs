@@ -83,6 +83,8 @@
 
 use core::fmt;
 
+use continuum_model_core::definedness::Definedness;
+
 use crate::bfs::{Bound, Discovery, Exploration, Reachable};
 use crate::ident::Ident;
 use crate::model::{Action, EvaluationError, Model, State};
@@ -102,9 +104,15 @@ pub enum Target {
     /// is no witness otherwise.
     State(State),
     /// The states where the model's predicate at this index evaluates to `true`.
+    ///
+    /// Only where the predicate's reads are defined (bn-24a5c): when the model declares
+    /// its definedness predicate `I#defined` (or a deeper one of its chain, cr-pt5h3a),
+    /// a state where any is false gives `I` no value (RFC 0003, "Definedness"), so it is
+    /// neither a [`Target::Holds`] nor a [`Target::Fails`] endpoint.
     Holds(usize),
     /// The states where it evaluates to `false` — the shape an invariant violation
-    /// takes. Die Hard's `NotSolved` is the corpus example.
+    /// takes. Die Hard's `NotSolved` is the corpus example. Only where its reads are
+    /// defined, as for [`Target::Holds`].
     Fails(usize),
 }
 
@@ -376,7 +384,17 @@ pub fn shortest(
             });
         }
     };
-    let (endpoint, depth) = select(model, reachable, target)?;
+    shortest_in(model, reachable, &Definedness::of(model), target)
+}
+
+/// [`shortest`] over a closed set, with the model's definedness already classified.
+pub(crate) fn shortest_in(
+    model: &Model,
+    reachable: &Reachable,
+    definedness: &Definedness,
+    target: &Target,
+) -> Result<Witness, NoWitness> {
+    let (endpoint, depth) = select(model, reachable, definedness, target)?;
     trace(model, reachable, endpoint, depth)
 }
 
@@ -387,11 +405,12 @@ pub fn shortest(
 fn select<'a>(
     model: &Model,
     reachable: &'a Reachable,
+    definedness: &Definedness,
     target: &Target,
 ) -> Result<(&'a State, usize), NoWitness> {
     let mut best: Option<(&'a State, usize)> = None;
     for (state, depth) in reachable.states().iter().zip(reachable.depths().iter()) {
-        if !satisfies(model, target, state)? {
+        if !satisfies(model, definedness, target, state)? {
             continue;
         }
         let improves = match best {
@@ -408,11 +427,27 @@ fn select<'a>(
 }
 
 /// Whether one state is an admissible endpoint.
-fn satisfies(model: &Model, target: &Target, state: &State) -> Result<bool, NoWitness> {
+///
+/// A predicate target is read only where its definedness predicate holds; the guard is
+/// evaluated first, so its evaluation error is reported before the predicate's.
+fn satisfies(
+    model: &Model,
+    definedness: &Definedness,
+    target: &Target,
+    state: &State,
+) -> Result<bool, NoWitness> {
+    let defined = |index: usize| {
+        for &guard in definedness.guards_of(index) {
+            if !evaluate(model, guard, state)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    };
     match target {
         Target::State(wanted) => Ok(state == wanted),
-        Target::Holds(index) => evaluate(model, *index, state),
-        Target::Fails(index) => evaluate(model, *index, state).map(|holds| !holds),
+        Target::Holds(index) => Ok(defined(*index)? && evaluate(model, *index, state)?),
+        Target::Fails(index) => Ok(defined(*index)? && !evaluate(model, *index, state)?),
     }
 }
 

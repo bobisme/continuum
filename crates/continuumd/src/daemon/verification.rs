@@ -362,6 +362,20 @@ fn run(
              declare",
         )
     })?;
+    // An undefined read at a state the model reaches (RFC 0003 "Definedness", RFC 0013:
+    // it invalidates the model, bn-24a5c) is the same defect class as a transition
+    // relation that is undefined there: no `InconclusiveReason` names it, no verdict is
+    // one, and a resume would find it again. So it is refused the same way — unless the
+    // report is refuted anyway: an undefined read in one invariant leaves another
+    // invariant's counterexample sound (every action on its path is defined, because an
+    // undefined action read makes every outcome `Undefined`), and "a refutation
+    // dominates" is the report's own fold.
+    if report.undefined().is_some() && report.verdict() != EngineVerdict::Refuted {
+        return Err(Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "the model reads a value that is undefined at a state it reaches",
+        ));
+    }
     Ok(Ok(Campaign::of(&exploration, report)))
 }
 

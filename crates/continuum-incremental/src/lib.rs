@@ -59,9 +59,14 @@
 //!   unpinned by omission rather than as named `Unpinned` entries.
 //!
 //! - The differential test's oracle, `continuum-engine-reference`'s own checker
-//!   (`tests/differential.rs`), does not check definedness: it neither reads
-//!   `I#defined` nor `A#defined`. The engine and the audit do, independently; the
-//!   oracle's gap is tracked by the lead, outside this crate.
+//!   (`tests/differential.rs`), checks definedness since bn-24a5c, and its typed
+//!   `Undefined` outcome is compared with this engine's `Undefined` and
+//!   `UndefinedAction` on partial-map models. That comparison is scoped to depth-1
+//!   definedness chains with no action-name collision, which is every model the CML
+//!   front end lowers. The reference engine also follows nested chains
+//!   (`I#defined#defined`) and fails closed on name collisions, which only a
+//!   hand-built model carries; this engine reads depth-1 guards only, and adopting
+//!   the chain rule is bn-1eoco.
 //!
 //! What is not here: persistence and crash ordering, the index verifier, epoch
 //! `Revalidate` demotion, witness-loss downgrade, quarantine clearing, continuations,

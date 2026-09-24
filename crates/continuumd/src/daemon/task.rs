@@ -186,9 +186,13 @@ impl Campaign {
         }
         match self.report.deadlock() {
             DeadlockOutcome::Inconclusive(reason) => Some(reason),
+            // `Undefined` carries no `InconclusiveReason`: `verification::run` refuses a
+            // report with an undefined read before a campaign is recorded, unless the
+            // report is refuted, whose verdict needs no reason (bn-24a5c).
             DeadlockOutcome::NotJudged { .. }
             | DeadlockOutcome::Free { .. }
-            | DeadlockOutcome::Deadlocked { .. } => None,
+            | DeadlockOutcome::Deadlocked { .. }
+            | DeadlockOutcome::Undefined(_) => None,
         }
     }
 
@@ -203,7 +207,9 @@ impl Campaign {
             .iter()
             .filter_map(|result| match result.outcome() {
                 CheckOutcome::Violated { depth, .. } => Some(*depth),
-                CheckOutcome::Holds { .. } | CheckOutcome::Inconclusive(_) => None,
+                CheckOutcome::Holds { .. }
+                | CheckOutcome::Inconclusive(_)
+                | CheckOutcome::Undefined(_) => None,
             })
             .min()
     }

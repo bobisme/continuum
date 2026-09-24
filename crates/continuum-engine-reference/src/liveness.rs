@@ -99,7 +99,10 @@ use core::fmt;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::bfs::{Exploration, Reachable};
+use continuum_model_core::definedness::Definedness;
+
 use crate::checking::Unresolved;
+use crate::definedness::{self, Undefined};
 use crate::fairness::Strength;
 use crate::model::{EvaluationError, Model, State};
 use crate::witness::Step;
@@ -197,6 +200,13 @@ pub enum LivenessOutcome {
     Violated(Box<Lasso>),
     /// Not settled: the exploration stopped at a bound, or the model failed to evaluate.
     Inconclusive(Unresolved),
+    /// A read is undefined at an explored state (bn-24a5c): some action's `A#defined`
+    /// is false there, or the goal's own `P#defined` is. RFC 0003, "Definedness", makes
+    /// that state the typed outcome "undefined read in `X`" and RFC 0013 makes it an
+    /// error that invalidates the model, so no fair-cycle verdict is given. The
+    /// precedence is [`crate::definedness`]'s, and a bounded exploration reports one
+    /// found in its prefix.
+    Undefined(Box<Undefined>),
 }
 
 /// Why no liveness check ran.
@@ -238,7 +248,8 @@ impl core::error::Error for LivenessError {}
 /// [`LivenessError::Inconsistent`] for an engine defect. A model that fails to evaluate
 /// at a reachable state is [`LivenessOutcome::Inconclusive`] with
 /// [`Unresolved::EngineError`], and a bounded exploration is `Inconclusive` with
-/// [`Unresolved::ResourceExhausted`].
+/// [`Unresolved::ResourceExhausted`]. An undefined read at an explored state is
+/// [`LivenessOutcome::Undefined`], checked before the bound.
 pub fn check_liveness(
     model: &Model,
     exploration: &Exploration,
@@ -251,6 +262,28 @@ pub fn check_liveness(
             index,
             declared: model.predicates().len(),
         });
+    }
+    // Definedness first, over every explored state (bn-24a5c): a model with no
+    // definedness predicate evaluates nothing here, so its answers are unchanged.
+    let definedness = Definedness::of(model);
+    match definedness::scan(
+        model,
+        exploration.reachable(),
+        &definedness,
+        Some(index),
+        false,
+    ) {
+        Err(failed) => return Ok(LivenessOutcome::Inconclusive(failed.into())),
+        Ok(scan) => {
+            if let Some(first) = scan.undefined() {
+                return Ok(
+                    match definedness::outcome(model, exploration, &definedness, first) {
+                        Ok(undefined) => LivenessOutcome::Undefined(Box::new(undefined)),
+                        Err(reason) => LivenessOutcome::Inconclusive(reason),
+                    },
+                );
+            }
+        }
     }
     let reachable = match exploration {
         Exploration::Complete(reachable) => reachable,

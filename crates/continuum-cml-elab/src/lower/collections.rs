@@ -46,21 +46,10 @@ use crate::budget::{MAX_TYPE_DEPTH, lookup_cost, sort_cost, text_cost};
 use crate::norm::{BinOp, Builtin, Expr, ExprKind};
 use crate::types::Type;
 
-/// The suffix of a definedness predicate: `A#defined` for an action `A`, `I#defined`
-/// for an invariant `I` (RFC 0003 correction 4, "Definedness"). `#` is not a CML
-/// identifier character, so no declared name collides with one.
-pub const DEFINED_SUFFIX: &str = "#defined";
-
-/// The action or invariant whose definedness predicate `predicate` is, or `None` for
-/// any other predicate. A state that violates `X#defined` is the typed outcome
-/// "undefined read in `X`": it is not a verdict of a declared invariant, and the
-/// verdict of `X` at that state is not a CML verdict.
-#[must_use]
-pub fn definedness_subject(predicate: &str) -> Option<&str> {
-    predicate
-        .strip_suffix(DEFINED_SUFFIX)
-        .filter(|s| !s.is_empty())
-}
+// The definedness convention (RFC 0003 correction 4, "Definedness") is stated once, in
+// the model core, so the elaborator that writes `X#defined` and every engine that reads
+// it share one spelling (bn-24a5c).
+pub use continuum_model_core::definedness::{DEFINED_SUFFIX, definedness_subject};
 
 // ---------------------------------------------------------------------------
 // the state layout
