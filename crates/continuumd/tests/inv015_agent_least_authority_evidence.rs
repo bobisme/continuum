@@ -13,7 +13,7 @@
 //! | alter evidence status | `daemon/evidence.rs` — [`Promotion`] has private fields and no public constructor, so producer code (`daemon/observe.rs`, a *different module*) can name the type and never build one; `observe.ingest`'s wire shape declares no status field, so an append lands at the lattice's bottom as a property of the request's *type* | `daemon_evidence.rs`: `a_producers_append_lands_at_the_lattices_bottom`, `the_producers_request_body_has_no_field_that_could_name_a_status`, `the_status_written_is_what_the_checker_established_not_what_the_caller_named`, `no_operation_in_either_family_removes_or_edits_an_appended_node` — cited via [`status_authority`], plus this file's own registry-grain sweep [`privileged_perimeter::positive_no_mutation_request_admits_a_caller_supplied_status`] |
 //! | sign receipts | `evidence.link` — the checker is the *admitted capability's* actor (there is no checker request field), the actor must be a `service:` scheme, and self-certification is refused before the receipt is read (RFC 0038 D3) | `daemon_evidence.rs`: `only_a_service_actor_may_append_a_check_edge`, `a_checker_may_not_record_a_check_of_its_own_production` — cited via [`receipt_authority`]; cryptographic signing (plan §18.6, bn-1hape): the daemon holds the key, installed only by the deployment, and signs only inside `evidence.link` after the service gate; no wire type carries key material — [`receipt_authority::positive_only_the_daemon_holds_the_receipt_key_and_only_a_service_check_signs`] |
 //! | access ungranted production traces | `daemon/admission.rs` — R-4: `observe.ingest` requires `DataGrant::ProductionTrace` beyond its `execute` level, decided by [`required_grant`] *before* any family runs; the denial is the zero-bit [`Denied`] (X1) and precedes the index (X3), so a refused caller learns nothing (X2) | live here: [`trace_grant::positive_exactly_one_operation_requires_a_data_grant_and_it_is_the_production_trace`], [`trace_grant::positive_a_denial_carries_zero_bits`]; cited: `the_production_trace_grant_is_required_beyond_the_execute_level`, `every_admission_failure_is_one_byte_identical_answer`, `a_promotion_of_a_claim_that_does_not_exist_is_byte_identical_to_one_that_does` |
-//! | execute unrestricted host effects | structurally: the 83-operation registry has **no host-execution verb and no `capability` namespace** (RFC 0026 correction 20: "no operation in this protocol can widen the authority of the connection that invokes it"); `ReferenceStore::mint`/`revoke` have no wire caller (swept live over every `continuumd` source); every remaining host-effect crate (`continuum-effects-{storage,time}`, `continuum-proof-client`, `continuum-security`) is a zero-pub-item scaffold, pinned to go red when the substance arrives; `continuum-effects-network` grew its Lab pack at bn-3ohe, and `continuum-effects-process` its Lab pack at bn-3mmf, and each is audited like Forge — a recorded public inventory, no host effect by the compiler (`#![no_std]` and a live compiler lane), no dependencies, and no route from a connection into it; `continuum-forge` grew its first public surface at bn-1dsih and is audited rather than grandfathered — a recorded public inventory, zero host-effect facilities named in its code, one verifier-side dependency, and no route from a connection into it: the declared `forge.*` vocabulary has no registered family and answers `UnsupportedSemanticFeature`, the daemon does not link the crate, and no `continuumd` source names it | live here: [`privileged_perimeter::positive_the_namespace_set_is_closed_and_contains_no_capability_namespace`], [`no_widening`] |
+//! | execute unrestricted host effects | structurally: the 83-operation registry has **no host-execution verb and no `capability` namespace** (RFC 0026 correction 20: "no operation in this protocol can widen the authority of the connection that invokes it"); `ReferenceStore::mint`/`revoke` have no wire caller (swept live over every `continuumd` source); every remaining host-effect crate (`continuum-effects-time`, `continuum-proof-client`, `continuum-security`) is a zero-pub-item scaffold, pinned to go red when the substance arrives; `continuum-effects-network` grew its Lab pack at bn-3ohe, `continuum-effects-process` its Lab pack at bn-3mmf, and `continuum-effects-storage` its Lab pack at bn-2fk3, and each is audited like Forge — a recorded public inventory, no host effect by the compiler (`#![no_std]` and a live compiler lane), no dependencies, and no route from a connection into it; `continuum-forge` grew its first public surface at bn-1dsih and is audited rather than grandfathered — a recorded public inventory, zero host-effect facilities named in its code, one verifier-side dependency, and no route from a connection into it: the declared `forge.*` vocabulary has no registered family and answers `UnsupportedSemanticFeature`, the daemon does not link the crate, and no `continuumd` source names it | live here: [`privileged_perimeter::positive_the_namespace_set_is_closed_and_contains_no_capability_namespace`], [`no_widening`] |
 //!
 //! Cross-cutting, because "no ambient authority" is a property of the *admission
 //! predicate* rather than of any one clause: the `@privileged` set is exactly the five
@@ -181,6 +181,10 @@ const EFFECTS_NETWORK_MANIFEST: &str = include_str!("../../continuum-effects-net
 /// `continuum-effects-process`'s manifest — the same posture: bn-3mmf landed the
 /// `process/crash-restart-v0` Lab pack there.
 const EFFECTS_PROCESS_MANIFEST: &str = include_str!("../../continuum-effects-process/Cargo.toml");
+
+/// `continuum-effects-storage`'s manifest — the same posture: bn-2fk3 landed the
+/// `storage/append-log-v0` Lab pack there.
+const EFFECTS_STORAGE_MANIFEST: &str = include_str!("../../continuum-effects-storage/Cargo.toml");
 
 /// `continuumd`'s own manifest — the other end of the same edge: whether the daemon
 /// links Forge at all.
@@ -369,6 +373,133 @@ const EFFECTS_PROCESS_NO_STD_LANE: &str =
 const PROCESS_NO_STD_LANE_TEST: &str =
     "fn the_compiler_refuses_a_host_facility_in_the_process_pack()";
 
+/// Every source file of `continuum-effects-storage`, walked rather than listed — the
+/// same device as [`effects_network_sources`] (bn-2fk3).
+fn effects_storage_sources() -> Vec<(PathBuf, String)> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../continuum-effects-storage/src");
+    let mut sources = Vec::new();
+    rust_sources(&root, &mut sources);
+    assert!(
+        !sources.is_empty(),
+        "the walk found no continuum-effects-storage source; the crate moved and this \
+         sweep is reporting nothing rather than checking something"
+    );
+    sources
+}
+
+/// The storage pack's compiler lane (bn-2fk3), the network lane applied to that crate.
+const EFFECTS_STORAGE_NO_STD_LANE: &str =
+    include_str!("../../continuum-effects-storage/tests/pr15_no_std_lane.rs");
+
+/// The name of the storage lane's test.
+const STORAGE_NO_STD_LANE_TEST: &str =
+    "fn the_compiler_refuses_a_host_facility_in_the_storage_pack()";
+
+// The shared token lexer and structure rules (cr-35ujnx): one Rust file for this
+// audit and the three pack lanes, the twin of `tools/governance/rust_lexer.py`.
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../tools/governance/rust_lexer.rs"
+));
+
+/// Why a pack's manifest lets a build escape its `src/`, or `Ok` (cr-35ujnx round
+/// 5). No manifest text scan decides it:
+///
+/// - Cargo's resolved view does. The manifest, the sources and any `build.rs` beside
+///   the real manifest are placed in a scratch copy of the real workspace (its root
+///   manifest verbatim, so inherited keys resolve as they do for real), and
+///   `cargo metadata` must show no `custom-build` or `proc-macro` target, no `links`,
+///   no dependency, no feature, and a library at the pack's own `src/lib.rs`.
+/// - Python's `tomllib` parses the `[lints]` table structurally, which must be exactly
+///   `workspace = true`, so the pack keeps the workspace's `unsafe_code = "forbid"`.
+fn manifest_problem(sources: &[(PathBuf, String)], manifest: &str) -> Result<(), String> {
+    manifest_problem_with(sources, manifest, &[])
+}
+
+/// [`manifest_problem`], with extra files placed beside the scratch manifest, such as a
+/// `build.rs` that Cargo finds with no manifest key.
+fn manifest_problem_with(
+    sources: &[(PathBuf, String)],
+    manifest: &str,
+    extra: &[(&str, &str)],
+) -> Result<(), String> {
+    static SCRATCH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let (lib, _) = sources
+        .iter()
+        .find(|(path, _)| path.ends_with("lib.rs"))
+        .ok_or("no lib.rs")?;
+    let src = lib.parent().ok_or("lib.rs has no directory")?;
+    let crate_dir = src.parent().ok_or("src has no crate directory")?;
+    let package = crate_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("the crate directory has no name")?;
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let scratch = root.join("target/inv015-cargo-view").join(format!(
+        "{}-{}",
+        std::process::id(),
+        SCRATCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    ));
+    let pack = scratch.join("crates").join(package);
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(pack.join("src")).map_err(|e| e.to_string())?;
+    std::fs::copy(root.join("Cargo.toml"), scratch.join("Cargo.toml"))
+        .map_err(|e| e.to_string())?;
+    std::fs::write(pack.join("Cargo.toml"), manifest).map_err(|e| e.to_string())?;
+    for (path, text) in sources {
+        let rel = path.strip_prefix(src).map_err(|e| e.to_string())?;
+        let to = pack.join("src").join(rel);
+        if let Some(dir) = to.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(to, text).map_err(|e| e.to_string())?;
+    }
+    for (file, text) in extra {
+        std::fs::write(pack.join(file), text).map_err(|e| e.to_string())?;
+    }
+    if crate_dir.join("build.rs").exists() {
+        std::fs::copy(crate_dir.join("build.rs"), pack.join("build.rs"))
+            .map_err(|e| e.to_string())?;
+    }
+    let verdict = cargo_view::metadata(&pack.join("Cargo.toml"), false)
+        .and_then(|meta| cargo_view::pack_problem(&meta, package, &pack));
+    let _ = std::fs::remove_dir_all(&scratch);
+    verdict?;
+    let mut child = std::process::Command::new("python3")
+        .args([
+            "-c",
+            "import json, sys, tomllib\n\
+             try:\n    m = tomllib.loads(sys.stdin.read())\n\
+             except Exception as e:\n    print(json.dumps({'error': str(e)})); sys.exit()\n\
+             print(json.dumps({'lints': m.get('lints')}))",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("python3 did not run: {e}"))?;
+    std::io::Write::write_all(
+        &mut child.stdin.take().ok_or("no stdin")?,
+        manifest.as_bytes(),
+    )
+    .map_err(|e| e.to_string())?;
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    let lints = String::from_utf8_lossy(&out.stdout);
+    if lints.trim_end() != "{\"lints\": {\"workspace\": true}}" {
+        return Err(format!(
+            "the manifest's [lints] is not exactly `workspace = true`: {lints}"
+        ));
+    }
+    Ok(())
+}
+
+/// Cargo's resolved view of a pack in its real workspace, `--locked`.
+fn real_pack_problem(package: &str) -> Result<(), String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    let dir = root.join(package);
+    let meta = cargo_view::metadata(&dir.join("Cargo.toml"), true)?;
+    cargo_view::pack_problem(&meta, package, &dir)
+}
+
 /// Whether a crate's sources, manifest and compiler lane make "links no `std`" a
 /// compiler fact for every build (bn-3ohe, cr-1dl1d7). The structure rules close every
 /// way a build other than the lane's could differ: `#![no_std]` is the crate root's
@@ -385,102 +516,12 @@ fn no_std_unconditional(
     lane: &str,
     lane_test: &str,
 ) -> Result<(), String> {
-    let code = |text: &str| -> Vec<String> {
-        text.lines()
-            .map(|line| line.find("//").map_or(line, |at| &line[..at]))
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(str::to_owned)
-            .collect()
-    };
-    let words = |line: &str| -> Vec<String> {
-        line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-            .filter(|w| !w.is_empty())
-            .map(str::to_owned)
-            .collect()
-    };
-    let raw_token = |line: &str| -> bool {
-        let bytes = line.as_bytes();
-        bytes.windows(2).enumerate().any(|(at, pair)| {
-            pair[0] == b'r'
-                && (pair[1] == b'#' || pair[1] == b'"')
-                && (at == 0 || !(bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_'))
-        })
-    };
-    let lib = sources
+    let names: Vec<(String, &str)> = sources
         .iter()
-        .find(|(path, _)| path.ends_with("lib.rs"))
-        .ok_or("no lib.rs")?;
-    if code(&lib.1).first().map(String::as_str) != Some("#![no_std]") {
-        return Err("`#![no_std]` is not the crate root's first item".to_owned());
-    }
-    let banned = [
-        "cfg",
-        "cfg_attr",
-        "macro_rules",
-        "include",
-        "include_str",
-        "include_bytes",
-        "path",
-        "asm",
-        "global_asm",
-    ];
-    let mut externs = 0;
-    for (path, text) in sources {
-        if text.contains("/*") {
-            return Err(format!("{} has a block comment", path.display()));
-        }
-        for line in code(text) {
-            let w = words(&line);
-            if let Some(word) = banned.iter().find(|b| w.iter().any(|x| x == *b)) {
-                return Err(format!("{} uses `{word}`: {line}", path.display()));
-            }
-            if raw_token(&line) {
-                return Err(format!("{} has a raw token: {line}", path.display()));
-            }
-            if w.windows(2)
-                .any(|pair| pair[0] == "extern" && pair[1] == "crate")
-            {
-                externs += 1;
-                if !path.ends_with("lib.rs") || line != "extern crate alloc;" {
-                    return Err(format!(
-                        "{} links a crate other than alloc: {line}",
-                        path.display()
-                    ));
-                }
-            }
-        }
-    }
-    if externs != 1 {
-        return Err(format!(
-            "{externs} extern crate declarations, not exactly one"
-        ));
-    }
-    let mut section = "";
-    for line in manifest
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-    {
-        if line.starts_with('[') {
-            section = match line {
-                "[package]" => "package",
-                "[lints]" => "lints",
-                other => return Err(format!("the manifest has a `{other}` table")),
-            };
-            continue;
-        }
-        let key = line.split('=').next().unwrap_or("").trim();
-        if section.is_empty()
-            || (section == "package" && (key == "build" || key == "links"))
-            || (section == "lints" && line != "workspace = true")
-        {
-            return Err(format!("the manifest's {section} section has `{line}`"));
-        }
-    }
-    if !manifest.contains("[lints]\nworkspace = true") {
-        return Err("the manifest does not inherit the workspace lints".to_owned());
-    }
+        .map(|(path, text)| (path.display().to_string(), text.as_str()))
+        .collect();
+    rust_lexer::structure(names.iter().map(|(name, text)| (name.as_str(), *text)))?;
+    manifest_problem(sources, manifest)?;
     let at = lane
         .find(lane_test)
         .ok_or("the compiler lane test is missing")?;
@@ -497,6 +538,22 @@ fn no_std_unconditional(
     if !(body.contains("std::net::UdpSocket") && body.contains("E0433") && body.contains("release"))
     {
         return Err("the compiler lane no longer plants a std use in both profiles".to_owned());
+    }
+    if !(body.contains("cargo_problem(manifest_dir()") && lane.contains("cargo_view::metadata")) {
+        return Err(
+            "the compiler lane no longer checks Cargo's resolved view of the pack".to_owned(),
+        );
+    }
+    if !(body.contains("ambient_inputs(&control") && lane.contains("# env-dep:")) {
+        return Err(
+            "the compiler lane no longer checks rustc's dep-info for ambient inputs".to_owned(),
+        );
+    }
+    if !(lane.contains("extern\\ncrate std as s;") && body.contains("with_aliased_std")) {
+        return Err(
+            "the compiler lane no longer witnesses the split, aliased `extern crate std`"
+                .to_owned(),
+        );
     }
     Ok(())
 }
@@ -1068,12 +1125,14 @@ mod no_widening {
         ADMISSION, CAPABILITY, CONTINUUMD_MANIFEST, DAEMON_OPERATIONS_TESTS, EFFECTS_NETWORK_LIB,
         EFFECTS_NETWORK_MANIFEST, EFFECTS_NETWORK_NO_STD_LANE, EFFECTS_PROCESS_LIB,
         EFFECTS_PROCESS_MANIFEST, EFFECTS_PROCESS_NO_STD_LANE, EFFECTS_STORAGE_LIB,
-        EFFECTS_TIME_LIB, FORGE_MANIFEST, NETWORK_NO_STD_LANE_TEST, NON_FILESYSTEM_FACILITIES,
-        PROCESS_NO_STD_LANE_TEST, PROOF_CLIENT_LIB, PUBLICATION, SECURITY_LIB, SECURITY_MANIFEST,
-        SIGNER_ADMINISTRATION, SIGNING_SOURCE_FACILITIES, administrative_callers,
+        EFFECTS_STORAGE_MANIFEST, EFFECTS_STORAGE_NO_STD_LANE, EFFECTS_TIME_LIB, FORGE_MANIFEST,
+        NETWORK_NO_STD_LANE_TEST, NON_FILESYSTEM_FACILITIES, PROCESS_NO_STD_LANE_TEST,
+        PROOF_CLIENT_LIB, PUBLICATION, SECURITY_LIB, SECURITY_MANIFEST, SIGNER_ADMINISTRATION,
+        SIGNING_SOURCE_FACILITIES, STORAGE_NO_STD_LANE_TEST, administrative_callers,
         continuumd_sources, declared_dependencies, effects_network_sources,
-        effects_process_sources, forge_sources, host_effect_lines, is_signing_source,
-        no_std_unconditional, pin, pub_items, security_sources, unexempted_callers,
+        effects_process_sources, effects_storage_sources, forge_sources, host_effect_lines,
+        is_signing_source, no_std_unconditional, pin, pub_items, real_pack_problem,
+        security_sources, unexempted_callers,
     };
 
     /// Correction 20's property, stated and then swept: capability administration is
@@ -1161,13 +1220,15 @@ mod no_widening {
     /// [`boundary_effects_network_grew_a_lab_pack_and_it_reaches_no_host_effect`].
     /// `continuum-effects-process` left when bn-3mmf landed its Lab pack, and is
     /// re-established in
-    /// [`boundary_effects_process_grew_a_lab_pack_and_it_reaches_no_host_effect`]. The
-    /// three rows below keep the original, stricter form because their substance
+    /// [`boundary_effects_process_grew_a_lab_pack_and_it_reaches_no_host_effect`].
+    /// `continuum-effects-storage` left when bn-2fk3 landed its Lab pack, and is
+    /// re-established in
+    /// [`boundary_effects_storage_grew_a_lab_pack_and_it_reaches_no_host_effect`]. The
+    /// two rows below keep the original, stricter form because their substance
     /// genuinely has not arrived.
     #[test]
     fn boundary_the_host_effect_surface_has_not_arrived_and_its_crates_are_scaffolds() {
         let scaffolds = [
-            ("continuum-effects-storage", EFFECTS_STORAGE_LIB),
             ("continuum-effects-time", EFFECTS_TIME_LIB),
             ("continuum-proof-client", PROOF_CLIENT_LIB),
         ];
@@ -1841,14 +1902,17 @@ mod no_widening {
         }
 
         // 3. No declared dependency.
-        assert!(
-            declared_dependencies(EFFECTS_NETWORK_MANIFEST).is_empty(),
+        assert_eq!(
+            real_pack_problem("continuum-effects-network"),
+            Ok(()),
             "continuum-effects-network gained a dependency; re-derive what it can reach"
         );
         // No build script and no build dependency either: build-time code runs on the
-        // host, and `declared_dependencies` reads only `[dependencies]`.
-        assert!(
-            !EFFECTS_NETWORK_MANIFEST.contains("build"),
+        // host. Both are judged by Cargo's resolved view, `cargo metadata --locked`
+        // (cr-35ujnx round 5), never by the manifest's text.
+        assert_eq!(
+            real_pack_problem("continuum-effects-network"),
+            Ok(()),
             "continuum-effects-network declares a build script or build dependency"
         );
         assert!(
@@ -1937,12 +2001,14 @@ mod no_widening {
         }
 
         // 3. No declared dependency, no build script, no build dependency.
-        assert!(
-            declared_dependencies(EFFECTS_PROCESS_MANIFEST).is_empty(),
+        assert_eq!(
+            real_pack_problem("continuum-effects-process"),
+            Ok(()),
             "continuum-effects-process gained a dependency; re-derive what it can reach"
         );
-        assert!(
-            !EFFECTS_PROCESS_MANIFEST.contains("build"),
+        assert_eq!(
+            real_pack_problem("continuum-effects-process"),
+            Ok(()),
             "continuum-effects-process declares a build script or build dependency"
         );
         assert!(
@@ -1975,6 +2041,217 @@ mod no_widening {
         pin(
             "continuum-effects-process/src/lib.rs",
             EFFECTS_PROCESS_LIB,
+            &[
+                "**No host semantics** (docs/09 T06)",
+                "This crate has no dependencies.",
+            ],
+        );
+    }
+
+    /// `continuum-effects-storage`'s recorded public surface, sorted — every `pub` item
+    /// across every source file of the crate, as `pub_items` reads them (bn-2fk3).
+    const EFFECTS_STORAGE_PUBLIC_SURFACE: [&str; 110] = [
+        "pub class: FidelityClass,",
+        "pub const ALL: [Self; 17] = [",
+        "pub const APPEND_LOG_V0: FidelityProfile = FidelityProfile {",
+        "pub const ASSUMPTIONS: [(&str, &str); 6] = [",
+        "pub const CANCELLATION_CONTRACT: [(&str, &str); 8] = [",
+        "pub const COMPOSITION: [(&str, &str); 3] = [",
+        "pub const JOURNAL_HEADER_BYTES: u64 =",
+        "pub const MAX_CRASHES_CAP: u32 = 1 << 16;",
+        "pub const MAX_NODES: u8 = 64;",
+        "pub const MAX_PENDING_CAP: u32 = 1 << 16;",
+        "pub const MAX_RETAINED_CAP: u64 = 1 << 28;",
+        "pub const MAX_STEPS: usize = 1 << 20;",
+        "pub const PROFILE_NAME: &str = \"storage/append-log-v0\";",
+        "pub const PROFILE_VERSION: ProfileVersion = ProfileVersion {",
+        "pub const fn all(n: u8) -> Self {",
+        "pub const fn as_str(self) -> &'static str {",
+        "pub const fn chooser(&self) -> Chooser {",
+        "pub const fn class(&self) -> RefusalClass {",
+        "pub const fn config(&self) -> &StorageConfig {",
+        "pub const fn config(&self) -> &StorageConfig {",
+        "pub const fn contains(self, node: NodeId) -> bool {",
+        "pub const fn crashes(&self) -> u32 {",
+        "pub const fn inconclusive_reason(&self) -> Option<&'static str> {",
+        "pub const fn is_up(&self, node: NodeId) -> bool {",
+        "pub const fn max_crashes(&self) -> u32 {",
+        "pub const fn max_pending(&self) -> u32 {",
+        "pub const fn max_retained_bytes(&self) -> u64 {",
+        "pub const fn max_steps(&self) -> u32 {",
+        "pub const fn new(",
+        "pub const fn nodes(&self) -> u8 {",
+        "pub const fn replicated_register_scenario(",
+        "pub const fn restart(&self) -> bool {",
+        "pub const fn retained_bytes(&self) -> u64 {",
+        "pub const fn retained_bytes(&self) -> u64 {",
+        "pub const fn statement(self) -> &'static str {",
+        "pub const fn step(&self) -> Step {",
+        "pub const fn suffix_loss(&self) -> bool {",
+        "pub const fn support(self) -> Support {",
+        "pub const fn token(self) -> &'static str {",
+        "pub const fn torn(&self) -> bool {",
+        "pub const fn unsupported_semantic(&self) -> Option<Semantic> {",
+        "pub const fn up(&self) -> NodeSet {",
+        "pub const fn with(self, node: NodeId) -> Self {",
+        "pub const fn with_max_steps(self, max_steps: u32) -> Result<Self, ConfigRefusal> {",
+        "pub const fn without(self, node: NodeId) -> Self {",
+        "pub enum Bound {",
+        "pub enum Chooser {",
+        "pub enum ConfigRefusal {",
+        "pub enum Entry {",
+        "pub enum Event {",
+        "pub enum FidelityClass {",
+        "pub enum HostQualification {",
+        "pub enum IndependenceClaim {",
+        "pub enum Malformed {",
+        "pub enum NotEnabled {",
+        "pub enum ProgramFault {",
+        "pub enum Refusal {",
+        "pub enum RefusalClass {",
+        "pub enum Semantic {",
+        "pub enum Step {",
+        "pub enum Support {",
+        "pub fn apply(&mut self, step: &Step) -> Result<&Event, Refusal> {",
+        "pub fn canonical_bytes(&self) -> Vec<u8> {",
+        "pub fn check(&self, step: &Step) -> Result<(), Refusal> {",
+        "pub fn choice_log(&self) -> impl Iterator<Item = Step> + '_ {",
+        "pub fn enabled_choices(&self) -> Vec<Step> {",
+        "pub fn encode(&self) -> Vec<u8> {",
+        "pub fn encode(&self) -> Vec<u8> {",
+        "pub fn epoch(&self, node: NodeId) -> Option<Epoch> {",
+        "pub fn events(&self) -> &[Event] {",
+        "pub fn events(&self) -> &[Event] {",
+        "pub fn into_journal(self) -> Journal {",
+        "pub fn log(&self, node: NodeId) -> Option<&[Entry]> {",
+        "pub fn new(config: StorageConfig) -> Self {",
+        "pub fn pending(&self) -> impl Iterator<Item = TicketId> + '_ {",
+        "pub fn replay(&self) -> Result<Self, RunRefusal> {",
+        "pub fn run(config: StorageConfig, steps: &[Step]) -> Result<Journal, RunRefusal> {",
+        "pub fn stable_len(&self, node: NodeId) -> Option<u32> {",
+        "pub fn ticket(&self, ticket: TicketId) -> Option<(NodeId, Epoch, u32, bool)> {",
+        "pub fn ticket_count(&self) -> usize {",
+        "pub host: HostQualification,",
+        "pub independence: IndependenceClaim,",
+        "pub index: usize,",
+        "pub major: u16,",
+        "pub minor: u16,",
+        "pub mod lab;",
+        "pub mod profile;",
+        "pub mod refusal;",
+        "pub mod step;",
+        "pub name: &'static str,",
+        "pub patch: u16,",
+        "pub refusal: Refusal,",
+        "pub struct Epoch(pub u32);",
+        "pub struct FidelityProfile {",
+        "pub struct Journal {",
+        "pub struct NodeId(pub u8);",
+        "pub struct NodeSet(pub u64);",
+        "pub struct ProfileVersion {",
+        "pub struct RunRefusal {",
+        "pub struct Storage {",
+        "pub struct StorageConfig {",
+        "pub struct TicketId(pub u32);",
+        "pub struct Value(pub u32);",
+        "pub use lab::{Journal, Storage, run};",
+        "pub use profile::{APPEND_LOG_V0, FidelityClass, FidelityProfile, Semantic, Support};",
+        "pub use refusal::{Refusal, RefusalClass, RunRefusal};",
+        "pub use step::{Entry, Epoch, Event, NodeId, NodeSet, Step, StorageConfig, TicketId, Value};",
+        "pub version: ProfileVersion,",
+        "pub(crate) fn put_str(out: &mut Vec<u8>, text: &str) {",
+        "pub(crate) fn u32_len(len: usize) -> u32 {",
+    ];
+
+    /// `continuum-effects-storage` stopped being a zero-pub-item scaffold when bn-2fk3
+    /// landed the `storage/append-log-v0` Lab pack (PR-15 / IMPL-03). The property the
+    /// scaffold sweep guards is re-established against the surface that now exists,
+    /// with the same four legs as the network and process packs:
+    ///
+    /// 1. the audited surface is exactly [`EFFECTS_STORAGE_PUBLIC_SURFACE`];
+    /// 2. no host effect is possible, by the compiler: the crate is `#![no_std]`
+    ///    unconditionally, and its compiler lane `tests/pr15_no_std_lane.rs` — a copy with
+    ///    a planted `std::net` use must not compile — exists and is not ignored;
+    /// 3. no declared dependency and no build script;
+    /// 4. it is unreachable from an agent connection: `continuumd` does not declare it,
+    ///    and no `continuumd` source names it.
+    ///
+    /// A storage pack is where "open a file" or "write to disk" would land; any leg
+    /// turning red means it has acquired authority the docs/49 audit has never examined.
+    #[test]
+    fn boundary_effects_storage_grew_a_lab_pack_and_it_reaches_no_host_effect() {
+        // 1. The audited surface, exactly.
+        let mut items: Vec<String> = effects_storage_sources()
+            .iter()
+            .flat_map(|(_, text)| {
+                pub_items(text)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<String>>()
+            })
+            .collect();
+        items.sort();
+        let audited: Vec<String> = EFFECTS_STORAGE_PUBLIC_SURFACE
+            .iter()
+            .map(|it| (*it).to_owned())
+            .collect();
+        assert_eq!(
+            items, audited,
+            "continuum-effects-storage's public surface is not the one INV-015 audited; \
+             record the new items here and re-derive this test's four legs against them"
+        );
+
+        // 2. No host effect, by the compiler rather than by a source scan.
+        if let Err(why) = no_std_unconditional(
+            &effects_storage_sources(),
+            EFFECTS_STORAGE_MANIFEST,
+            EFFECTS_STORAGE_NO_STD_LANE,
+            STORAGE_NO_STD_LANE_TEST,
+        ) {
+            panic!("continuum-effects-storage is not provably free of host effects: {why}");
+        }
+
+        // 3. No declared dependency, no build script, no build dependency.
+        assert_eq!(
+            real_pack_problem("continuum-effects-storage"),
+            Ok(()),
+            "continuum-effects-storage gained a dependency; re-derive what it can reach"
+        );
+        assert_eq!(
+            real_pack_problem("continuum-effects-storage"),
+            Ok(()),
+            "continuum-effects-storage declares a build script or build dependency"
+        );
+        assert!(
+            !std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../continuum-effects-storage/build.rs")
+                .exists(),
+            "continuum-effects-storage grew a build.rs"
+        );
+
+        // 4. Unreachable from an agent connection.
+        assert!(
+            !CONTINUUMD_MANIFEST.contains("continuum-effects-storage"),
+            "continuumd now declares continuum-effects-storage"
+        );
+        for (path, text) in continuumd_sources() {
+            let callers: Vec<&str> = text
+                .lines()
+                .map(str::trim_start)
+                .filter(|line| !line.starts_with("//"))
+                .filter(|line| line.contains("continuum_effects_storage"))
+                .collect();
+            assert!(
+                callers.is_empty(),
+                "{} names continuum_effects_storage: {callers:?}",
+                path.display()
+            );
+        }
+
+        // And the crate still declares the contract this file holds it to.
+        pin(
+            "continuum-effects-storage/src/lib.rs",
+            EFFECTS_STORAGE_LIB,
             &[
                 "**No host semantics** (docs/09 T06)",
                 "This crate has no dependencies.",
@@ -2255,7 +2532,7 @@ mod mutants {
     use std::collections::BTreeSet;
 
     use super::{
-        ADMISSION, CAPABILITY, DOCS_49, EFFECTS_STORAGE_LIB, EVIDENCE, FORGE_MANIFEST,
+        ADMISSION, CAPABILITY, DOCS_49, EFFECTS_TIME_LIB, EVIDENCE, FORGE_MANIFEST,
         NON_FILESYSTEM_FACILITIES, SECURITY_MANIFEST, administrative_callers,
         declared_dependencies, forge_sources, host_effect_lines, is_signing_source,
         isolation_bullets, missing_pin, pub_items, security_sources, unexempted_callers,
@@ -2363,10 +2640,10 @@ mod mutants {
     #[test]
     fn negative_the_scaffold_sweep_detects_a_grown_crate() {
         assert!(
-            pub_items(EFFECTS_STORAGE_LIB).is_empty(),
+            pub_items(EFFECTS_TIME_LIB).is_empty(),
             "the real scaffold is clean"
         );
-        let grown = format!("{EFFECTS_STORAGE_LIB}\npub fn spawn_worker() {{}}\n");
+        let grown = format!("{EFFECTS_TIME_LIB}\npub fn spawn_worker() {{}}\n");
         assert_eq!(pub_items(&grown), vec!["pub fn spawn_worker() {}"]);
     }
 
@@ -2501,8 +2778,10 @@ mod no_std_leg_mutants {
 
     use super::{
         EFFECTS_NETWORK_MANIFEST, EFFECTS_NETWORK_NO_STD_LANE, EFFECTS_PROCESS_MANIFEST,
-        EFFECTS_PROCESS_NO_STD_LANE, NETWORK_NO_STD_LANE_TEST, PROCESS_NO_STD_LANE_TEST,
-        effects_network_sources, effects_process_sources, no_std_unconditional,
+        EFFECTS_PROCESS_NO_STD_LANE, EFFECTS_STORAGE_MANIFEST, EFFECTS_STORAGE_NO_STD_LANE,
+        NETWORK_NO_STD_LANE_TEST, PROCESS_NO_STD_LANE_TEST, STORAGE_NO_STD_LANE_TEST,
+        effects_network_sources, effects_process_sources, effects_storage_sources,
+        no_std_unconditional,
     };
 
     /// A named doctored copy: sources, manifest, lane.
@@ -2716,6 +2995,524 @@ mod no_std_leg_mutants {
                 no_std_unconditional(&sources, &manifest, &lane, PROCESS_NO_STD_LANE_TEST).is_err(),
                 "{name} passed the process no_std leg"
             );
+        }
+    }
+
+    /// The storage pack's leg is the same predicate over that crate's inputs: the real
+    /// crate passes it, and the lane is bound to the storage lane's own test name, so
+    /// neither the network nor the process lane's text can stand in for it.
+    #[test]
+    fn negative_the_storage_no_std_leg_detects_its_mutants() {
+        let real = effects_storage_sources();
+        assert_eq!(
+            no_std_unconditional(
+                &real,
+                EFFECTS_STORAGE_MANIFEST,
+                EFFECTS_STORAGE_NO_STD_LANE,
+                STORAGE_NO_STD_LANE_TEST
+            ),
+            Ok(())
+        );
+        let with_storage_lib = |edit: &dyn Fn(&str) -> String| -> Vec<(PathBuf, String)> {
+            real.iter()
+                .map(|(path, text)| {
+                    let text = if path.ends_with("lib.rs") {
+                        edit(text)
+                    } else {
+                        text.clone()
+                    };
+                    (path.clone(), text)
+                })
+                .collect()
+        };
+        let mutants: Vec<Mutant> = vec![
+            (
+                "cfg_attr(no_std)",
+                with_storage_lib(&|t| {
+                    t.replacen("\n#![no_std]\n", "\n#![cfg_attr(not(test), no_std)]\n", 1)
+                }),
+                EFFECTS_STORAGE_MANIFEST.to_owned(),
+                EFFECTS_STORAGE_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "extern crate std",
+                with_storage_lib(&|t| {
+                    t.replace(
+                        "extern crate alloc;",
+                        "extern crate alloc;\nextern crate std;",
+                    )
+                }),
+                EFFECTS_STORAGE_MANIFEST.to_owned(),
+                EFFECTS_STORAGE_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "a std feature",
+                real.clone(),
+                format!("{EFFECTS_STORAGE_MANIFEST}\n[features]\nstd = []\n"),
+                EFFECTS_STORAGE_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "the lane ignored",
+                real.clone(),
+                EFFECTS_STORAGE_MANIFEST.to_owned(),
+                EFFECTS_STORAGE_NO_STD_LANE.replace("#[test]", "#[test]\n#[ignore]"),
+            ),
+            (
+                "the network lane in its place",
+                real.clone(),
+                EFFECTS_STORAGE_MANIFEST.to_owned(),
+                EFFECTS_NETWORK_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "the process lane in its place",
+                real.clone(),
+                EFFECTS_STORAGE_MANIFEST.to_owned(),
+                EFFECTS_PROCESS_NO_STD_LANE.to_owned(),
+            ),
+        ];
+        for (name, sources, manifest, lane) in mutants {
+            assert!(
+                no_std_unconditional(&sources, &manifest, &lane, STORAGE_NO_STD_LANE_TEST).is_err(),
+                "{name} passed the storage no_std leg"
+            );
+        }
+    }
+
+    /// cr-35ujnx: `#![no_std]` does not forbid an explicit `extern crate std`, and the
+    /// old line-level rule missed one split across lines. Each pack's leg refuses a
+    /// split, aliased `extern crate std` that reaches `s::fs`, one whose `extern` hides
+    /// behind a `//` inside a string literal, and an aliased `extern crate core`.
+    #[test]
+    fn negative_every_pack_leg_refuses_a_split_aliased_extern_std() {
+        let packs = [
+            (
+                effects_network_sources(),
+                EFFECTS_NETWORK_MANIFEST,
+                EFFECTS_NETWORK_NO_STD_LANE,
+                NETWORK_NO_STD_LANE_TEST,
+            ),
+            (
+                effects_process_sources(),
+                EFFECTS_PROCESS_MANIFEST,
+                EFFECTS_PROCESS_NO_STD_LANE,
+                PROCESS_NO_STD_LANE_TEST,
+            ),
+            (
+                effects_storage_sources(),
+                EFFECTS_STORAGE_MANIFEST,
+                EFFECTS_STORAGE_NO_STD_LANE,
+                STORAGE_NO_STD_LANE_TEST,
+            ),
+        ];
+        type Plant<'a> = (&'a str, &'a dyn Fn(&str) -> String);
+        let plants: [Plant; 3] = [
+            ("split, aliased extern crate std", &|t| {
+                format!(
+                    "{}\npub fn leak() -> bool {{\n    s::fs::metadata(\"/\").is_ok()\n}}\n",
+                    t.replacen(
+                        "extern crate alloc;",
+                        "extern crate alloc;\nextern\ncrate std as s;",
+                        1
+                    )
+                )
+            }),
+            ("a string that opens a comment", &|t| {
+                format!("{t}\npub const X: &str = \"//\"; extern crate std as s;\n")
+            }),
+            ("aliased extern crate core", &|t| {
+                t.replacen(
+                    "extern crate alloc;",
+                    "extern crate alloc;\nextern crate core as c;",
+                    1,
+                )
+            }),
+        ];
+        for (sources, manifest, lane, lane_test) in packs {
+            assert_eq!(
+                no_std_unconditional(&sources, manifest, lane, lane_test),
+                Ok(())
+            );
+            for (name, plant) in &plants {
+                let doctored: Vec<(PathBuf, String)> = sources
+                    .iter()
+                    .map(|(path, text)| {
+                        let text = if path.ends_with("lib.rs") {
+                            plant(text)
+                        } else {
+                            text.clone()
+                        };
+                        (path.clone(), text)
+                    })
+                    .collect();
+                assert!(
+                    no_std_unconditional(&doctored, manifest, lane, lane_test).is_err(),
+                    "{name} passed the no_std leg of {lane_test}"
+                );
+            }
+            let blind_lane = lane.replace("with_aliased_std", "without_the_alias");
+            assert!(
+                no_std_unconditional(&sources, manifest, &blind_lane, lane_test).is_err(),
+                "a lane that no longer witnesses the alias passed"
+            );
+            let cargo_blind_lane =
+                lane.replace("cargo_problem(manifest_dir()", "no_problem(manifest_dir()");
+            assert!(
+                no_std_unconditional(&sources, manifest, &cargo_blind_lane, lane_test).is_err(),
+                "a lane that no longer checks Cargo's view of the pack passed"
+            );
+            let env_blind_lane = lane.replace("ambient_inputs(&control", "no_inputs(&control");
+            assert!(
+                no_std_unconditional(&sources, manifest, &env_blind_lane, lane_test).is_err(),
+                "a lane that no longer checks rustc's dep-info for ambient inputs passed"
+            );
+            // cr-35ujnx round 4: every ambient compile-time input fails the leg.
+            for plant in [
+                "pub const A: &str = env!(\"X\");",
+                "pub const A: Option<&str> = option_env!(\"X\");",
+                "pub const A: Option<&str> = ::core::option_env ! (\"X\");",
+                "include!(\"x.rs\");",
+                "pub const A: &str = include_str!(\"x\");",
+                "pub const A: &[u8] = include_bytes!(\"x\");",
+                "pub const A: &str = file!();",
+            ] {
+                let doctored: Vec<(PathBuf, String)> = sources
+                    .iter()
+                    .map(|(path, text)| {
+                        let text = if path.ends_with("lib.rs") {
+                            format!("{text}\n{plant}\n")
+                        } else {
+                            text.clone()
+                        };
+                        (path.clone(), text)
+                    })
+                    .collect();
+                assert!(
+                    no_std_unconditional(&doctored, manifest, lane, lane_test).is_err(),
+                    "`{plant}` passed the no_std leg of {lane_test}"
+                );
+            }
+        }
+    }
+
+    /// The literal-kind corpus (cr-35ujnx), one case per Rust literal kind and per way
+    /// the scan could fail to read one.
+    const LEXER_CASES: &str = include_str!("../../../tools/governance/rust_lexer_cases.txt");
+
+    /// `(name, extern verdict, structure verdict, snippet)` for each corpus case.
+    fn lexer_cases() -> Vec<(String, bool, bool, String)> {
+        let mut out = Vec::new();
+        for block in LEXER_CASES.split("\n=== ").skip(1) {
+            let (head, body) = block.split_once('\n').expect("a case has a body");
+            let fields: Vec<&str> = head.split_whitespace().collect();
+            let [name, ext, st] = fields[..] else {
+                panic!("malformed case header {head:?}");
+            };
+            let verdict = |field: &str, key: &str| match field.strip_prefix(key) {
+                Some("pass") => true,
+                Some("fail") => false,
+                _ => panic!("malformed verdict {field:?}"),
+            };
+            out.push((
+                name.to_owned(),
+                verdict(ext, "extern="),
+                verdict(st, "structure="),
+                body.to_owned(),
+            ));
+        }
+        out
+    }
+
+    /// cr-35ujnx round 2: every Rust literal kind — string, byte string, C string, char,
+    /// byte char, raw string with and without hashes, raw byte string, raw C string —
+    /// plus lifetimes, labels, raw identifiers, line, doc and nested block comments, is
+    /// lexed per the Rust Reference. An `extern crate std` inside a literal or comment is
+    /// text and passes the `extern` rule; one beside a literal built to fool a scan is
+    /// still caught; and source the lexer cannot read (an unterminated literal or block
+    /// comment, unbalanced raw hashes, an unknown prefix or escape, a string suffix,
+    /// 2024's reserved `#"`) fails every rule. Each case runs through all three packs'
+    /// structure rules, and each has its GOV-4-13 fixture, which runs the Python twin.
+    #[test]
+    fn negative_the_shared_lexer_reads_every_literal_kind_and_fails_closed() {
+        let cases = lexer_cases();
+        assert!(cases.len() >= 30, "the corpus lost cases");
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let fixtures = root.join("tools/governance/fixtures/obligations/gov-4-pack-kernel");
+        let packs = [
+            effects_network_sources(),
+            effects_process_sources(),
+            effects_storage_sources(),
+        ];
+        for (name, ext, st, snippet) in &cases {
+            assert_eq!(
+                super::rust_lexer::extern_problem(snippet).is_ok(),
+                *ext,
+                "{name}: the extern rule gave {:?}",
+                super::rust_lexer::extern_problem(snippet)
+            );
+            for sources in &packs {
+                let files: Vec<(String, String)> = sources
+                    .iter()
+                    .map(|(path, text)| {
+                        let text = if path.ends_with("lib.rs") {
+                            format!("{text}\n{snippet}")
+                        } else {
+                            text.clone()
+                        };
+                        (path.display().to_string(), text)
+                    })
+                    .collect();
+                let verdict = super::rust_lexer::structure(
+                    files.iter().map(|(n, t)| (n.as_str(), t.as_str())),
+                );
+                assert_eq!(
+                    verdict.is_ok(),
+                    *st,
+                    "{name}: the structure rules gave {verdict:?}"
+                );
+            }
+            let dir = fixtures.join(format!("gov4-13-lexer-{name}"));
+            let lib = std::fs::read_to_string(
+                dir.join("crates_continuum-effects-network_src_lib.rs.fixture"),
+            )
+            .unwrap_or_else(|_| panic!("{name} has no GOV-4-13 fixture"));
+            assert!(
+                lib.ends_with(snippet.as_str()),
+                "{name}'s fixture drifted from the corpus"
+            );
+            let fixture = std::fs::read_to_string(dir.join("fixture.json")).unwrap();
+            let expect = if *st {
+                "\"expect\": \"clean\""
+            } else {
+                "\"expect\": \"violation\""
+            };
+            assert!(
+                fixture.contains(expect),
+                "{name}'s fixture expects the wrong verdict"
+            );
+        }
+    }
+
+    /// The Rust and Python lexers are twins (cr-35ujnx): over every corpus case and every
+    /// source file of the three packs, both give the same tokens, or both refuse.
+    #[test]
+    fn negative_the_rust_and_python_lexers_agree_token_for_token() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut inputs: Vec<(String, String)> = lexer_cases()
+            .into_iter()
+            .map(|(name, _, _, snippet)| (name, snippet))
+            .collect();
+        for sources in [
+            effects_network_sources(),
+            effects_process_sources(),
+            effects_storage_sources(),
+        ] {
+            for (path, text) in sources {
+                inputs.push((path.display().to_string(), text));
+            }
+        }
+        for (name, text) in inputs {
+            let mut child = std::process::Command::new("python3")
+                .arg(root.join("tools/governance/rust_lexer.py"))
+                .arg("--tokens")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .expect("python3 runs");
+            std::io::Write::write_all(&mut child.stdin.take().unwrap(), text.as_bytes()).unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(output.status.success(), "{name}: the Python lexer crashed");
+            let python = String::from_utf8(output.stdout).unwrap();
+            let rust = match super::rust_lexer::lex(&text) {
+                Ok(tokens) => {
+                    let body: Vec<String> = tokens
+                        .iter()
+                        .map(|t| {
+                            format!(
+                                "[{:?}, {}, {}]",
+                                format!("{:?}", t.kind),
+                                json_string(&t.text),
+                                t.line
+                            )
+                        })
+                        .collect();
+                    format!("{{\"tokens\": [{}]}}", body.join(", "))
+                }
+                Err(_) => "error".to_owned(),
+            };
+            if rust == "error" {
+                assert!(
+                    python.starts_with("{\"error\""),
+                    "{name}: only Rust refused"
+                );
+            } else {
+                assert_eq!(python.trim_end(), rust, "{name}: the lexers disagree");
+            }
+        }
+    }
+
+    /// The twins refuse the same identifiers (cr-35ujnx round 4): the ambient
+    /// compile-time inputs and the structure escapes are one set in Rust and Python.
+    #[test]
+    fn negative_the_rust_and_python_twins_refuse_the_same_identifiers() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let output = std::process::Command::new("python3")
+            .arg(root.join("tools/governance/rust_lexer.py"))
+            .arg("--rules")
+            .output()
+            .expect("python3 runs");
+        assert!(output.status.success());
+        let sorted = |set: &[&str]| -> String {
+            let mut v = set.to_vec();
+            v.sort_unstable();
+            let quoted: Vec<String> = v.iter().map(|w| format!("\"{w}\"")).collect();
+            format!("[{}]", quoted.join(", "))
+        };
+        let rust = format!(
+            "{{\"ambient\": {}, \"banned\": {}}}",
+            sorted(&super::rust_lexer::AMBIENT),
+            sorted(&super::rust_lexer::BANNED)
+        );
+        assert_eq!(String::from_utf8(output.stdout).unwrap().trim_end(), rust);
+        for word in [
+            "env",
+            "option_env",
+            "include",
+            "include_str",
+            "include_bytes",
+        ] {
+            assert!(
+                super::rust_lexer::AMBIENT.contains(&word),
+                "{word} is not refused as an ambient compile-time input"
+            );
+        }
+    }
+
+    /// A string as Python's `json.dumps` writes it (ASCII-escaped).
+    fn json_string(text: &str) -> String {
+        let mut out = String::from("\"");
+        for c in text.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                '\u{8}' => out.push_str("\\b"),
+                '\u{c}' => out.push_str("\\f"),
+                c if (c as u32) < 0x20 || (c as u32) > 0x7f => {
+                    let mut buf = [0_u16; 2];
+                    for unit in c.encode_utf16(&mut buf) {
+                        out.push_str(&format!("\\u{unit:04x}"));
+                    }
+                }
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+        out
+    }
+
+    /// cr-35ujnx round 5: no manifest text scan carries the no-build-script claim.
+    /// For each pack, Cargo's resolved view refuses every way to declare or find a
+    /// build script or `links` value: a quoted `build` key, a dotted `package."links"`
+    /// key, an inherited `build` key, an inline-table package with a `build` key, and a
+    /// `build.rs` found with no key at all. The `[lints]` table is judged structurally,
+    /// so a quoted `"workspace" = true` is the same table, and an added override fails.
+    #[test]
+    fn negative_every_manifest_form_of_a_build_script_is_refused_by_cargos_view() {
+        let packs = [
+            (
+                effects_network_sources(),
+                EFFECTS_NETWORK_MANIFEST,
+                "continuum-effects-network",
+            ),
+            (
+                effects_process_sources(),
+                EFFECTS_PROCESS_MANIFEST,
+                "continuum-effects-process",
+            ),
+            (
+                effects_storage_sources(),
+                EFFECTS_STORAGE_MANIFEST,
+                "continuum-effects-storage",
+            ),
+        ];
+        let script = "fn main() {}\n";
+        for (sources, manifest, package) in packs {
+            assert_eq!(
+                super::manifest_problem(&sources, manifest),
+                Ok(()),
+                "{package}"
+            );
+            assert_eq!(
+                super::manifest_problem(
+                    &sources,
+                    &manifest.replace("[lints]\nworkspace = true", "[lints]\n\"workspace\" = true"),
+                ),
+                Ok(()),
+                "{package}: a quoted key is the same table"
+            );
+            assert!(
+                manifest.contains("publish = false"),
+                "{package}'s manifest changed shape"
+            );
+            let inline = format!(
+                "package = {{ name = \"{package}\", version = {{ workspace = true }}, \
+                 edition = {{ workspace = true }}, publish = false, build = \"x.rs\" }}\n\n\
+                 [lints]\nworkspace = true\n"
+            );
+            type Variant<'a> = (&'a str, String, Vec<(&'a str, &'a str)>);
+            let variants: Vec<Variant> = vec![
+                (
+                    "quoted build key",
+                    manifest.replacen(
+                        "publish = false",
+                        "publish = false\n\"build\" = \"x.rs\"",
+                        1,
+                    ),
+                    vec![("x.rs", script)],
+                ),
+                (
+                    "single-quoted links key with a build script",
+                    manifest.replacen("publish = false", "publish = false\n'links' = \"z\"", 1),
+                    vec![("build.rs", script)],
+                ),
+                (
+                    "dotted package.\"links\" key",
+                    format!("package.\"links\" = \"z\"\n{manifest}"),
+                    vec![],
+                ),
+                (
+                    "inherited build key",
+                    manifest.replacen(
+                        "publish = false",
+                        "publish = false\nbuild.workspace = true",
+                        1,
+                    ),
+                    vec![("build.rs", script)],
+                ),
+                (
+                    "inline-table package with a build key",
+                    inline,
+                    vec![("x.rs", script)],
+                ),
+                (
+                    "build.rs found with no key",
+                    manifest.to_owned(),
+                    vec![("build.rs", script)],
+                ),
+                (
+                    "lint override",
+                    format!("{manifest}\n[lints.rust]\nunsafe_code = \"allow\"\n"),
+                    vec![],
+                ),
+            ];
+            for (name, doctored, extra) in variants {
+                assert!(
+                    super::manifest_problem_with(&sources, &doctored, &extra).is_err(),
+                    "{package}: {name} passed Cargo's view"
+                );
+            }
         }
     }
 }

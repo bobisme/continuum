@@ -89,6 +89,14 @@
 //! themselves are lexical; the claim rests on the compiler run they keep meaningful.
 //! A std-less target is not in the pinned toolchain, so there is no second,
 //! independent compiler witness.
+//!
+//! Nor does the crate read its build environment at compile time (cr-35ujnx): the
+//! structure rules refuse `env!`, `option_env!`, `include!`, `include_str!`,
+//! `include_bytes!`, `file!` and `cfg`, and the lane checks rustc's own dep-info for
+//! the dev and release builds, which must name no `env-dep` variable and no file
+//! outside `src/`. That there is no build script, `links` value, dependency or
+//! feature is judged by Cargo's resolved view, `cargo metadata`, never by the
+//! manifest's text.
 
 #![no_std]
 

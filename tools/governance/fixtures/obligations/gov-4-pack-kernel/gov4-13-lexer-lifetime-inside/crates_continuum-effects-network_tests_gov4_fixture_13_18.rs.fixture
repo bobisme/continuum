@@ -1,0 +1,25 @@
+//! Fixture tests (inert data; never compiled).
+
+/// Host/Lab conformance: compares the host path against the Lab path.
+#[test]
+fn host_matches_lab() {
+    assert_eq!(1, 1);
+}
+
+/// Fault coverage: crash.
+#[test]
+fn crash_mid_write() {
+    assert_eq!(1, 1);
+}
+
+/// Fault coverage: partition.
+#[test]
+fn partitions_both_ways() {
+    assert_eq!(1, 1);
+}
+
+#[test]
+#[ignore]
+fn ignored_marker() {
+    assert_eq!(1, 1);
+}

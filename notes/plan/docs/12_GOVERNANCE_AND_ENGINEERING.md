@@ -158,9 +158,28 @@ structural and lexical. It keeps the lane's builds the only builds: `#![no_std]`
 as the crate root's first item; no `cfg`, `cfg_attr`, macro definition,
 `include!`, `#[path]`, `asm!` or raw token in `src/`; exactly one `extern crate`,
 which is `alloc`; no `build.rs`; and a manifest with only `[package]` and
-`[lints] workspace = true`. Both named tests must be live, in the pack, and not
+`[lints] workspace = true`. The source rules are checked token by token by one
+lexer that knows every token kind of the Rust Reference: every string, byte, C and
+raw literal form, character literals, lifetimes and labels, and nested block
+comments. So a line break, an alias or a literal does not hide a declaration, and
+source the lexer cannot classify fails the rule (cr-35ujnx). The lexer is
+`tools/governance/rust_lexer.py`, with a Rust twin that a test holds to it token for
+token. The pack also reads nothing from its build environment at compile time: the
+rules refuse `env!`, `option_env!`, `include!`, `include_str!`, `include_bytes!`,
+`file!` and `cfg`, and the lane checks rustc's dep-info for both profiles, which
+must name no `env-dep` variable and no file outside `src/`. The manifest rules are
+never judged from the manifest text. The gating evidence is Cargo's resolved view,
+`cargo metadata --no-deps --offline`, of the pack in its real workspace and of the
+lane's copy. It must show no `custom-build` or `proc-macro` target, no `links`, no
+dependency, no feature, and a library at the pack's own `src/lib.rs`. So a quoted,
+dotted or inline-table `build` or `links` key, or a `build.rs` found with no key, is
+refused (cr-35ujnx). The governance checker reads the manifest with `tomllib`, a
+structural cross-check.
+`#![no_std]` does not forbid `extern crate std`, so this rule carries that part of
+the claim. Both named tests must be live, in the pack, and not
 `should_panic`, `cfg`-gated or ignored. The lane test must plant the `std` use and
-check both profiles, and the profile test must `assert_eq!` the declared profile's
+check both profiles, and it must show that a split, aliased `extern crate std`
+compiles but fails the structure rule, and the profile test must `assert_eq!` the declared profile's
 `host` to `HostQualification::None`, which every profile the pack declares must
 also say (the docs/09 T06 claim of no host semantics). Any gap fails closed and
 the full obligation applies, as it does for an empty reason or a record that

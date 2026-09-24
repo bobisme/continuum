@@ -94,6 +94,7 @@ from check_obligations import (
     test_is_fresh,
 )
 import check_code_policy as policy
+import rust_lexer
 
 # `tools/governance` is already on `sys.path` (check_obligations.py inserts it),
 # but `tools/governance/obligations` is not; add it so the sibling set's
@@ -185,13 +186,10 @@ C_HL_NA_TEST = "host-lab-not-applicable-tests-resolve"
 # tests exist, live in the pack crate, and are not ignored.
 HOST_NA_STATUS = "not-applicable"
 HOST_NA_KEYS = {"status", "reason", "profile_test", "no_std_lane_test"}
-NO_STD_ATTR = "#![no_std]"
-NO_STD_BANNED_WORDS = (
-    "cfg", "cfg_attr", "macro_rules", "include", "include_str", "include_bytes", "path", "asm", "global_asm",
-)
-RAW_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])r[#\"]")
-EXTERN_CRATE_RE = re.compile(r"\bextern\s+crate\b")
-WORD_RE = re.compile(r"[A-Za-z0-9_]+")
+# cr-35ujnx: the source rules (`#![no_std]` first, no block comment, raw token or
+# banned identifier, and `extern` only as `extern crate alloc;` in `lib.rs`) are
+# `rust_lexer.structure_problem`, token by token over a complete Rust lexer that fails
+# closed on source it cannot lex. `#![no_std]` does not forbid `extern crate std`.
 # The profile test must assert the declared profile's host qualification exactly.
 PROFILE_ASSERT_RE = re.compile(
     r"assert_eq!\(\s*[A-Z][A-Z0-9_]*\s*\.\s*host\s*,\s*HostQualification\s*::\s*None\s*\)"
@@ -199,7 +197,13 @@ PROFILE_ASSERT_RE = re.compile(
 HOST_DECL_RE = re.compile(r"\bhost\s*:\s*HostQualification\s*::\s*(\w+)")
 # What identifies a compiler lane: it plants a `std` use, demands the unresolved-`std`
 # error, and checks the release profile too.
-LANE_MARKERS = ("std::net::UdpSocket", "E0433", "release")
+# The lane also checks rustc's dep-info (`ambient_inputs`) and Cargo's resolved view of
+# the pack (`cargo_problem`, cr-35ujnx round 5): the gating evidence for "no build
+# script, no links, no dependency" is `cargo metadata`, not the manifest text.
+LANE_MARKERS = (
+    "std::net::UdpSocket", "E0433", "release", "with_aliased_std", "ambient_inputs(&control",
+    "cargo_problem(manifest_dir()",
+)
 # Attributes that make a named test evidence of nothing.
 DEAD_TEST_ATTR_RE = re.compile(r"\b(should_panic|cfg|cfg_attr|ignore)\b")
 
@@ -277,20 +281,11 @@ def fault_vocabulary(ctx: Context) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _code_lines(text: str) -> list[str]:
-    out = []
-    for line in text.splitlines():
-        at = line.find("//")
-        line = (line if at < 0 else line[:at]).strip()
-        if line:
-            out.append(line)
-    return out
-
-
 def no_std_problem(ctx: Context, crate: str) -> str | None:
     """Why some build of `crate` could link `std`, or `None` when none can.
 
-    The same structure rules the pack's compiler lane and the INV-015 audit enforce:
+    The same structure rules the pack's compiler lane and the INV-015 audit enforce,
+    read token by token by `rust_lexer` (source it cannot lex fails):
     `#![no_std]` is the crate root's first item; `src/` has no block comment, no `cfg`,
     `cfg_attr`, macro definition, `include!`, `#[path]`, `asm!` or raw token, and
     exactly one `extern crate`, which is `alloc` in `lib.rs`; the manifest has only
@@ -300,27 +295,10 @@ def no_std_problem(ctx: Context, crate: str) -> str | None:
     lib = ctx.head.read_text(f"crates/{crate}/src/lib.rs")
     if lib is None:
         return f"crates/{crate}/src/lib.rs does not exist"
-    lib_lines = _code_lines(lib)
-    if not lib_lines or lib_lines[0] != NO_STD_ATTR:
-        return f"crates/{crate}/src/lib.rs does not open with `{NO_STD_ATTR}` as the crate root's first item"
-    externs = 0
-    for rel in ctx.head.glob(f"crates/{crate}/src/**/*.rs"):
-        text = ctx.head.read_text(rel) or ""
-        if "/*" in text:
-            return f"{rel} has a block comment"
-        for line in _code_lines(text):
-            words = set(WORD_RE.findall(line))
-            banned = sorted(words.intersection(NO_STD_BANNED_WORDS))
-            if banned:
-                return f"{rel} uses `{banned[0]}`: {line}"
-            if RAW_TOKEN_RE.search(line):
-                return f"{rel} has a raw identifier or string: {line}"
-            if EXTERN_CRATE_RE.search(line):
-                externs += 1
-                if not rel.endswith("/src/lib.rs") or line != "extern crate alloc;":
-                    return f"{rel} links a crate other than `alloc`: {line}"
-    if externs != 1:
-        return f"crates/{crate}/src has {externs} `extern crate` declarations, not exactly `extern crate alloc;`"
+    files = [(rel, ctx.head.read_text(rel) or "") for rel in ctx.head.glob(f"crates/{crate}/src/**/*.rs")]
+    problem = rust_lexer.structure_problem(files)
+    if problem:
+        return problem
     if ctx.head.exists(f"crates/{crate}/build.rs"):
         return f"crates/{crate}/build.rs exists"
     manifest = ctx.head.read_toml(f"crates/{crate}/Cargo.toml")

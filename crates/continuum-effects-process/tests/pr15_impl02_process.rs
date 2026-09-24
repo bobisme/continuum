@@ -4,8 +4,9 @@
 //!
 //! | Id | Test | What it shows |
 //! |---|---|---|
-//! | `pr15-impl02-pos-01` | [`differential_the_lab_handler_equals_an_independent_reference_model_exhaustively`] | over the complete reachable space of four configurations, one under a binding retained-bytes budget, the Lab handler and an independently written reference model accept and refuse the same steps with the same refusals, emit the same events, reach the same states, and list the same enabled choices |
+//! | `pr15-impl02-pos-01` | [`differential_the_lab_handler_equals_an_independent_reference_model_exhaustively`] | over the complete reachable space of four configurations, each under a binding retained-bytes budget, pruned by a key that holds the journal length and retained bytes (cr-35ujnx), the Lab handler and an independently written reference model accept and refuse the same steps with the same refusals, emit the same events, reach the same states, and list the same enabled choices |
 //! | `pr15-impl02-neg-04` | [`differential_is_not_vacuous_every_seeded_model_bug_is_caught`] | fourteen seeded reference-model bugs, each caught by the exhaustive differential |
+//! | `pr15-impl02-neg-05` | [`differential_key_is_the_whole_input_of_a_step`] | cr-35ujnx: two histories with one pruning key have the same outcome, event and successor key for every candidate, so the exhaustive exploration hides no successor |
 //! | `pr15-impl02-pos-02` | [`determinism_identical_choice_logs_give_byte_identical_journals`] | 2,100 seeded random logs: two runs of one log give identical bytes, and distinct logs give many distinct journals |
 //! | `pr15-impl02-pos-03` | [`replay_a_journal_is_its_own_choice_log`] | a journal's choice log replays to the same journal, byte for byte |
 //! | `pr15-impl02-pos-04` | [`every_step_boundary_truncation_replays_as_the_journal_prefix`] | cutting a log at any step boundary gives exactly the journal prefix |
@@ -119,7 +120,7 @@ const MUTANTS: [Mutant; 14] = [
     Mutant::PrecedenceSwap,
 ];
 
-type ModelKey = (Vec<(bool, u32)>, Vec<(u8, u32, Status)>, u32, Option<u64>);
+type ModelKey = (Vec<(bool, u32)>, Vec<(u8, u32, Status)>, u32, usize, u64);
 
 impl Model {
     fn new(config: ProcessConfig, mutant: Mutant) -> Self {
@@ -133,16 +134,18 @@ impl Model {
         }
     }
 
+    /// The exploration's pruning key: everything a step and the candidate generator
+    /// read (cr-35ujnx). That is the node and ticket state and the crashes used, which
+    /// fix the next `Begin` too, and the journal length and retained bytes, which the
+    /// step bound and the retained-bytes budget are charged against. Only the event
+    /// contents are left out, and no step reads them.
     fn key(&self) -> ModelKey {
-        // Every event has a fixed size, so the retained bytes are a function of the rest
-        // of the key; they are keyed anyway under a budget that can bind, so a model
-        // that got the sizes wrong could not hide behind a merged state.
-        let retained = (self.config.max_retained_bytes() < RETAINED).then(|| self.retained());
         (
             self.nodes.clone(),
             self.tickets.clone(),
             self.crashes,
-            retained,
+            self.events.len(),
+            self.retained(),
         )
     }
 
@@ -162,6 +165,9 @@ impl Model {
     /// One step: the transition on a scratch copy, then the retained-bytes charge,
     /// then commit.
     fn step(&mut self, step: &Step) -> Result<Event, Refusal> {
+        if self.events.len() >= MAX_STEPS {
+            return Err(Refusal::BoundReached(Bound::Steps { max: MAX_STEPS }));
+        }
         let mut next = self.clone();
         let event = next.transition(step)?;
         let max = self.config.max_retained_bytes();
@@ -410,10 +416,11 @@ fn random_log(rng: &mut XorShift, cfg: ProcessConfig, len: usize) -> Vec<Step> {
 // --- positive evidence ----------------------------------------------------------------
 
 /// `pr15-impl02-pos-01`. Differential against the reference model, over the complete
-/// reachable space (no depth bound: the program begins four tickets and the crash
-/// budget bounds crashes and so restarts, so the visited set is finite), under four
-/// configurations that between them switch every fault on and off, one of them under a
-/// retained-bytes budget that binds.
+/// reachable space (no depth bound: every configuration has a retained-bytes budget
+/// that binds, so every path ends, `Delay` stutters included), under four
+/// configurations that between them switch every fault on and off. The pruning key is
+/// the whole input of a step, the journal length and retained bytes included
+/// (cr-35ujnx).
 #[test]
 fn differential_the_lab_handler_equals_an_independent_reference_model_exhaustively() {
     let mut kinds = BTreeSet::new();
@@ -442,7 +449,7 @@ fn differential_the_lab_handler_equals_an_independent_reference_model_exhaustive
     );
 }
 
-const PINNED_STATES: usize = 3_733;
+const PINNED_STATES: usize = 21_819;
 
 /// `pr15-impl02-neg-04`. Anti-vacuity of the differential: each of fourteen seeded bugs in
 /// the reference model makes the exhaustive comparison fail.
@@ -456,14 +463,20 @@ fn differential_is_not_vacuous_every_seeded_model_bug_is_caught() {
     }
 }
 
+/// The retained-bytes budget past the header of the differential's unbudgeted-shape
+/// configurations: large enough for their programs, small enough to end every path.
+const BUDGET: u64 = 140;
+
 fn differential_configs() -> [ProcessConfig; 4] {
     [
         // A retained-bytes budget of the header plus 60 bytes: the budget, not the
         // program or the crash budget, ends most paths.
         ProcessConfig::new(3, 2, true, 2, JOURNAL_HEADER_BYTES + 60).unwrap(),
-        config(3, 2, true, 3),
-        config(2, 1, false, 2),
-        config(3, 0, true, 4),
+        // The key holds the journal length and the retained bytes, so every
+        // configuration has a budget that binds: `Delay`, a stutter, then ends too.
+        ProcessConfig::new(3, 2, true, 3, JOURNAL_HEADER_BYTES + BUDGET).unwrap(),
+        ProcessConfig::new(2, 1, false, 2, JOURNAL_HEADER_BYTES + BUDGET).unwrap(),
+        ProcessConfig::new(3, 0, true, 4, JOURNAL_HEADER_BYTES + BUDGET).unwrap(),
     ]
 }
 
@@ -484,7 +497,7 @@ fn variant(debug: String) -> String {
 
 /// The observable state: up set, epochs, ticket facts, pending tickets, crashes used,
 /// retained bytes.
-type View = (u64, Vec<u32>, Vec<(u8, u32)>, Vec<u32>, u32, u64);
+type View = (u64, Vec<u32>, Vec<(u8, u32)>, Vec<u32>, u32, usize, u64);
 
 fn view_of_process(p: &Process) -> View {
     let n = p.config().nodes();
@@ -499,6 +512,7 @@ fn view_of_process(p: &Process) -> View {
             .collect(),
         p.pending().map(|t| t.0).collect(),
         p.crashes(),
+        p.events().len(),
         p.retained_bytes(),
     )
 }
@@ -519,6 +533,7 @@ fn view_of_model(m: &Model) -> View {
             .map(|(i, _)| u32::try_from(i).unwrap())
             .collect(),
         m.crashes,
+        m.events.len(),
         m.retained(),
     )
 }
@@ -1541,4 +1556,54 @@ fn honesty_the_network_pack_defers_crash_semantics_here_and_this_profile_states_
         COMPOSITION.map(|(pack, _)| pack),
         ["network/adversarial-v0", "storage", "runtime"]
     );
+}
+
+/// `pr15-impl02-neg-05` (cr-35ujnx, found on the storage pack and audited here). The
+/// exploration prunes by [`Model::key`], so the key must be the whole input of a step
+/// and of the candidate generator. The journal length and the retained bytes are in it,
+/// because the step bound and the budget are charged against them. Over the reachable
+/// space of every configuration, two histories with one key have the same candidates,
+/// and each candidate has the same outcome, event and successor key from both. A step
+/// that read anything the key omits would break this.
+#[test]
+fn differential_key_is_the_whole_input_of_a_step() {
+    type Outcomes = Vec<(Step, Result<Event, Refusal>, Option<ModelKey>)>;
+    let outcomes = |model: &Model| -> Outcomes {
+        candidates(model)
+            .into_iter()
+            .map(|step| {
+                let mut child = model.clone();
+                let result = child.step(&step);
+                let key = result.is_ok().then(|| child.key());
+                (step, result, key)
+            })
+            .collect()
+    };
+    for cfg in differential_configs() {
+        let mut seen: std::collections::BTreeMap<ModelKey, Outcomes> =
+            std::collections::BTreeMap::new();
+        let mut collisions = 0;
+        let mut stack = vec![Model::new(cfg, Mutant::None)];
+        while let Some(model) = stack.pop() {
+            let key = model.key();
+            let next = outcomes(&model);
+            if let Some(before) = seen.get(&key) {
+                assert_eq!(before, &next, "a key collision hides a different successor");
+                collisions += 1;
+                continue;
+            }
+            for (step, result, _) in &next {
+                if result.is_ok() {
+                    let mut child = model.clone();
+                    child.step(step).unwrap();
+                    stack.push(child);
+                }
+            }
+            seen.insert(key, next);
+        }
+        assert!(
+            collisions > 0,
+            "no two histories met, so the check checked nothing"
+        );
+    }
 }

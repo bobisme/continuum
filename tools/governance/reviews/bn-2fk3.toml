@@ -1,0 +1,45 @@
+[change]
+bone = "bn-2fk3"
+author = "continuum-dev"
+summary = "PR-15/IMPL-03: the storage/append-log-v0 fidelity profile and its deterministic Lab handler for submit, sync, stable and ack, with crash loss of the volatile suffix, a torn last record, and fenced late acknowledgements"
+
+[pack]
+covers = ["crates/continuum-effects-storage/src/"]
+
+# `crash` is the fail-stop crash row with its storage outcome: every stable record
+# survives intact, a prefix of the volatile suffix survives, and the first lost record
+# may survive torn. The test drives every outcome from one log state. `delay` is the
+# adversary's explicit, journalled `Delay` step, as in the network and process packs:
+# it holds a sync ticket back one step with no duration. The test drives it 1,000 times
+# while the incarnation runs, where the ack is still delivered after the flush, and
+# across a crash and a restart, where it is fenced (docs/17 §10: "delayed completion
+# from old epoch is rejected").
+fault_coverage_tests = [
+  { test = "crates/continuum-effects-storage/tests/pr15_impl03_storage.rs::fault_crash_keeps_stable_records_and_loses_or_tears_the_volatile_suffix", fault = "crash" },
+  { test = "crates/continuum-effects-storage/tests/pr15_impl03_storage.rs::fault_delay_an_ack_delayed_past_its_incarnation_is_fenced_never_delivered", fault = "delay" },
+]
+
+# GOV-4-13: no host path exists. The crate is #![no_std]; its lane test (the network
+# pack's lane applied unchanged) runs the compiler on the dev and release host builds
+# and demands the unresolved-std error for a planted std use, and the structure rules
+# keep those the only builds. The profile test asserts HostQualification::None. The
+# obligation applies in full once a production handler lands.
+[pack.host_conformance]
+status = "not-applicable"
+reason = "continuum-effects-storage is no_std and declares storage/append-log-v0 with HostQualification::None: there is no production handler, no file, no device and no host path, so there is nothing for the Lab handler to conform to"
+profile_test = "crates/continuum-effects-storage/tests/pr15_impl03_storage.rs::profile_declares_host_qualification_none"
+no_std_lane_test = "crates/continuum-effects-storage/tests/pr15_no_std_lane.rs::the_compiler_refuses_a_host_facility_in_the_storage_pack"
+
+[pack.fidelity_profile]
+profile = "adversarial-envelope"
+note = "continuum-effects-storage declares storage/append-log-v0 0.1.0: it permits every behaviour its modelled rows and stated assumptions do not forbid, makes no host claim, states what a crash keeps and loses and how it composes with process/crash-restart-v0, and refuses every unmodelled storage semantic as Unsupported"
+
+[pack.version_bump]
+from = "0.0.0"
+to = "0.1.0"
+note = "continuum-effects-storage goes from a scaffold with no contract to storage/append-log-v0 0.1.0; the first profile version, so no consumer pins an earlier one"
+
+[pack.independence_review]
+reviewer = "continuum-security"
+review = "cr-35ujnx"
+verdict = "approved"

@@ -1,0 +1,15 @@
+{
+  "base": {},
+  "check": "host-lab-not-applicable-tests-resolve",
+  "description": "cr-35ujnx round 5: a dotted `package.\"links\"` key before `[package]` is a TOML duplicate-key error. Neither Cargo nor tomllib reads the manifest, so no pack crate resolves and the not-applicable form fails closed.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-effects-network/src/gov4_fixture_13_18.rs": "crates_continuum-effects-network_src_gov4_fixture_13_18.rs.fixture",
+    "crates/continuum-effects-network/tests/gov4_fixture_13_18.rs": "crates_continuum-effects-network_tests_gov4_fixture_13_18.rs.fixture",
+    "tools/governance/reviews/gov4-pack-kernel-pack-fixture.toml": "tools_governance_reviews_gov4-pack-kernel-pack-fixture.toml.fixture",
+    "crates/continuum-effects-network/Cargo.toml": "crates_continuum-effects-network_Cargo.toml.fixture"
+  },
+  "id": "gov4-13-host-not-applicable-manifest-dotted-links-key",
+  "requirement": "GOV-4-13",
+  "rule": "host-lab-conformance"
+}

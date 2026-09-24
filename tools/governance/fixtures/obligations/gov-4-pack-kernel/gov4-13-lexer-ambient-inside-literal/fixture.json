@@ -1,0 +1,15 @@
+{
+  "base": {},
+  "check": "host-lab-not-applicable-crate-is-no-std",
+  "description": "rust_lexer_cases.txt case `ambient-inside-literal` appended to the network pack's lib.rs: the structure rules must say clean (cr-35ujnx).",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-effects-network/src/gov4_fixture_13_18.rs": "crates_continuum-effects-network_src_gov4_fixture_13_18.rs.fixture",
+    "crates/continuum-effects-network/tests/gov4_fixture_13_18.rs": "crates_continuum-effects-network_tests_gov4_fixture_13_18.rs.fixture",
+    "tools/governance/reviews/gov4-pack-kernel-pack-fixture.toml": "tools_governance_reviews_gov4-pack-kernel-pack-fixture.toml.fixture",
+    "crates/continuum-effects-network/src/lib.rs": "crates_continuum-effects-network_src_lib.rs.fixture"
+  },
+  "id": "gov4-13-lexer-ambient-inside-literal",
+  "requirement": "GOV-4-13",
+  "rule": "host-lab-conformance"
+}

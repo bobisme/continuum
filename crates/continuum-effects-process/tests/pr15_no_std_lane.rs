@@ -29,118 +29,29 @@ fn manifest_dir() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Code lines of a Rust source: `//` comments (and `//!`, `///`) dropped, blank lines
-/// dropped, the rest trimmed. Block comments are refused by the structure rules.
-fn code_lines(text: &str) -> Vec<String> {
-    text.lines()
-        .map(|line| match line.find("//") {
-            Some(at) => &line[..at],
-            None => line,
-        })
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_owned)
-        .collect()
-}
-
-fn words(line: &str) -> Vec<&str> {
-    line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .filter(|w| !w.is_empty())
-        .collect()
-}
-
-/// Whether a line holds a raw identifier or raw string: an `r` that starts a token and
-/// is followed by `#` or `"`.
-fn raw_token(line: &str) -> bool {
-    let bytes = line.as_bytes();
-    bytes.windows(2).enumerate().any(|(at, pair)| {
-        pair[0] == b'r'
-            && (pair[1] == b'#' || pair[1] == b'"')
-            && (at == 0 || !(bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_'))
-    })
-}
+// The shared token lexer and structure rules (cr-35ujnx): one Rust file for the
+// INV-015 audit and the three pack lanes, the twin of `tools/governance/rust_lexer.py`.
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../tools/governance/rust_lexer.rs"
+));
 
 /// Why the crate's structure lets some build escape `no_std`, or `Ok`.
-fn structure(sources: &[(String, String)], manifest: &str) -> Result<(), String> {
-    let lib = sources
-        .iter()
-        .find(|(name, _)| name == "lib.rs")
-        .ok_or("no lib.rs")?;
-    if code_lines(&lib.1).first().map(String::as_str) != Some("#![no_std]") {
-        return Err("`#![no_std]` is not the crate root's first item".to_owned());
-    }
-    let mut externs = 0;
-    for (name, text) in sources {
-        if text.contains("/*") {
-            return Err(format!("{name} has a block comment"));
-        }
-        for line in code_lines(text) {
-            let w = words(&line);
-            for banned in [
-                "cfg",
-                "cfg_attr",
-                "macro_rules",
-                "include",
-                "include_str",
-                "include_bytes",
-                "path",
-                "asm",
-                "global_asm",
-            ] {
-                if w.contains(&banned) {
-                    return Err(format!("{name} uses `{banned}`: {line}"));
-                }
-            }
-            if raw_token(&line) {
-                return Err(format!("{name} uses a raw identifier or string: {line}"));
-            }
-            if w.windows(2).any(|pair| pair == ["extern", "crate"]) {
-                externs += 1;
-                if name != "lib.rs" || line != "extern crate alloc;" {
-                    return Err(format!(
-                        "{name} has an extern crate other than alloc: {line}"
-                    ));
-                }
-            }
-        }
-    }
-    if externs != 1 {
-        return Err(format!(
-            "{externs} extern crate declarations, not exactly one"
-        ));
-    }
-    let mut section = "";
-    for line in manifest
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-    {
-        if line.starts_with('[') {
-            if line != "[package]" && line != "[lints]" {
-                return Err(format!("the manifest has a `{line}` table"));
-            }
-            section = if line == "[package]" {
-                "package"
-            } else {
-                "lints"
-            };
-            continue;
-        }
-        let key = line.split('=').next().unwrap_or("").trim();
-        if section == "package" && (key == "build" || key == "links") {
-            return Err(format!("the manifest sets `{key}`"));
-        }
-        if section == "lints" && line != "workspace = true" {
-            return Err(format!("the manifest overrides lints: {line}"));
-        }
-        if section.is_empty() {
-            return Err(format!("the manifest has a top-level key: {line}"));
-        }
-    }
-    if !manifest.contains("[lints]\nworkspace = true") {
-        return Err("the manifest does not inherit the workspace lints".to_owned());
-    }
-    Ok(())
+fn structure(sources: &[(String, String)]) -> Result<(), String> {
+    rust_lexer::structure(
+        sources
+            .iter()
+            .map(|(name, text)| (name.as_str(), text.as_str())),
+    )
+}
+
+/// Why Cargo's resolved view of the package at `root` lets a build escape its `src/`
+/// (cr-35ujnx round 5), or `Ok`. Cargo, not a scan of the manifest text, decides what
+/// a quoted, dotted or inline `build` or `links` key means, and finds a `build.rs`
+/// with no key at all. A manifest Cargo refuses is refused.
+fn cargo_problem(root: &Path, package: &str, locked: bool) -> Result<(), String> {
+    let meta = cargo_view::metadata(&root.join("Cargo.toml"), locked)?;
+    cargo_view::pack_problem(&meta, package, root)
 }
 
 fn real_sources() -> Vec<(String, String)> {
@@ -162,14 +73,15 @@ fn real_sources() -> Vec<(String, String)> {
 /// A standalone copy of the crate, its own workspace root, with the workspace's edition
 /// and `unsafe_code = "forbid"`, under a directory unique to this process.
 fn scratch_copy(name: &str, sources: &[(String, String)]) -> PathBuf {
-    let root = manifest_dir()
-        .join("../../target/pr15-process-no-std-lane")
-        .join(format!("{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(root.join("src")).unwrap();
-    for (file, text) in sources {
-        std::fs::write(root.join("src").join(file), text).unwrap();
-    }
+    scratch_with(name, sources, &lane_manifest(), &[])
+}
+
+/// The lane's scratch package name.
+const LANE_PACKAGE: &str = "process-pack-lane";
+
+/// The scratch copy's own manifest: its own workspace root, the workspace's edition and
+/// `unsafe_code = "forbid"`.
+fn lane_manifest() -> String {
     let workspace = std::fs::read_to_string(manifest_dir().join("../../Cargo.toml")).unwrap();
     let edition = workspace
         .lines()
@@ -179,14 +91,32 @@ fn scratch_copy(name: &str, sources: &[(String, String)]) -> PathBuf {
         workspace.contains("unsafe_code = \"forbid\""),
         "the workspace no longer sets unsafe_code to forbid"
     );
-    std::fs::write(
-        root.join("Cargo.toml"),
-        format!(
-            "[package]\nname = \"process-pack-lane\"\nversion = \"0.0.0\"\nedition = {edition}\n\
-             publish = false\n\n[lints.rust]\nunsafe_code = \"forbid\"\n\n[workspace]\n"
-        ),
+    format!(
+        "[package]\nname = \"{LANE_PACKAGE}\"\nversion = \"0.0.0\"\nedition = {edition}\n\
+         publish = false\n\n[lints.rust]\nunsafe_code = \"forbid\"\n\n[workspace]\n"
     )
-    .unwrap();
+}
+
+/// A standalone copy of the crate with the given manifest and extra root files, under a
+/// directory unique to this process.
+fn scratch_with(
+    name: &str,
+    sources: &[(String, String)],
+    manifest: &str,
+    extra: &[(&str, &str)],
+) -> PathBuf {
+    let root = manifest_dir()
+        .join("../../target/pr15-process-no-std-lane")
+        .join(format!("{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    for (file, text) in sources {
+        std::fs::write(root.join("src").join(file), text).unwrap();
+    }
+    std::fs::write(root.join("Cargo.toml"), manifest).unwrap();
+    for (file, text) in extra {
+        std::fs::write(root.join(file), text).unwrap();
+    }
     root
 }
 
@@ -207,11 +137,55 @@ fn cargo_check(package: &Path, release: bool) -> std::process::Output {
     command.output().expect("cargo runs")
 }
 
+/// The dep-info rustc wrote for the scratch crate's library in one profile: every
+/// file and every environment variable the compiler read to build it.
+fn dep_info(package: &Path, release: bool) -> String {
+    let deps = package
+        .join("target")
+        .join(if release { "release" } else { "debug" })
+        .join("deps");
+    let mut found: Vec<String> = std::fs::read_dir(&deps)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "d"))
+        .map(|path| std::fs::read_to_string(path).unwrap())
+        .collect();
+    assert_eq!(found.len(), 1, "one dep-info file in {}", deps.display());
+    found.remove(0)
+}
+
+/// The compiler's own witness that a build read nothing from its environment
+/// (cr-35ujnx round 4): its dep-info names no `# env-dep:` variable, and every file it
+/// read lies in the copy's `src/`.
+fn ambient_inputs(package: &Path, release: bool) -> Vec<String> {
+    let src = package.join("src").canonicalize().unwrap();
+    let mut out = Vec::new();
+    for line in dep_info(package, release).lines() {
+        if let Some(var) = line.strip_prefix("# env-dep:") {
+            out.push(format!("env {var}"));
+        } else if let Some((_, deps)) = line.split_once(": ") {
+            for dep in deps.split_whitespace() {
+                let path = package.join(dep);
+                let path = path.canonicalize().unwrap_or(path);
+                if !path.starts_with(&src) {
+                    out.push(format!("file {dep}"));
+                }
+            }
+        }
+    }
+    out
+}
+
 #[test]
 fn the_compiler_refuses_a_host_facility_in_the_process_pack() {
     let sources = real_sources();
-    let manifest = std::fs::read_to_string(manifest_dir().join("Cargo.toml")).unwrap();
-    assert_eq!(structure(&sources, &manifest), Ok(()));
+    assert_eq!(structure(&sources), Ok(()));
+    // Cargo's view of the real pack, in its real workspace context.
+    assert_eq!(
+        cargo_problem(manifest_dir(), env!("CARGO_PKG_NAME"), true),
+        Ok(()),
+        "cargo metadata shows the real pack escaping its src/"
+    );
     assert!(
         !manifest_dir().join("build.rs").exists(),
         "the pack has a build script"
@@ -233,12 +207,71 @@ fn the_compiler_refuses_a_host_facility_in_the_process_pack() {
         })
         .collect();
     let planted = scratch_copy("planted", &planted_sources);
+    // cr-35ujnx: `#![no_std]` does not forbid an explicit `extern crate std`, and an
+    // alias split across lines reaches `std::fs` under another name. The compiler
+    // accepts this copy; the structure rule is what refuses it, and the lane shows
+    // both halves.
+    let aliased_sources = with_aliased_std(&sources);
+    assert!(
+        structure(&aliased_sources).is_err(),
+        "the structure rules accepted a split, aliased `extern crate std`"
+    );
+    let aliased = scratch_copy("aliased", &aliased_sources);
+    // cr-35ujnx round 4: a pack must read nothing from its build environment. A copy
+    // that reads an environment variable compiles; the structure rule refuses it, and
+    // the compiler's dep-info names the variable, while the real pack's names none.
+    let ambient_sources: Vec<(String, String)> = sources
+        .iter()
+        .map(|(name, text)| {
+            let text = if name == "lib.rs" {
+                format!(
+                    "{text}\n/// Planted by the lane.\npub const LANE_MODE: Option<&str> = \
+                     option_env!(\"CONTINUUM_LANE_MODE\");\n"
+                )
+            } else {
+                text.clone()
+            };
+            (name.clone(), text)
+        })
+        .collect();
+    assert!(
+        structure(&ambient_sources).is_err(),
+        "the structure rules accepted an ambient `option_env!`"
+    );
+    let ambient = scratch_copy("ambient", &ambient_sources);
     for release in [false, true] {
         let clean = cargo_check(&control, release);
         assert!(
             clean.status.success(),
             "the unchanged copy must compile (release: {release}): {}",
             String::from_utf8_lossy(&clean.stderr)
+        );
+        assert_eq!(
+            cargo_problem(&control, LANE_PACKAGE, true),
+            Ok(()),
+            "cargo metadata shows the control copy escaping its src/"
+        );
+        assert!(
+            !dep_info(&control, release).contains("env-dep:OUT_DIR"),
+            "a build script's OUT_DIR reached the pack"
+        );
+        assert_eq!(
+            ambient_inputs(&control, release),
+            Vec::<String>::new(),
+            "rustc read an ambient input building the pack (release: {release})"
+        );
+        let through_env = cargo_check(&ambient, release);
+        assert!(
+            through_env.status.success(),
+            "the env-reading copy must compile (release: {release}): {}",
+            String::from_utf8_lossy(&through_env.stderr)
+        );
+        assert!(
+            ambient_inputs(&ambient, release)
+                .iter()
+                .any(|input| input.starts_with("env CONTINUUM_LANE_MODE")),
+            "rustc's dep-info does not name the variable the copy read, so an empty \
+             env-dep set would prove nothing"
         );
         let refused = cargo_check(&planted, release);
         let stderr = String::from_utf8_lossy(&refused.stderr);
@@ -250,16 +283,48 @@ fn the_compiler_refuses_a_host_facility_in_the_process_pack() {
             (stderr.contains("E0433") || stderr.contains("E0432")) && stderr.contains("`std`"),
             "the failure must be the unresolved `std` crate, not another error: {stderr}"
         );
+        let through_alias = cargo_check(&aliased, release);
+        assert!(
+            through_alias.status.success(),
+            "the aliased copy must compile, or the structure rule is not what refuses it \
+             (release: {release}): {}",
+            String::from_utf8_lossy(&through_alias.stderr)
+        );
     }
     let _ = std::fs::remove_dir_all(control);
     let _ = std::fs::remove_dir_all(planted);
+    let _ = std::fs::remove_dir_all(aliased);
+    let _ = std::fs::remove_dir_all(ambient);
+}
+
+/// The crate's sources with `extern crate std as s;` split across two lines after
+/// `extern crate alloc;`, and a function that reaches the filesystem through the alias.
+fn with_aliased_std(sources: &[(String, String)]) -> Vec<(String, String)> {
+    sources
+        .iter()
+        .map(|(name, text)| {
+            let text = if name == "lib.rs" {
+                format!(
+                    "{}\n/// Planted by the lane.\npub fn lane_alias() -> bool {{\n    \
+                     s::fs::metadata(\"/\").is_ok()\n}}\n",
+                    text.replacen(
+                        "extern crate alloc;",
+                        "extern crate alloc;\nextern\ncrate std as s;",
+                        1
+                    )
+                )
+            } else {
+                text.clone()
+            };
+            (name.clone(), text)
+        })
+        .collect()
 }
 
 /// The structure rules refuse each known way around them.
 #[test]
 fn the_structure_rules_refuse_each_way_around_no_std() {
     let sources = real_sources();
-    let manifest = std::fs::read_to_string(manifest_dir().join("Cargo.toml")).unwrap();
     let edit_lib = |f: &dyn Fn(&str) -> String| -> Vec<(String, String)> {
         sources
             .iter()
@@ -328,37 +393,108 @@ fn the_structure_rules_refuse_each_way_around_no_std() {
             edit_lib(&|t| format!("{t}\ninclude!(\"../x.rs\");\n")),
         ),
         ("block comment", edit_lib(&|t| format!("{t}\n/* x */\n"))),
+        (
+            "split, aliased extern crate std",
+            with_aliased_std(&sources),
+        ),
+        (
+            "extern crate core",
+            edit_lib(&|t| {
+                t.replacen(
+                    "extern crate alloc;",
+                    "extern crate alloc;\nextern crate core as c;",
+                    1,
+                )
+            }),
+        ),
+        (
+            "aliased alloc",
+            edit_lib(&|t| t.replacen("extern crate alloc;", "extern crate alloc as a;", 1)),
+        ),
+        (
+            "a string that opens a comment hides the extern",
+            edit_lib(&|t| format!("{t}\npub const LANE: &str = \"//\"; extern crate std as s;\n")),
+        ),
     ];
     for (name, mutant) in lib_mutants {
-        assert!(structure(&mutant, &manifest).is_err(), "{name} passed");
+        assert!(structure(&mutant).is_err(), "{name} passed");
     }
-    for (name, bad) in [
-        ("std feature", format!("{manifest}\n[features]\nstd = []\n")),
+    // Manifest forms, judged by Cargo's resolved view (cr-35ujnx round 5): quoted,
+    // dotted, inherited and inline-table `build` and `links` keys, a `build.rs` that
+    // Cargo finds with no key at all, a feature and dependencies. Each is refused,
+    // either because Cargo resolves it to what the rule forbids or because Cargo
+    // refuses the manifest.
+    let base = lane_manifest();
+    let script = "fn main() {}\n";
+    let inline = format!(
+        "package = {{ name = \"{LANE_PACKAGE}\", version = \"0.0.0\", edition = \"2024\", \
+         publish = false, build = \"x.rs\" }}\n\n[workspace]\n"
+    );
+    type Variant<'a> = (&'a str, String, Vec<(&'a str, &'a str)>);
+    let variants: Vec<Variant> = vec![
+        (
+            "quoted build key",
+            base.replacen(
+                "publish = false",
+                "publish = false\n\"build\" = \"x.rs\"",
+                1,
+            ),
+            vec![("x.rs", script)],
+        ),
+        (
+            "single-quoted links key with a build script",
+            base.replacen("publish = false", "publish = false\n'links' = \"z\"", 1),
+            vec![("build.rs", script)],
+        ),
+        (
+            "dotted package.\"links\" key",
+            format!("package.\"links\" = \"z\"\n{base}"),
+            vec![],
+        ),
+        (
+            "inherited build key",
+            base.replacen(
+                "publish = false",
+                "publish = false\nbuild.workspace = true",
+                1,
+            ),
+            vec![("build.rs", script)],
+        ),
+        (
+            "inline-table package with a build key",
+            inline,
+            vec![("x.rs", script)],
+        ),
+        (
+            "build.rs found with no key",
+            base.clone(),
+            vec![("build.rs", script)],
+        ),
+        (
+            "std feature",
+            format!("{base}\n[features]\nstd = []\n"),
+            vec![],
+        ),
         (
             "target dependency",
-            format!("{manifest}\n[target.'cfg(windows)'.dependencies]\nx = \"1\"\n"),
+            format!("{base}\n[target.'cfg(windows)'.dependencies]\nx = \"1\"\n"),
+            vec![],
         ),
         (
             "dependency table",
-            format!("{manifest}\n[dependencies.foo]\npath = \"../foo\"\n"),
+            format!("{base}\n[dependencies.foo]\npath = \"../foo\"\n"),
+            vec![],
         ),
-        (
-            "build script",
-            manifest.replacen(
-                "publish = false",
-                "publish = false\nbuild = \"build.rs\"",
-                1,
-            ),
-        ),
-        (
-            "lint override",
-            manifest.replacen(
-                "[lints]\nworkspace = true",
-                "[lints]\nworkspace = true\nrust.unsafe_code = \"allow\"",
-                1,
-            ),
-        ),
-    ] {
-        assert!(structure(&sources, &bad).is_err(), "{name} passed");
+    ];
+    let clean = scratch_with("manifest-clean", &sources, &base, &[]);
+    assert_eq!(cargo_problem(&clean, LANE_PACKAGE, false), Ok(()));
+    let _ = std::fs::remove_dir_all(clean);
+    for (at, (name, manifest, extra)) in variants.into_iter().enumerate() {
+        let root = scratch_with(&format!("manifest-{at}"), &sources, &manifest, &extra);
+        assert!(
+            cargo_problem(&root, LANE_PACKAGE, false).is_err(),
+            "{name} passed Cargo's view"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }

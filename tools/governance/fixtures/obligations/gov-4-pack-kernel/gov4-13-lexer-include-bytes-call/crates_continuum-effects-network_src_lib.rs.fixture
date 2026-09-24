@@ -1,0 +1,96 @@
+//! `continuum-effects-network` — the network effect pack (plan §15, docs/17, PR 15).
+//!
+//! # Responsibility
+//!
+//! Declared network profiles: delivery, drop, duplicate, delay, and partition, with
+//! explicitly declared unsupported cases.
+//!
+//! Only the profiles the replicated-register slice needs are in scope; breadth is
+//! deliberately deferred.
+//!
+//! # What is here (PR-15 / IMPL-01, bn-3ohe)
+//!
+//! One fidelity profile, [`profile::ADVERSARIAL_V0`] — `network/adversarial-v0` at
+//! version 0.1.0, class `adversarial-envelope`, the name
+//! `replicated_register.scenario.toml` and the replicated-register Intent Contract
+//! already use — and one Lab handler, [`lab::Network`], that implements exactly the
+//! profile's modelled rows:
+//!
+//! | Modelled | Step | Event |
+//! |---|---|---|
+//! | delivery (scheduler's choice of any in-flight envelope, or FIFO per link without reordering) | `Deliver` | `Delivered` |
+//! | loss | `Drop` | `Dropped` |
+//! | duplication | `Duplicate` | `Duplicated` |
+//! | unbounded delay, with no duration | `Delay` | `Delayed` |
+//! | one symmetric partition at a time, budgeted | `Partition`, `Heal` | `Partitioned`, `Healed` |
+//!
+//! Every other network semantic RFC 0002 and docs/17 §7 name has a row in
+//! [`profile::Semantic`] marked [`profile::Support::Unsupported`] with its reason. Seven
+//! of them have a step a caller can ask for — one-way and overlapping partitions,
+//! corruption, forgery, connection reset, endpoint crash and recall — and that step is
+//! refused with [`Refusal::Unsupported`], never approximated. The other six — bounded
+//! delay, connection epochs, half-open, backpressure, discovery and framing — have no
+//! step at all, so the handler cannot be asked for them; the profile row is their
+//! declaration.
+//! The profile states two assumptions ([`profile::ASSUMPTIONS`]): no forgery, and no
+//! eventual delivery.
+//!
+//! # What is not here
+//!
+//! - **No host semantics** (docs/09 T06). There is no production handler, no socket,
+//!   and no measured host configuration: [`profile::HostQualification::None`]. Nothing
+//!   this crate produces may be cited as `platform-qualified`.
+//! - **No independence relation** (docs/09 T07): every pair of network events is
+//!   dependent ([`profile::IndependenceClaim::AllDependent`]).
+//! - **No substrate binding.** `continuum-asupersync` does not bind a network family,
+//!   and this crate does not depend on it. Driving this pack from asupersync tasks is the
+//!   replicated-register implementation's work (PR 16).
+//! - **No crash or incarnation semantics.** Those belong to the process pack.
+//!
+//! # Determinism
+//!
+//! Every choice is an explicit [`Step`] in a choice log, and every accepted step is one
+//! [`Event`]. [`run`] is a pure function of a configuration and a log, a
+//! [`lab::Journal`] is its own choice log ([`lab::Journal::choice_log`]), and
+//! [`lab::Journal::encode`] is canonical, so replay is exact to the byte.
+//!
+//! # Dependency-boundary contract
+//!
+//! - A domain pack is declared data plus a normalized adapter; it owns no semantic
+//!   state and may not import engines or `continuum-forge`. The Lab handler's state is
+//!   the pack's own declared network state (docs/17 §7), not the program's.
+//! - INV-008 — typed inconclusiveness: an unsupported case is declared, never silently
+//!   approximated.
+//!
+//! This crate has no dependencies. `tools/check_crate_boundaries.py` enforces the
+//! forbidden edges mechanically.
+//!
+//! # No host effects, by construction
+//!
+//! The crate is `#![no_std]`: it links only `core` and `alloc`, which have no
+//! filesystem, network, process, environment or clock, and `unsafe_code` is forbidden
+//! workspace-wide, so no FFI route exists either. `tests/pr15_no_std_lane.rs` runs the
+//! compiler on the dev and release host builds: a copy of this crate with a planted
+//! `std::net` use fails with the unresolved-`std` error. Structure rules, which the
+//! lane, the INV-015 audit and the GOV-4-13 checker enforce, make those the only builds:
+//! `#![no_std]` first, no `cfg`, no macro definitions, no `include!`, one `extern
+//! crate`, which is `alloc`, no build script, no dependencies, no features. The rules
+//! themselves are lexical; the claim rests on the compiler run they keep meaningful.
+//! A std-less target is not in the pinned toolchain, so there is no second,
+//! independent compiler witness.
+
+#![no_std]
+
+extern crate alloc;
+
+pub mod lab;
+pub mod profile;
+pub mod refusal;
+pub mod step;
+
+pub use lab::{Journal, Network, run};
+pub use profile::{ADVERSARIAL_V0, FidelityClass, FidelityProfile, Semantic, Support};
+pub use refusal::{Refusal, RefusalClass, RunRefusal};
+pub use step::{EnvelopeId, Event, FaultSwitches, NetworkConfig, NodeId, NodeSet, Payload, Step};
+
+pub const BYTES: &[u8] = include_bytes!("../Cargo.toml");

@@ -1,0 +1,101 @@
+# The literal-kind corpus of the no_std structure rules (cr-35ujnx). Each case is a
+# snippet appended to a pack's real `lib.rs`. `extern` is the verdict of the `extern`
+# rule alone; `structure` is the verdict of all the structure rules. An `-inside` case
+# puts `extern crate std` inside one literal kind, where it is text, not a declaration.
+# A `-beside` case uses that literal kind to hide a real `extern crate std as s;` from a
+# scan that lexes the literal wrongly, and the real declaration must still be caught.
+# The Rust twin (INV-015) runs every case; each case is also a GOV-4-13 fixture named
+# `gov4-13-lexer-<name>`, which runs the Python twin.
+=== string-inside extern=pass structure=pass
+pub const NOTE: &str = "extern crate std;";
+=== string-beside extern=fail structure=fail
+pub const A: &str = "\" // /* ";
+extern crate std as s;
+=== byte-string-inside extern=pass structure=pass
+pub const NOTE: &[u8] = b"extern crate std; // \" /*";
+=== byte-string-beside extern=fail structure=fail
+pub const A: &[u8] = b"\\"; extern crate std as s; const B: &[u8] = b"\\";
+=== c-string-inside extern=pass structure=pass
+pub const NOTE: &core::ffi::CStr = c"extern crate std; \u{41}";
+=== c-string-beside extern=fail structure=fail
+pub const A: &core::ffi::CStr = c"\""; extern crate std as s;
+=== char-inside extern=pass structure=pass
+pub const Q: [char; 3] = ['"', '\'', '\u{22}'];
+pub const NOTE: &str = "extern crate std;";
+=== char-beside extern=fail structure=fail
+pub const Q: char = '"'; extern crate std as s; pub const R: char = '"';
+=== byte-char-inside extern=pass structure=pass
+pub const Q: [u8; 3] = [b'"', b'\'', b'\xff'];
+pub const NOTE: &str = "extern crate std;";
+=== byte-char-beside extern=fail structure=fail
+pub const Q: u8 = b'"'; extern crate std as s; pub const R: u8 = b'"';
+=== lifetime-inside extern=pass structure=pass
+pub fn first<'a>(x: &'a str) -> &'a str { 'outer: loop { break 'outer x; } }
+pub const NOTE: &str = "extern crate std;";
+=== lifetime-beside extern=fail structure=fail
+pub fn first<'a, 'b>(x: &'a str, _y: &'b str) -> &'a str { x } extern crate std as s;
+=== raw-string-inside extern=pass structure=fail
+pub const NOTE: &str = r"extern crate std;";
+=== raw-string-beside extern=fail structure=fail
+pub const A: &str = r"\"; extern crate std as s; pub const B: &str = r"\";
+=== raw-hash-string-beside extern=fail structure=fail
+pub const A: &str = r#"a"#; extern crate std as s; pub const B: &str = r##"b"#"##;
+=== raw-byte-string-inside extern=pass structure=fail
+pub const NOTE: &[u8] = br##"extern crate std; "# still inside"##;
+=== raw-byte-string-beside extern=fail structure=fail
+pub const A: &[u8] = br"\"; extern crate std as s; pub const B: &[u8] = br"\";
+=== raw-c-string-beside extern=fail structure=fail
+pub const A: &core::ffi::CStr = cr#"\"#; extern crate std as s;
+=== raw-identifier extern=pass structure=fail
+pub fn r#match() -> u8 { 1 }
+=== nested-block-comment-inside extern=pass structure=fail
+/* outer /* inner */ extern crate std as s; */
+=== nested-block-comment-beside extern=fail structure=fail
+/* outer /* inner */ */ extern crate std as s;
+=== doc-comment-inside extern=pass structure=pass
+/// extern crate std; "an unbalanced quote in a doc comment
+pub const DOC: u8 = 0;
+=== line-comment-with-quote-beside extern=fail structure=fail
+// a quote " in a comment opens nothing
+extern crate std as s;
+=== split-aliased-std extern=fail structure=fail
+extern
+crate std as s;
+=== unterminated-string extern=fail structure=fail
+pub const A: &str = "never closed; extern crate std as s;
+=== unterminated-char extern=fail structure=fail
+pub const A: char = '\u{41';
+=== unbalanced-raw-hashes extern=fail structure=fail
+pub const A: &str = r##"x"#;
+=== unknown-prefix extern=fail structure=fail
+pub const A: &str = z"x";
+=== reserved-guarded-string extern=fail structure=fail
+pub const A: &str = #"x"#;
+=== unknown-escape extern=fail structure=fail
+pub const A: &str = "\q";
+=== string-suffix extern=fail structure=fail
+pub const A: &str = "x"suffix;
+=== unterminated-block-comment extern=fail structure=fail
+/* never /* closed */
+=== env-call extern=pass structure=fail
+pub const MODE: &str = env!("CONTINUUM_MODE");
+=== option-env-call extern=pass structure=fail
+pub const MODE: Option<&str> = option_env!("CONTINUUM_MODE");
+=== option-env-path-spaced extern=pass structure=fail
+pub const MODE: Option<&str> = ::core::option_env ! ("CONTINUUM_MODE");
+=== include-call extern=pass structure=fail
+include!("other.rs");
+=== include-str-call extern=pass structure=fail
+pub const TEXT: &str = include_str!("../Cargo.toml");
+=== include-bytes-call extern=pass structure=fail
+pub const BYTES: &[u8] = include_bytes!("../Cargo.toml");
+=== file-call extern=pass structure=fail
+pub const WHERE: &str = file!();
+=== cfg-attribute extern=pass structure=fail
+#[cfg(feature = "host")]
+pub const HOST: u8 = 1;
+=== ambient-inside-literal extern=pass structure=pass
+pub const NOTE: &str = "env!(\"X\") option_env!(\"Y\") include_str!(\"z\") file!() cfg";
+=== ambient-in-comment extern=pass structure=pass
+// env!("X") option_env!("Y") include_bytes!("z") file!()
+pub const QUIET: u8 = 0;
