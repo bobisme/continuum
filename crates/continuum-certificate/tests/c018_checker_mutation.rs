@@ -1415,17 +1415,59 @@ fn no_single_byte_mutant_verifies_a_claim_the_oracle_refutes() {
     assert!(verified > 0, "no mutant verified, so the oracle never ran");
 }
 
+/// Writes `contents` to `dir/name`, creating `dir` first.
+///
+/// `CARGO_TARGET_TMPDIR` is a compile-time constant (`env!`): cargo creates the
+/// directory it names when it (re)builds this test binary, but it does not
+/// re-create the directory on every `cargo test` run of an already-built binary.
+/// A run with a fresh or emptied target directory (a new checkout, a scratch
+/// workspace, `TMPDIR` pointed at a not-yet-created path per the project
+/// convention) then hits a plain `std::fs::write` before this test's own
+/// assertion runs, so the write itself, not the check it supports, fails
+/// (bn-1gibz). Creating the directory here removes that dependency on cargo's
+/// build-time side effect.
+fn write_scratch(dir: &Path, name: &str, contents: &str) -> std::path::PathBuf {
+    std::fs::create_dir_all(dir)
+        .unwrap_or_else(|error| panic!("{} is not creatable: {error}", dir.display()));
+    let out = dir.join(name);
+    std::fs::write(&out, contents)
+        .unwrap_or_else(|error| panic!("{} is not writable: {error}", out.display()));
+    out
+}
+
 #[test]
 fn the_c018_checker_ledger_matches_the_golden() {
     let actual = ledger();
-    let out = Path::new(env!("CARGO_TARGET_TMPDIR")).join("c018_checker_ledger.txt");
-    std::fs::write(&out, &actual).expect("the rendered ledger is writable");
+    let out = write_scratch(
+        Path::new(env!("CARGO_TARGET_TMPDIR")),
+        "c018_checker_ledger.txt",
+        &actual,
+    );
     assert!(
         actual == GOLDEN,
         "the C018 checker ledger drifted; the rendered ledger is at {}",
         out.display()
     );
     assert_eq!(actual, ledger(), "INV-005: the campaign is a pure function");
+}
+
+/// Regression for bn-1gibz: `write_scratch` must recreate its directory when it
+/// is absent, not assume cargo already made it. Uses its own subdirectory so it
+/// cannot race the other tests in this binary that write under
+/// `CARGO_TARGET_TMPDIR` directly.
+#[test]
+fn write_scratch_recreates_a_missing_directory() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("bn-1gibz-missing-dir-regression");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        !dir.exists(),
+        "setup: the regression directory must start absent"
+    );
+    let out = write_scratch(&dir, "probe.txt", "bn-1gibz");
+    assert_eq!(
+        std::fs::read_to_string(&out).expect("the probe file was written"),
+        "bn-1gibz"
+    );
 }
 
 // --- the committed corpus ---------------------------------------------------------------
@@ -1473,9 +1515,12 @@ fn render_corpus() -> String {
 /// bn-2npu regression input.
 #[test]
 fn the_committed_corpus_replays_with_its_recorded_verdicts() {
-    let out = Path::new(env!("CARGO_TARGET_TMPDIR")).join("c018_corpus_cases.txt");
     let rendered = render_corpus();
-    std::fs::write(&out, &rendered).expect("the rendered corpus is writable");
+    let out = write_scratch(
+        Path::new(env!("CARGO_TARGET_TMPDIR")),
+        "c018_corpus_cases.txt",
+        &rendered,
+    );
     let mut replayed = 0;
     for line in CORPUS.lines().filter(|l| !l.starts_with('#')) {
         let mut fields = line.split(" | ");

@@ -763,7 +763,14 @@ fn the_evidence_ledger_is_byte_stable_and_matches_the_golden() {
         render(&campaign(SEED, VARIANTS)),
         held_out_summary().1
     );
-    let out = Path::new(env!("CARGO_TARGET_TMPDIR")).join("c020_hidden_mutant_evidence.txt");
+    // `CARGO_TARGET_TMPDIR` is a compile-time constant: cargo creates it when it
+    // (re)builds this test binary, not on every later `cargo test` run of an
+    // already-built one, so a cached binary over an emptied target directory
+    // (bn-1gibz) hits this write, not the assertion below, with ENOENT.
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    std::fs::create_dir_all(dir)
+        .unwrap_or_else(|error| panic!("{} is not creatable: {error}", dir.display()));
+    let out = dir.join("c020_hidden_mutant_evidence.txt");
     std::fs::write(&out, &actual).expect("the rendered ledger is writable");
     assert!(
         actual == GOLDEN,

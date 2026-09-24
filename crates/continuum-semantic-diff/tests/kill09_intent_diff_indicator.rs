@@ -2572,7 +2572,14 @@ fn render(m: &Measurement) -> String {
 #[test]
 fn the_indicator_artifact_is_byte_stable_and_matches_the_golden() {
     let first = render(measured());
-    let out = Path::new(env!("CARGO_TARGET_TMPDIR")).join("kill09_intent_diff_indicator.txt");
+    // `CARGO_TARGET_TMPDIR` is a compile-time constant: cargo creates it when it
+    // (re)builds this test binary, not on every later `cargo test` run of an
+    // already-built one, so a cached binary over an emptied target directory
+    // (bn-1gibz) hits this write, not the assertion below, with ENOENT.
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    std::fs::create_dir_all(dir)
+        .unwrap_or_else(|error| panic!("{} is not creatable: {error}", dir.display()));
+    let out = dir.join("kill09_intent_diff_indicator.txt");
     std::fs::write(&out, &first).expect("the rendered artifact is writable");
     assert!(
         first == GOLDEN,
