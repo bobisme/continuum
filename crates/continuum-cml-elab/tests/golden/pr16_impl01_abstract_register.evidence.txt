@@ -1,0 +1,113 @@
+# PR-16/IMPL-01 abstract atomic register (bn-3e3v): notes/plan/examples/abstract_register.ctm
+# checked by continuum-engine-reference. Regenerate: CML_BLESS=1 cargo test -p
+# continuum-cml-elab --test pr16_impl01_abstract_register
+
+[pr16-impl01-pos-01-values2-epochs2]
+committed configuration: epochs {0,1}, values {v0,v1}
+model: slots=6 actions=4 predicates=Agreement,Stability
+scope: Complete { states: 9 }
+Agreement: established states=9
+Stability: established states=9
+deadlock established states=9
+write-once step violations: 0
+
+[pr16-impl01-pos-02-wide]
+epochs {0,1,2}, values {v0,v1,v2}
+model: slots=12 actions=9 predicates=Agreement,Stability
+scope: Complete { states: 64 }
+Agreement: established states=64
+Stability: established states=64
+deadlock established states=64
+write-once step violations: 0
+
+[pr16-impl01-neg-01-overwrite]
+seeded bug: Choose without its guard rewrites a chosen epoch
+model: slots=6 actions=4 predicates=Agreement,Stability
+scope: Complete { states: 25 }
+Agreement: refuted state=(0, 1, 0, 0, 1, 1) depth=2 violations=16
+  witness: Choose(epoch=1,value=v1) ; Choose(epoch=1,value=v0)
+Stability: refuted state=(0, 1, 0, 0, 1, 1) depth=2 violations=16
+  witness: Choose(epoch=1,value=v1) ; Choose(epoch=1,value=v0)
+deadlock established states=25
+write-once step violations: 40
+
+[pr16-impl01-neg-02-amnesia]
+seeded bug: Forget drops every chosen value, history keeps them
+model: slots=6 actions=5 predicates=Agreement,Stability
+scope: Complete { states: 64 }
+Agreement: refuted state=(0, 1, 0, 0, 1, 1) depth=3 violations=39
+  witness: Choose(epoch=1,value=v1) ; Forget ; Choose(epoch=1,value=v0)
+Stability: refuted state=(0, 0, 0, 0, 0, 1) depth=2 violations=55
+  witness: Choose(epoch=1,value=v1) ; Forget
+deadlock established states=64
+write-once step violations: 48
+
+[pr16-impl01-neg-03-unrecorded]
+seeded bug: Choose does not record history
+model: slots=6 actions=4 predicates=Agreement,Stability
+scope: Complete { states: 9 }
+Agreement: established states=9
+Stability: refuted state=(0, 1, 0, 0, 0, 0) depth=1 violations=8
+  witness: Choose(epoch=1,value=v0)
+deadlock established states=9
+write-once step violations: 0
+
+[pr16-impl01-neg-04-lockstep-forget]
+seeded bug outside the invariants: Forget clears chosen and history together
+model: slots=6 actions=5 predicates=Agreement,Stability
+scope: Complete { states: 9 }
+Agreement: established states=9
+Stability: established states=9
+deadlock established states=9
+write-once step violations: 8
+
+[pr16-impl01-bnd-01-one-value]
+epochs {0,1}, values {v0}
+model: slots=4 actions=2 predicates=Agreement,Stability
+scope: Complete { states: 4 }
+Agreement: established states=4
+Stability: established states=4
+deadlock established states=4
+write-once step violations: 0
+
+[pr16-impl01-bnd-02-one-value-overwrite]
+the overwrite bug under one value: unobservable
+model: slots=4 actions=2 predicates=Agreement,Stability
+scope: Complete { states: 4 }
+Agreement: established states=4
+Stability: established states=4
+deadlock established states=4
+write-once step violations: 0
+
+[pr16-impl01-bnd-03-one-epoch-overwrite]
+the overwrite bug under one epoch, two values: the smallest exposing scope
+model: slots=3 actions=2 predicates=Agreement,Stability
+scope: Complete { states: 5 }
+Agreement: refuted state=(1, 1, 1) depth=2 violations=2
+  witness: Choose(epoch=0,value=v1) ; Choose(epoch=0,value=v0)
+Stability: refuted state=(1, 1, 1) depth=2 violations=2
+  witness: Choose(epoch=0,value=v1) ; Choose(epoch=0,value=v0)
+deadlock established states=5
+write-once step violations: 4
+
+[pr16-impl01-bnd-04-depth-bound]
+the committed configuration under a depth bound of 1
+model: slots=6 actions=4 predicates=Agreement,Stability
+scope: Bounded { states: 5, tripped: Depth, frontier: 4 }
+Agreement: inconclusive reason=ResourceExhausted tripped=depth explored=5 frontier=4
+Stability: inconclusive reason=ResourceExhausted tripped=depth explored=5 frontier=4
+deadlock inconclusive reason=ResourceExhausted tripped=depth explored=5 frontier=4
+
+[pr16-impl01-bnd-05-depth-bound-overwrite]
+the overwrite bug under a depth bound of 2
+model: slots=6 actions=4 predicates=Agreement,Stability
+scope: Bounded { states: 13, tripped: Depth, frontier: 8 }
+Agreement: refuted state=(0, 1, 0, 0, 1, 1) depth=2 violations=4
+  witness: none (the exploration reached its depth bound after 13 states, so no path from it is known to be shortest)
+Stability: refuted state=(0, 1, 0, 0, 1, 1) depth=2 violations=4
+  witness: none (the exploration reached its depth bound after 13 states, so no path from it is known to be shortest)
+deadlock inconclusive reason=ResourceExhausted tripped=depth explored=13 frontier=8
+
+[pr16-impl01-bnd-06-refused]
+epochs {0..3}, values {v0..v3}: past MAX_INIT_ENUMERATION, a limit of the history encoding, 2^16 membership slots, not of the 625 chosen maps
+lowering: refused Unlowerable(InitDomainTooLarge)

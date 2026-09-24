@@ -1,0 +1,56 @@
+module AbstractRegister
+
+// The abstract atomic register: the specification-level model of the replicated
+// register's service contract (examples/replicated_register.md, "Service contract";
+// START_HERE PR 16, first bullet). The operational durable register refines it.
+//
+// `chosen` is the abstract state the contract names. `history` is a history
+// variable: every (epoch, value) pair the register has ever chosen. It only records
+// what `Choose` does and never constrains it, so the behaviour of `chosen` is the
+// contract's alone. It turns the contract's two transition properties -- no epoch
+// is ever given two values, and a chosen value never changes or disappears -- into
+// state invariants that an explicit-state check can decide.
+//
+// Side-condition: every action may only add to `history` (write it as
+// `history union {...}` or leave it unchanged). The invariants mean "write-once"
+// only under it; an action that shrinks `history` with `chosen` escapes them. A
+// refinement onto this model must therefore check each concrete step against the
+// `Choose` guard, not only the invariants on projected states.
+//
+// `Stability` implies `Agreement`, because `chosen` is a map. `Agreement` stays as
+// the scenario's named property. Reads are out of scope: the contract defines only
+// `Choose`, and an observation of the register is a read of `chosen`.
+
+type Value
+
+state {
+  chosen: Map[Nat, Value]
+  history: Set[(Nat, Value)]
+}
+
+init {
+  chosen = {}
+  history = {}
+}
+
+// One atomic step: the linearization point of an acknowledged proposal. Choosing
+// the value an epoch already holds is allowed and changes nothing.
+action Choose(epoch: Nat, value: Value) {
+  require chosen.get(epoch) in {None, Some(value)}
+  next chosen = chosen.put(epoch, value)
+  next history = history union {(epoch, value)}
+}
+
+// abstract_register::Agreement: no epoch has ever been given two values.
+invariant Agreement {
+  forall epoch, v1, v2:
+    (epoch, v1) in history && (epoch, v2) in history
+    => v1 == v2
+}
+
+// Every value ever chosen is still chosen, and nothing is chosen that was not
+// chosen by `Choose`: `chosen` is write-once per epoch.
+invariant Stability {
+  forall epoch, value:
+    (epoch, value) in history <=> chosen.get(epoch) == Some(value)
+}
