@@ -11,7 +11,7 @@ tests = ["crates/continuum-kernel-core/tests/gov4_fixture.rs::no_such_test"]
 classes = ["encoding.injectivity"]
 
 [kernel.code_size]
-total = 12833
+total = 13270
 budget = 15000
 note = "continuum-kernel-core grew by five lines for the governance fixture marker"
 

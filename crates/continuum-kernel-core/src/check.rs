@@ -60,8 +60,8 @@
 //!    table.
 //!
 //! At wire epoch 2 the order is the one `check_model_closure` documents: precharge,
-//! `S ⊆ Dom(M)`, `Init(M) ⊆ S`, the carried relation equal to the model's, and the
-//! invariant.
+//! `S ⊆ Dom(M)`, `Init(M) ⊆ S`, the carried relation equal to the model's, then
+//! definedness and the invariant (bn-iu8eh).
 //!
 //! # Determinism
 //!
@@ -70,7 +70,8 @@
 //! docs/12 §1). Two runs over the same bytes produce byte-identical verdicts on any
 //! platform.
 
-use crate::model::Fault;
+use crate::definedness::{self, Definedness};
+use crate::model::{Fault, Model};
 use crate::verdict::Resource;
 use crate::verdict::{CertificateKind, CheckedClaim, Feature, PropertyClass, Rejection, Verdict};
 use crate::wire::{
@@ -170,9 +171,19 @@ fn check_finite_closure(envelope: &Envelope, body: &FiniteClosureBody) -> Verdic
 /// 3. `Post(S) ⊆ S`, exactly — for every table state the kernel evaluates every
 ///    action of the model, locates each successor in the table, and requires the
 ///    sorted, deduplicated result to equal the carried row entry for entry;
-/// 4. `S ⊆ P` — for [`PropertyClass::Invariant`], the named predicate holds at every
-///    table state. For [`PropertyClass::StateDomain`], `P` is `Dom(M)` and step 1
-///    discharged it.
+/// 4. definedness, then `S ⊆ P` — no definedness predicate of an action chain is
+///    false at a table state ([`Rejection::UndefinedActionRead`]); for
+///    [`PropertyClass::Invariant`], no definedness predicate that guards the named
+///    predicate is false at a table state ([`Rejection::UndefinedInvariantRead`]), and
+///    the named predicate holds at every table state. For
+///    [`PropertyClass::StateDomain`], `P` is `Dom(M)` and step 1 discharged it.
+///
+/// Step 4 is RFC 0003 "Definedness" and RFC 0013 "Undefined and partial behavior"
+/// (bn-iu8eh): a state where `X#defined` is false is an undefined read in `X`, an
+/// error that invalidates the model, so no closure over it is valid, whoever produced
+/// it. The chains are classified by `crate::definedness`. A certificate that names
+/// such a model is refuted, not unsupported: the kernel decides the question, and the
+/// answer is that the claim is not valid.
 ///
 /// Step 3 is what closes bn-2npu's residual: a row the producer wrote from a faulty
 /// evaluator, or wrote wrongly from a correct one, is not the kernel's row.
@@ -264,35 +275,75 @@ fn check_model_closure(envelope: &Envelope, body: &ModelClosureBody) -> Verdict 
         }
     }
 
-    // 4. S ⊆ P for the invariant class.
-    let invariant = match body.predicate() {
-        Some(predicate) => {
-            for index in 0..table.len() {
-                let holds = table
-                    .state(index)
-                    .map(|state| model.holds(predicate, state));
-                match holds {
-                    Some(Ok(true)) => {}
-                    Some(Ok(false)) | None => {
-                        return Verdict::Rejected(Rejection::InvariantViolated { state: index });
-                    }
-                    // The evaluator's own budget, not a fact about the certificate
-                    // (bn-ympz5): typed-inconclusive, never a rejection.
-                    Some(Err(Fault::DepthExhausted)) => {
-                        return Verdict::Unsupported(expression_depth_unsupported());
-                    }
-                    // Listed by name, not `_`, so a future `Fault` variant fails to
-                    // compile here instead of silently falling into `Rejected`
-                    // (bn-ympz5, adversarial review of this bone).
-                    Some(Err(Fault::Overflow | Fault::OutsideDomain { .. })) => {
-                        return Verdict::Rejected(Rejection::EvaluationOverflow { state: index });
-                    }
-                }
+    // 4. Definedness, then S ⊆ P for the invariant class (bn-iu8eh). Every table
+    // state in ascending order: every action chain, deepest first; where every action
+    // read is defined, the invariant's own chain; where that is defined too, the
+    // invariant. An evaluation fault ends the check at once. Otherwise an undefined
+    // action read anywhere comes first, then an undefined invariant read, then a
+    // violation: the precedence of `continuum-engine-reference`'s definedness scan.
+    let definedness = Definedness::of(model);
+    let subject = body.predicate();
+    let (subject_guards, subject_is_guard) = subject.map_or((&[][..], false), |index| {
+        (definedness.guards_of(index), definedness.is_guard(index))
+    });
+    let mut undefined_action: Option<(u32, usize)> = None;
+    let mut undefined_invariant: Option<(u32, usize)> = None;
+    let mut violated: Option<u32> = None;
+    for index in 0..table.len() {
+        // Fail closed: a table index the table cannot answer is a mismatch, as in
+        // step 3. Unreachable, because the decoder reads exactly `len` states.
+        let Some(state) = table.state(index) else {
+            return Verdict::Rejected(Rejection::RelationMismatch {
+                state: index,
+                entry: 0,
+            });
+        };
+        match first_false(model, definedness.action_guards(), state, index) {
+            Err(fault) => return fault_verdict(fault),
+            Ok(Some(guard)) => {
+                undefined_action.get_or_insert((index, guard));
+                continue;
             }
-            model.predicate_name(predicate).cloned()
+            Ok(None) => {}
         }
-        None => None,
-    };
+        let Some(subject) = subject else {
+            continue;
+        };
+        match first_false(model, subject_guards.iter().copied(), state, index) {
+            Err(fault) => return fault_verdict(fault),
+            Ok(Some(guard)) => {
+                undefined_invariant.get_or_insert((index, guard));
+                continue;
+            }
+            Ok(None) => {}
+        }
+        match first_false(model, core::iter::once(subject), state, index) {
+            Err(fault) => return fault_verdict(fault),
+            Ok(Some(_)) if subject_is_guard => {
+                undefined_invariant.get_or_insert((index, subject));
+            }
+            Ok(Some(_)) => {
+                violated.get_or_insert(index);
+            }
+            Ok(None) => {}
+        }
+    }
+    if let Some((state, predicate)) = undefined_action {
+        return Verdict::Rejected(Rejection::UndefinedActionRead {
+            state,
+            predicate: narrow_u32(predicate),
+        });
+    }
+    if let Some((state, predicate)) = undefined_invariant {
+        return Verdict::Rejected(Rejection::UndefinedInvariantRead {
+            state,
+            predicate: narrow_u32(predicate),
+        });
+    }
+    if let Some(state) = violated {
+        return Verdict::Rejected(Rejection::InvariantViolated { state });
+    }
+    let invariant = subject.and_then(|index| model.predicate_name(index).cloned());
 
     Verdict::Verified(CheckedClaim::model_bound(
         body.property(),
@@ -305,6 +356,43 @@ fn check_model_closure(envelope: &Envelope, body: &ModelClosureBody) -> Verdict 
         model.identity(),
         invariant,
     ))
+}
+
+/// The first of `predicates` that is false at table state `index`, in order, or the
+/// fault that ends the check.
+///
+/// A [`Fault::DepthExhausted`] is the evaluator's own budget, never a fact about the
+/// certificate (bn-ympz5): [`WalkFault::DepthExhausted`], typed-inconclusive. Every
+/// other fault is a rejection: the model has no well-defined value there. The faults
+/// are listed by name, not `_`, so a future [`Fault`] variant fails to compile here
+/// instead of silently becoming a rejection.
+fn first_false(
+    model: &Model,
+    predicates: impl IntoIterator<Item = usize>,
+    state: &[i64],
+    index: u32,
+) -> Result<Option<usize>, WalkFault> {
+    for predicate in predicates {
+        match model.holds(predicate, state) {
+            Ok(true) => {}
+            Ok(false) => return Ok(Some(predicate)),
+            Err(Fault::DepthExhausted) => return Err(WalkFault::DepthExhausted),
+            Err(Fault::Overflow | Fault::OutsideDomain { .. }) => {
+                return Err(WalkFault::Rejection(Rejection::EvaluationOverflow {
+                    state: index,
+                }));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// The verdict a [`WalkFault`] ends the check with.
+fn fault_verdict(fault: WalkFault) -> Verdict {
+    match fault {
+        WalkFault::Rejection(rejection) => Verdict::Rejected(rejection),
+        WalkFault::DepthExhausted => Verdict::Unsupported(expression_depth_unsupported()),
+    }
 }
 
 /// What `Model::successors` can fail with, inside step 3 of [`check_model_closure`].
@@ -377,8 +465,10 @@ const SORT_UNITS_PER_OUTCOME: u64 = 24;
 /// `bits(states) + 1` probes. Per table state: the domain check (`arity`), every
 /// guard, every outcome of every action as if enabled (its assignments, a state copy
 /// and a lookup), a sort of the derived row (one lookup's worth per outcome, already
-/// counted), the row comparison (included in the copy), and the invariant. Plus one
-/// lookup per initial state.
+/// counted), the row comparison (included in the copy), the invariant, and the
+/// definedness scan ([`definedness::evaluation_work`]). Plus one lookup per initial
+/// state, and one classification of the definedness chains
+/// ([`definedness::classification_work`], one unit per byte compared) (bn-iu8eh).
 fn evaluation_work(body: &ModelClosureBody) -> Option<u64> {
     let model = body.model();
     let states = u64::from(body.table().len());
@@ -398,11 +488,15 @@ fn evaluation_work(body: &ModelClosureBody) -> Option<u64> {
     let per_state = model
         .successor_work(lookup)?
         .checked_add(arity)?
-        .checked_add(invariant)?;
+        .checked_add(invariant)?
+        .checked_add(definedness::evaluation_work(model, body.predicate())?)?;
     let initial = u64::try_from(model.initial_states().len())
         .ok()?
         .checked_mul(lookup)?;
-    states.checked_mul(per_state)?.checked_add(initial)
+    states
+        .checked_mul(per_state)?
+        .checked_add(initial)?
+        .checked_add(definedness::classification_work(model)?)
 }
 
 /// Every state in the table lies in the declared state domain (docs/16 PO-MOD-003).
@@ -1501,6 +1595,253 @@ mod tests {
                 value: 99,
             })
         );
+    }
+
+    // --- definedness (bn-iu8eh) ----------------------------------------------
+
+    /// `big != value`, over the Die Hard variables.
+    fn big_is_not(value: i64) -> Expr {
+        Expr::Not(Box::new(Expr::Eq(
+            Box::new(Expr::Var("big".to_owned())),
+            Box::new(Expr::Int(value)),
+        )))
+    }
+
+    /// The Die Hard certificate over a model that declares `extra` predicates too,
+    /// claiming `invariant` (or the state domain). The rows stay the green relation:
+    /// the certificate of a producer that ignores definedness.
+    fn diehard_with(extra: Vec<(&str, Expr)>, invariant: Option<&str>) -> PlanV2 {
+        let mut model = ModelPlan::diehard();
+        model
+            .predicates
+            .extend(extra.into_iter().map(|(n, e)| (n.to_owned(), e)));
+        model.predicates.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut plan = match invariant {
+            Some(name) => PlanV2::diehard_invariant(name),
+            None => PlanV2::diehard(),
+        };
+        plan.model = model.encode();
+        plan
+    }
+
+    /// The least table index of a state with `big == value`.
+    fn first_with_big(plan: &PlanV2, value: i64) -> u32 {
+        u32::try_from(plan.states.iter().position(|s| s[0] == value).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn an_undefined_action_read_at_a_table_state_is_rejected_under_every_claim() {
+        // `fill-big#defined` is false where big = 4. A producer that ignores it writes
+        // the lowered relation, which is closed; the kernel refutes the claim anyway.
+        for invariant in [None, Some("TypeOK")] {
+            let plan = diehard_with(vec![("fill-big#defined", big_is_not(4))], invariant);
+            assert_eq!(
+                rejection_v2(&plan),
+                Rejection::UndefinedActionRead {
+                    state: first_with_big(&plan, 4),
+                    // BigNotFour, TypeOK, fill-big#defined.
+                    predicate: 2,
+                },
+                "{invariant:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_undefined_invariant_read_refutes_only_its_invariant() {
+        let extra = || vec![("TypeOK#defined", big_is_not(4))];
+        let plan = diehard_with(extra(), Some("TypeOK"));
+        assert_eq!(
+            rejection_v2(&plan),
+            Rejection::UndefinedInvariantRead {
+                state: first_with_big(&plan, 4),
+                predicate: 2,
+            }
+        );
+        // The chain guards `TypeOK`, not the state domain and not another invariant.
+        assert!(verdict_v2(&diehard_with(extra(), None)).is_verified());
+        assert!(matches!(
+            rejection_v2(&diehard_with(extra(), Some("BigNotFour"))),
+            Rejection::InvariantViolated { .. }
+        ));
+        // A definedness predicate claimed as the invariant: false is an undefined
+        // read, never a violation.
+        let plan = diehard_with(extra(), Some("TypeOK#defined"));
+        assert_eq!(
+            rejection_v2(&plan),
+            Rejection::UndefinedInvariantRead {
+                state: first_with_big(&plan, 4),
+                predicate: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn a_deeper_chain_member_is_read_first() {
+        // `TypeOK#defined#defined` guards `TypeOK#defined`; both are false at big = 4,
+        // and the deeper one is named.
+        let plan = diehard_with(
+            vec![
+                ("TypeOK#defined", big_is_not(4)),
+                ("TypeOK#defined#defined", big_is_not(4)),
+            ],
+            Some("TypeOK"),
+        );
+        assert_eq!(
+            rejection_v2(&plan),
+            Rejection::UndefinedInvariantRead {
+                state: first_with_big(&plan, 4),
+                predicate: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn an_ill_formed_chain_is_read_as_an_actions_and_fails_closed() {
+        // A gap (`TypeOK#defined` is not declared), a base that names nothing, and a
+        // base that is an action's name: each chain is evaluated under every claim.
+        for (name, index) in [
+            ("TypeOK#defined#defined", 2),
+            ("Nothing#defined", 1),
+            ("fill-big#defined", 2),
+        ] {
+            let plan = diehard_with(vec![(name, big_is_not(4))], None);
+            assert_eq!(
+                rejection_v2(&plan),
+                Rejection::UndefinedActionRead {
+                    state: first_with_big(&plan, 4),
+                    predicate: index,
+                },
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn precedence_is_fault_then_action_then_invariant_then_violation() {
+        // BigNotFour is violated at big = 4, and its own read is undefined only at the
+        // later state (5, 3): the undefined read still comes first.
+        let late = Expr::Not(Box::new(Expr::And(
+            Box::new(Expr::Eq(
+                Box::new(Expr::Var("big".to_owned())),
+                Box::new(Expr::Int(5)),
+            )),
+            Box::new(Expr::Eq(
+                Box::new(Expr::Var("small".to_owned())),
+                Box::new(Expr::Int(3)),
+            )),
+        )));
+        let plan = diehard_with(
+            vec![("BigNotFour#defined", late.clone())],
+            Some("BigNotFour"),
+        );
+        let last = u32::try_from(plan.states.len() - 1).unwrap();
+        assert_eq!(plan.states[last as usize], vec![5, 3]);
+        assert_eq!(
+            rejection_v2(&plan),
+            Rejection::UndefinedInvariantRead {
+                state: last,
+                predicate: 1,
+            }
+        );
+        // An undefined action read at the last state outranks both.
+        let plan = diehard_with(
+            vec![
+                ("BigNotFour#defined", big_is_not(4)),
+                ("fill-big#defined", late),
+            ],
+            Some("BigNotFour"),
+        );
+        assert_eq!(
+            rejection_v2(&plan),
+            Rejection::UndefinedActionRead {
+                state: last,
+                predicate: 3,
+            }
+        );
+        // An evaluation fault in a definedness predicate outranks every finding.
+        let overflow = Expr::Eq(
+            Box::new(Expr::Add(
+                Box::new(Expr::Var("big".to_owned())),
+                Box::new(Expr::Int(i64::MAX)),
+            )),
+            Box::new(Expr::Int(0)),
+        );
+        let plan = diehard_with(
+            vec![
+                ("BigNotFour#defined", big_is_not(4)),
+                ("fill-big#defined", overflow),
+            ],
+            Some("BigNotFour"),
+        );
+        assert_eq!(
+            rejection_v2(&plan),
+            Rejection::EvaluationOverflow {
+                state: first_with_big(&plan, 1),
+            }
+        );
+    }
+
+    /// Metamorphic relation: alpha-renaming (docs/19 §3). Renaming an invariant
+    /// together with its `#defined` chain keeps the verdict and the state it names.
+    /// The non-preservation control renames only the chain, which detaches it from
+    /// its base, so the kernel reads it as an action's (fail closed).
+    #[test]
+    fn metamorphic_alpha_renaming_a_chain_with_its_base_keeps_the_verdict() {
+        let rename = |plan: &PlanV2, from: &str, to: &str| {
+            let mut model = ModelPlan::diehard();
+            model
+                .predicates
+                .push(("TypeOK#defined".to_owned(), big_is_not(4)));
+            for (name, _) in &mut model.predicates {
+                if name == from || name.strip_suffix("#defined") == Some(from) {
+                    *name = name.replacen(from, to, 1);
+                }
+            }
+            model.predicates.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut out = plan.clone();
+            out.model = model.encode();
+            out
+        };
+        let green = diehard_with(vec![("TypeOK#defined", big_is_not(4))], Some("TypeOK"));
+        let Rejection::UndefinedInvariantRead { state, .. } = rejection_v2(&green) else {
+            panic!("the invariant's read is undefined");
+        };
+        for to in ["AOK", "Typed", "zz"] {
+            let mut plan = rename(&green, "TypeOK", to);
+            plan.predicate = Some(to.to_owned());
+            assert!(
+                matches!(rejection_v2(&plan),
+                    Rejection::UndefinedInvariantRead { state: s, .. } if s == state),
+                "{to}"
+            );
+        }
+        // Control: the chain alone renamed guards nothing, so it is an action's.
+        let plan = rename(&green, "TypeOK#defined", "Other#defined");
+        assert!(matches!(
+            rejection_v2(&plan),
+            Rejection::UndefinedActionRead { state: s, .. } if s == state
+        ));
+    }
+
+    #[test]
+    fn the_definedness_scan_is_charged_before_any_evaluation() {
+        let body = |plan: &PlanV2| match crate::wire::decode(&plan.encode()).unwrap().body() {
+            Body::ModelClosure(body) => body.clone(),
+            _ => panic!("a model-bound certificate"),
+        };
+        let plain = body(&PlanV2::diehard());
+        let guarded = body(&diehard_with(
+            vec![("fill-big#defined", big_is_not(4))],
+            None,
+        ));
+        let (plain, guarded) = (
+            evaluation_work(&plain).unwrap(),
+            evaluation_work(&guarded).unwrap(),
+        );
+        // 16 states, each evaluating the 4-node predicate once, plus the
+        // classification of one 16-byte name.
+        assert!(guarded > plain + 16 * 4, "{plain} {guarded}");
     }
 
     #[test]

@@ -15,6 +15,7 @@
     "crates/continuum-certificate/tests/inv004_no_self_certification.rs",
     "crates/continuum-kernel-core/Cargo.toml",
     "crates/continuum-kernel-core/src/check.rs",
+    "crates/continuum-kernel-core/src/definedness.rs",
     "crates/continuum-kernel-core/src/fixture.rs",
     "crates/continuum-kernel-core/src/lib.rs",
     "crates/continuum-kernel-core/src/model.rs",
@@ -84,7 +85,7 @@
     "tools/tcb-audit/mutants.toml",
     "tools/tcb-audit/public-api.txt"
   ],
-  "checker_inputs_sha256": "354a3c13d057d3f070c1833af480a00b0a0762111d357e3f56c5905c849b51c0",
+  "checker_inputs_sha256": "bc4422a79fe360a1b3443c02474c240ab3c528eeffe8f9a6c9c9cbca71a18736",
   "checking_base": [
     "continuum-certificate",
     "continuum-kernel-core",
@@ -182,15 +183,16 @@
       },
       "continuum-kernel-core": {
         "by_file": {
-          "check.rs": 481,
-          "lib.rs": 134,
-          "model.rs": 874,
+          "check.rs": 575,
+          "definedness.rs": 265,
+          "lib.rs": 135,
+          "model.rs": 918,
           "receipt.rs": 648,
-          "verdict.rs": 872,
+          "verdict.rs": 905,
           "wire.rs": 1240
         },
-        "code_lines": 2548,
-        "lines": 4249
+        "code_lines": 2807,
+        "lines": 4686
       },
       "continuum-kernel-sat": {
         "by_file": {
@@ -227,16 +229,16 @@
       }
     },
     "checking_base_total": {
-      "code_lines": 7716,
-      "lines": 13300
+      "code_lines": 7975,
+      "lines": 13737
     },
     "finite_closure_checker": {
-      "code_lines": 2690,
+      "code_lines": 2949,
       "crates": [
         "continuum-certificate",
         "continuum-kernel-core"
       ],
-      "lines": 4721
+      "lines": 5158
     },
     "method": "tools/check_kernel_covenant.py count_crate: shipped src lines; code_lines are non-blank non-comment"
   },
@@ -389,6 +391,90 @@
       "outcome": "killed",
       "side": "checker",
       "targets": "S ⊆ P for an invariant of the carried model"
+    },
+    {
+      "failed_tests": [
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "no_lie_verifies",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "id": "core-v2-undefined-action-read-off",
+      "kill_class": "soundness",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "no undefined read: every action's definedness holds at every table state (bn-iu8eh)"
+    },
+    {
+      "failed_tests": [
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "no_lie_verifies",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "id": "core-v2-undefined-invariant-read-off",
+      "kill_class": "soundness",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "no undefined read: the invariant's definedness holds at every table state (bn-iu8eh)"
+    },
+    {
+      "failed_tests": [
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "no_lie_verifies",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/definedness.rs",
+      "id": "core-v2-definedness-paren-rule-off",
+      "kill_class": "soundness",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "classification: a chain through a name with `(` is an action's (bn-iu8eh)"
+    },
+    {
+      "failed_tests": [
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "no_lie_verifies",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/definedness.rs",
+      "id": "core-v2-definedness-gap-rule-off",
+      "kill_class": "soundness",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "classification: a chain with a gap is an action's (bn-iu8eh)"
+    },
+    {
+      "failed_tests": [
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "no_lie_verifies",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/model.rs",
+      "id": "core-v2-definedness-action-name-off",
+      "kill_class": "soundness",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "classification: a chain through an action's name is an action's (bn-iu8eh)"
+    },
+    {
+      "failed_tests": [
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "no_lie_verifies",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/model.rs",
+      "id": "core-v2-definedness-schema-off",
+      "kill_class": "soundness",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "classification: a chain through the schema of an action instance is an action's (bn-iu8eh)"
     },
     {
       "failed_tests": [],
@@ -901,13 +987,13 @@
       "targets": "evaluation: a disabled action has no successor"
     }
   ],
-  "producer_inputs_sha256": "8a16ddc342f839c0cfdff635d8b86bc6d7758249b567fe3892bd8a521db0e952",
+  "producer_inputs_sha256": "fb289f1e33e8e55846d4f86c16eb353ed8c56f0960303dc6a1cb58eba1f449e0",
   "producer_measurement": {
     "producers": {
       "continuum-engine-reference": {
         "by_file": {
           "bfs.rs": 892,
-          "certificate.rs": 1058,
+          "certificate.rs": 1060,
           "checking.rs": 1227,
           "defect.rs": 339,
           "definedness.rs": 328,
@@ -922,7 +1008,7 @@
           "witness.rs": 512
         },
         "code_lines": 4943,
-        "lines": 8172
+        "lines": 8174
       },
       "continuum-model-core": {
         "by_file": {
@@ -949,10 +1035,10 @@
   "producer_residual": {
     "no_observed_escape": {
       "crates/continuum-engine-reference/src/bfs.rs": 892,
-      "crates/continuum-engine-reference/src/certificate.rs": 1058,
+      "crates/continuum-engine-reference/src/certificate.rs": 1060,
       "crates/continuum-model-core/src/model.rs": 1437
     },
-    "no_observed_escape_lines": 3387,
+    "no_observed_escape_lines": 3389,
     "per_file": {
       "crates/continuum-engine-reference/src/bfs.rs": {
         "refused": 2
@@ -987,11 +1073,11 @@
       "completeness": 7,
       "drift": 3,
       "precision": 5,
-      "soundness": 17,
+      "soundness": 23,
       "timeout": 0
     },
-    "checker_killed": 33,
-    "checker_mutants": 35,
+    "checker_killed": 39,
+    "checker_mutants": 41,
     "checker_survived": [
       "core-lookup-ignores-arity",
       "core-v2-precharge-off"

@@ -244,6 +244,50 @@ impl Model {
             .map_or(0, |predicate| predicate.body.size)
     }
 
+    /// How many predicates the model declares.
+    pub(crate) fn predicate_count(&self) -> usize {
+        self.predicates.len()
+    }
+
+    /// The name of the predicate at `index`, as bytes.
+    pub(crate) fn predicate_bytes(&self, index: usize) -> Option<&[u8]> {
+        self.predicates
+            .get(index)
+            .map(|predicate| predicate.name.as_bytes())
+    }
+
+    /// The index of the predicate named `name`. A binary search: the decoder admits
+    /// predicate names only in strictly ascending byte order.
+    pub(crate) fn predicate_by_bytes(&self, name: &[u8]) -> Option<usize> {
+        self.predicates
+            .binary_search_by(|predicate| predicate.name.as_bytes().cmp(name))
+            .ok()
+    }
+
+    /// Whether `name` is an action's name, or the schema `X` of an action instance
+    /// `X(…)` (the action's name up to its first `(`).
+    ///
+    /// Two binary searches over the action names, which the decoder admits only in
+    /// strictly ascending byte order. For a `name` without `(`, an action has schema
+    /// `name` exactly when its name starts with `name(`, and the actions that do form
+    /// one contiguous run that starts at the first name not below `name(`. A `name`
+    /// with `(` is never a schema by that test; the caller refuses such names anyway.
+    pub(crate) fn is_action_or_schema(&self, name: &[u8]) -> bool {
+        let named = |action: &Action| action.name.as_bytes().cmp(name);
+        if self.actions.binary_search_by(named).is_ok() {
+            return true;
+        }
+        let mut prefix: Vec<u8> = Vec::with_capacity(name.len().saturating_add(1));
+        prefix.extend_from_slice(name);
+        prefix.push(b'(');
+        let first = self
+            .actions
+            .partition_point(|action| action.name.as_bytes() < prefix.as_slice());
+        self.actions
+            .get(first)
+            .is_some_and(|action| action.name.as_bytes().starts_with(&prefix))
+    }
+
     /// An upper bound on the evaluation work of one state's successor computation:
     /// every guard, every assignment of every outcome, a copy of the state per
     /// outcome, and one table lookup per outcome costed at `lookup` units.

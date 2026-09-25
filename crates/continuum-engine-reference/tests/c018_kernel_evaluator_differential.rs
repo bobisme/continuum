@@ -340,15 +340,17 @@ fn compare(model: &Model, tally: &mut Tally) {
     }
 
     for (index, predicate) in model.predicates().iter().enumerate() {
-        // The first state where the model core faults or finds the predicate false.
+        // The first state where the model core faults, else the first where it finds
+        // the predicate false. A fault anywhere outranks a violation (bn-iu8eh): the
+        // kernel scans every table state, as the reference engine's definedness scan
+        // does, and an evaluation error ends it at once.
         let mut first: Option<(usize, bool)> = None;
         for (at, vector) in states.iter().enumerate() {
             let state = model.state(vector).expect("a domain vector is a state");
             match model.evaluate_predicate(index, &state) {
                 Ok(true) => {}
                 Ok(false) => {
-                    first = Some((at, false));
-                    break;
+                    first.get_or_insert((at, false));
                 }
                 Err(_) => {
                     first = Some((at, true));

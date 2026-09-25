@@ -132,10 +132,62 @@ id = "core-v2-invariant-rule-off"
 side = "checker"
 file = "crates/continuum-kernel-core/src/check.rs"
 targets = "S ⊆ P for an invariant of the carried model"
-find = """                    Some(Ok(false)) | None => {
-                        return Verdict::Rejected(Rejection::InvariantViolated { state: index });
-                    }"""
-replace = """                    Some(Ok(false)) | None => {}"""
+find = "    if let Some(state) = violated {"
+replace = "    if let Some(state) = violated.filter(|_| false) {"
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-undefined-action-read-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/check.rs"
+targets = "no undefined read: every action's definedness holds at every table state (bn-iu8eh)"
+find = "    if let Some((state, predicate)) = undefined_action {"
+replace = "    if let Some((state, predicate)) = undefined_action.filter(|_| false) {"
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-undefined-invariant-read-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/check.rs"
+targets = "no undefined read: the invariant's definedness holds at every table state (bn-iu8eh)"
+find = "    if let Some((state, predicate)) = undefined_invariant {"
+replace = "    if let Some((state, predicate)) = undefined_invariant.filter(|_| false) {"
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-definedness-paren-rule-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/definedness.rs"
+targets = "classification: a chain through a name with `(` is an action's (bn-iu8eh)"
+find = "                if current.contains(&b'(')"
+replace = "                if false && current.contains(&b'(')"
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-definedness-gap-rule-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/definedness.rs"
+targets = "classification: a chain with a gap is an action's (bn-iu8eh)"
+find = "                    || model.predicate_by_bytes(current).is_none()"
+replace = "                    || false"
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-definedness-action-name-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/model.rs"
+targets = "classification: a chain through an action's name is an action's (bn-iu8eh)"
+find = "        if self.actions.binary_search_by(named).is_ok() {"
+replace = "        if false && self.actions.binary_search_by(named).is_ok() {"
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-definedness-schema-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/model.rs"
+targets = "classification: a chain through the schema of an action instance is an action's (bn-iu8eh)"
+find = "            .is_some_and(|action| action.name.as_bytes().starts_with(&prefix))"
+replace = "            .is_some_and(|_| false)"
 expect = "killed"
 
 [[mutant]]

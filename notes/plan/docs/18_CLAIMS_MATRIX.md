@@ -210,15 +210,17 @@ compiling fixtures each fail it for their own stated reason. The retained record
 checked whole: its controls, rows, summary and measurements must equal a
 recomputation, and its digest covers every file under the checking crates and the
 workspace build inputs. The record is replaced only by a campaign that passed. The
-checking base is 13156 shipped lines by the KCOV counting method. An edit to it fails
+checking base is 13737 shipped lines by the KCOV counting method. An edit to it fails
 `just covenant` until the lane runs again.
 
 The checker campaign is `crates/continuum-certificate/tests/c018_checker_mutation.rs`.
 Its ledger is `tests/golden/c018_checker_ledger.txt`, and its corpus is
 `tests/c018-corpus/cases.txt`. It covers the seven classes the kernels check: finite
 closure at wire epochs 1 and 2, state type, LRAT, SMT proof, ranking and fair-SCC
-exclusion. The kernels accept all eleven green certificates. They reject 37 of 38
-corrupted certificates, each for the reason it targets. The exception is a false SMT
+exclusion. The kernels accept all eleven green certificates. They reject 43 of 44
+corrupted certificates, each for the reason it targets. Six of them carry a closed
+relation over a model with an undefined read at a table state, which the kernel
+refutes by RFC 0003 "Definedness" (bn-iu8eh). The exception is a false SMT
 theory lemma. The kernel accepts it by design, and the claim names `TRUSTED_SOLVER`
 and the theory. Of 11643 single-byte mutants, the kernels accept 2005. At wire epoch
 2 the oracle is a third reading of the model grammar, written in the test. For each one, an oracle re-derives the
@@ -227,8 +229,9 @@ accepted claim is false about the structure the mutant carries. Some accepted mu
 carry a different relation, such as a transition moved to another table state. The
 kernel cannot tell those from a producer's intent.
 
-Thirty-five source mutants of the checking base ran against scratch copies of its
-crates. The campaign kills 33 of them. The second survivor turns off the epoch-2
+Forty-one source mutants of the checking base ran against scratch copies of its
+crates. The campaign kills 39 of them. Six of the kills are bn-iu8eh's: the two
+definedness reports and four clauses of the chain classification. The second survivor turns off the epoch-2
 evaluation precharge: no corpus certificate comes near the budget, and the kernel's
 own unit test kills it. The counts that follow are bn-2npu's first 25. Thirteen let a lie through, a false claim or a
 broken proof. One overstates the assurance of a lemma proof, 6 reject a green, 2 give

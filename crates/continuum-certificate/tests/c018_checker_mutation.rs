@@ -864,6 +864,87 @@ fn lies() -> Vec<Lie> {
         "invariant-violated",
         c.encode(),
     ));
+    // bn-iu8eh: the rows are the lowered relation, closed and the model's, but a
+    // definedness predicate is false at a table state. RFC 0003 makes that an
+    // undefined read, and RFC 0013 an error that invalidates the model.
+    let mut c = core_model_closure();
+    c.model.predicates.push((
+        "inc#defined",
+        expr::compare(1, &expr::var("x"), &expr::int(1)),
+    ));
+    out.push(lie(
+        "core-mc/undefined-action-read",
+        "no undefined read: an action's definedness is false at a table state",
+        "undefined-action-read",
+        c.encode(),
+    ));
+    let mut c = core_model_invariant();
+    c.model.predicates.push((
+        "Small#defined",
+        expr::compare(1, &expr::var("x"), &expr::int(2)),
+    ));
+    out.push(lie(
+        "core-mc/undefined-invariant-read",
+        "no undefined read: the invariant's definedness is false at a table state",
+        "undefined-invariant-read",
+        c.encode(),
+    ));
+    // bn-iu8eh: a chain that does not guard a predicate is an action's (fail closed),
+    // so it refutes the state-domain claim. One lie per clause of the rule.
+    let not_one = || expr::compare(1, &expr::var("x"), &expr::int(1));
+    let fail_closed = |actions: Option<&[&'static str]>, extra: Vec<(&'static str, Vec<u8>)>| {
+        let mut c = core_model_closure();
+        if let Some(names) = actions {
+            for (action, name) in c.model.actions.iter_mut().zip(names) {
+                action.0 = *name;
+            }
+        }
+        c.model.predicates.extend(extra);
+        c.model.predicates.sort_by(|a, b| a.0.cmp(b.0));
+        c.encode()
+    };
+    out.push(lie(
+        "core-mc/undefined-read-behind-a-gap",
+        "no undefined read: a chain with a gap is an action's",
+        "undefined-action-read",
+        fail_closed(None, vec![("Small#defined#defined", not_one())]),
+    ));
+    out.push(lie(
+        "core-mc/undefined-read-in-an-instance-name",
+        "no undefined read: a chain through a name with `(` is an action's",
+        "undefined-action-read",
+        fail_closed(
+            None,
+            vec![
+                ("inc(k=0)", expr::within(&expr::var("x"), 0, 3)),
+                ("inc(k=0)#defined", not_one()),
+            ],
+        ),
+    ));
+    out.push(lie(
+        "core-mc/undefined-read-named-like-an-action",
+        "no undefined read: a chain whose base is an action's name is an action's",
+        "undefined-action-read",
+        fail_closed(
+            None,
+            vec![
+                ("reset", expr::within(&expr::var("x"), 0, 3)),
+                ("reset#defined", not_one()),
+            ],
+        ),
+    ));
+    out.push(lie(
+        "core-mc/undefined-read-named-like-a-schema",
+        "no undefined read: a chain whose base is the schema of an instance is an action's",
+        "undefined-action-read",
+        fail_closed(
+            Some(&["inc(k=0)", "reset"]),
+            vec![
+                ("inc", expr::within(&expr::var("x"), 0, 3)),
+                ("inc#defined", not_one()),
+            ],
+        ),
+    ));
 
     // State type: S ⊆ P.
     let mut c = core_state_type();
@@ -1154,6 +1235,7 @@ type OracleAction = (Tree, Vec<Vec<(usize, Tree)>>);
 
 struct OracleModel {
     bounds: Vec<(i64, i64)>,
+    action_names: Vec<String>,
     actions: Vec<OracleAction>,
     initial: Vec<Vec<i64>>,
     predicates: Vec<(String, Tree)>,
@@ -1246,8 +1328,9 @@ fn read_model(bytes: &[u8]) -> Result<OracleModel, String> {
         bounds.push((c.i64()?, c.i64()?));
     }
     let mut actions = Vec::new();
+    let mut action_names = Vec::new();
     for _ in 0..c.u64()? {
-        c.name()?;
+        action_names.push(c.name()?);
         let guard = c.boolean(&names)?;
         let mut outcomes = Vec::new();
         for _ in 0..c.u64()? {
@@ -1276,6 +1359,7 @@ fn read_model(bytes: &[u8]) -> Result<OracleModel, String> {
     }
     Ok(OracleModel {
         bounds,
+        action_names,
         actions,
         initial,
         predicates,
@@ -1335,8 +1419,99 @@ fn eval_bool(tree: &Tree, state: &[i64]) -> Option<bool> {
     }
 }
 
-/// The wire-epoch-2 claim: S ⊆ Dom(M), Init(M) ⊆ S, every row the model's row, and the
-/// invariant at every state.
+/// `name` without one trailing `#defined`, when something remains.
+fn defined_subject(name: &str) -> Option<&str> {
+    name.strip_suffix("#defined")
+        .filter(|rest| !rest.is_empty())
+}
+
+/// The definedness obligations of the model (RFC 0003, "Definedness"; bn-iu8eh), read
+/// a third way: by name strings and linear scans. Returns, per predicate, the base of
+/// its chain and its depth when it is a definedness predicate, and whether that chain
+/// is an action's. A chain guards the predicate its base names only when, for every
+/// member, every name from the member down to the base is a declared predicate, is no
+/// action's name nor the part before `(` of one, and has no `(`.
+fn oracle_chains(model: &OracleModel) -> Vec<Option<(String, usize, bool)>> {
+    let declared = |n: &str| model.predicates.iter().any(|(p, _)| p == n);
+    let action_like = |n: &str| {
+        model
+            .action_names
+            .iter()
+            .any(|a| a == n || a.split('(').next() == Some(n) && a.contains('('))
+    };
+    let mut members: Vec<Option<(String, usize, bool)>> = Vec::new();
+    for (name, _) in &model.predicates {
+        let Some(mut base) = defined_subject(name) else {
+            members.push(None);
+            continue;
+        };
+        let mut depth = 1;
+        while let Some(inner) = defined_subject(base) {
+            base = inner;
+            depth += 1;
+        }
+        let mut good = true;
+        let mut here = Some(name.as_str());
+        while let Some(n) = here {
+            good &= declared(n) && !action_like(n) && !n.contains('(');
+            here = defined_subject(n);
+        }
+        members.push(Some((base.to_owned(), depth, good)));
+    }
+    // A chain is a predicate's only when every member is well formed.
+    let chains: Vec<Option<(String, usize, bool)>> = members
+        .iter()
+        .map(|m| {
+            m.as_ref().map(|(base, depth, _)| {
+                let all = members
+                    .iter()
+                    .flatten()
+                    .filter(|(b, _, _)| b == base)
+                    .all(|(_, _, good)| *good);
+                (base.clone(), *depth, !all)
+            })
+        })
+        .collect();
+    chains
+}
+
+/// Whether every definedness obligation of the claim holds at `state`: every action
+/// chain member, and, for an invariant `name`, every member of its own chain deeper
+/// than it.
+fn oracle_defined(
+    model: &OracleModel,
+    chains: &[Option<(String, usize, bool)>],
+    invariant: Option<&str>,
+    state: &[i64],
+) -> bool {
+    let (own_base, own_depth) = match invariant {
+        Some(name) => match model
+            .predicates
+            .iter()
+            .position(|(p, _)| p == name)
+            .and_then(|i| chains[i].clone())
+        {
+            Some((base, depth, _)) => (Some(base), depth),
+            None => (Some(name.to_owned()), 0),
+        },
+        None => (None, 0),
+    };
+    model
+        .predicates
+        .iter()
+        .zip(chains)
+        .all(|((_, body), chain)| match chain {
+            Some((base, depth, is_action)) => {
+                let obliged = *is_action
+                    || (own_base.as_deref() == Some(base.as_str()) && *depth > own_depth);
+                !obliged || eval_bool(body, state) == Some(true)
+            }
+            None => true,
+        })
+}
+
+/// The wire-epoch-2 claim: S ⊆ Dom(M), Init(M) ⊆ S, every row the model's row, no
+/// undefined read at any state, and the invariant at every state.
 fn oracle_model_closure(body: &kcore::wire::ModelClosureBody) -> Result<bool, String> {
     let model = read_model(body.model_identity())?;
     let states: Vec<Vec<i64>> = (0..body.table().len())
@@ -1387,6 +1562,14 @@ fn oracle_model_closure(body: &kcore::wire::ModelClosureBody) -> Result<bool, St
         if carried != derived.as_slice() {
             return Ok(false);
         }
+    }
+    let chains = oracle_chains(&model);
+    let invariant = body.invariant().map(|name| name.as_str());
+    if !states
+        .iter()
+        .all(|state| oracle_defined(&model, &chains, invariant, state))
+    {
+        return Ok(false);
     }
     if let Some(name) = body.invariant() {
         let Some((_, predicate)) = model.predicates.iter().find(|(n, _)| n == name.as_str()) else {
@@ -2083,6 +2266,11 @@ fn the_committed_corpus_replays_with_its_recorded_verdicts() {
         "lie:core-mc/rows-from-another-evaluator | rejected:relation-mismatch | ",
         "green:core/model-closure | verified | ",
         "green:core/model-invariant | verified | ",
+        // bn-iu8eh: a closed relation over a model with an undefined read.
+        "lie:core-mc/undefined-action-read | rejected:undefined-action-read | ",
+        "lie:core-mc/undefined-invariant-read | rejected:undefined-invariant-read | ",
+        "lie:core-mc/undefined-read-behind-a-gap | rejected:undefined-action-read | ",
+        "lie:core-mc/undefined-read-named-like-a-schema | rejected:undefined-action-read | ",
     ] {
         assert!(CORPUS.contains(line), "the corpus carries {line:?}");
     }

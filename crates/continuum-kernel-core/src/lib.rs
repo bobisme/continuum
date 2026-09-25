@@ -120,6 +120,7 @@
 )]
 
 pub mod check;
+mod definedness;
 mod model;
 pub mod receipt;
 pub mod verdict;

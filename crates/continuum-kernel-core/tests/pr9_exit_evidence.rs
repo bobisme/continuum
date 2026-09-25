@@ -206,6 +206,7 @@ fn checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes() {
     let mut public_verdict_producers = Vec::new();
     for (name, source) in walked_sources(&[
         "check.rs",
+        "definedness.rs",
         "fixture.rs",
         "lib.rs",
         "model.rs",
@@ -623,6 +624,7 @@ fn no_public_value_can_carry_a_verdict_or_a_callable() {
     let mut found = Vec::new();
     for (name, source) in walked_sources(&[
         "check.rs",
+        "definedness.rs",
         "fixture.rs",
         "lib.rs",
         "model.rs",

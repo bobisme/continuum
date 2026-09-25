@@ -708,6 +708,9 @@ const CERTIFICATE_LANDINGS: &[&str] = &[
     "cert::core::rejected::successor-not-in-table",
     "cert::core::rejected::relation-mismatch",
     "cert::core::rejected::invariant-violated",
+    // bn-iu8eh: an undefined read at a table state.
+    "cert::core::rejected::undefined-action-read",
+    "cert::core::rejected::undefined-invariant-read",
     "cert::sat::verified",
     "cert::sat::rejected",
     "cert::sat::unsupported",

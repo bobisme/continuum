@@ -555,8 +555,10 @@ impl<'a> ClosedSet<'a> {
 /// kernel's question, asked of the bytes. These are the ways the bytes could not be
 /// produced at all. One arm is a refusal rather than an inability:
 /// [`EmissionError::Undefined`] (bn-24a5c), because an undefined read is an error of
-/// the model that no certificate may cover, and the kernel does not yet read
-/// definedness predicates itself.
+/// the model that no certificate may cover. The kernel refuses such a certificate
+/// too, from any producer (bn-iu8eh: `Rejection::UndefinedActionRead` and
+/// `Rejection::UndefinedInvariantRead`); the emitter refuses first, so its caller
+/// gets the typed reason without writing bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EmissionError {
     /// The claim envelope is not one the decoder would accept.

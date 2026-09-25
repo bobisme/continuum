@@ -31,6 +31,12 @@ LIE core-mc/update-leaves-domain | false-claim | the model's relation is defined
 LIE core-mc/guard-overflows | false-claim | the model's relation is defined: checked arithmetic | evaluation-overflow | evaluation-overflow | claim-false | caught
 LIE core-mc/dead-operand-overflows | false-claim | the model's relation is defined: connectives do not short-circuit | evaluation-overflow | evaluation-overflow | claim-false | caught
 LIE core-mc/invariant-false | false-claim | S ⊆ P for an invariant of the model | invariant-violated | invariant-violated | claim-false | caught
+LIE core-mc/undefined-action-read | false-claim | no undefined read: an action's definedness is false at a table state | undefined-action-read | undefined-action-read | claim-false | caught
+LIE core-mc/undefined-invariant-read | false-claim | no undefined read: the invariant's definedness is false at a table state | undefined-invariant-read | undefined-invariant-read | claim-false | caught
+LIE core-mc/undefined-read-behind-a-gap | false-claim | no undefined read: a chain with a gap is an action's | undefined-action-read | undefined-action-read | claim-false | caught
+LIE core-mc/undefined-read-in-an-instance-name | false-claim | no undefined read: a chain through a name with `(` is an action's | undefined-action-read | undefined-action-read | claim-false | caught
+LIE core-mc/undefined-read-named-like-an-action | false-claim | no undefined read: a chain whose base is an action's name is an action's | undefined-action-read | undefined-action-read | claim-false | caught
+LIE core-mc/undefined-read-named-like-a-schema | false-claim | no undefined read: a chain whose base is the schema of an instance is an action's | undefined-action-read | undefined-action-read | claim-false | caught
 LIE core-st/state-outside-domain | false-claim | S ⊆ P | property-violated | property-violated | claim-false | caught
 LIE sat/satisfiable-formula | false-claim | refutation: the formula without clause 4 is satisfiable | no-conflict | no-conflict | claim-false | caught
 LIE sat/antecedent-not-unit | broken-evidence | RUP: an antecedent with two unassigned literals | hint-not-unit | hint-not-unit | claim-holds | caught
@@ -54,7 +60,7 @@ LIE tmp-scc/complete-disabled | false-claim | `Complete` disabled on the loop di
 LIE tmp-scc/reachable-dead-end | false-claim | an execution that stops at a non-goal state (bn-2npu fix) | progress-deadlock | progress-deadlock | claim-false | caught
 LIE tmp-scc/fair-action-undeclared | false-claim | a fairness assumption over an action outside the alphabet | fair-action-out-of-range | fair-action-out-of-range | claim-false | caught
 LIE tmp-scc/successor-outside-table | false-claim | every transition lands in the table | closure-failure | closure-failure | claim-false | caught
-# LIES caught 37 not-caught 1
+# LIES caught 43 not-caught 1
 # SWEEP class | bytes | mutants | verified (same claim / relabelled) | verified-false | outcome histogram
 SWEEP core/finite-closure | 267 | 801 | 159 (39 / 120) | 0 | rejected:closure-failure=71 rejected:count-out-of-range=39 rejected:initial-state-not-in-table=23 rejected:inverted-variable-range=23 rejected:malformed-token=315 rejected:no-initial-states=2 rejected:not-strictly-ascending=60 rejected:property-violated=24 rejected:schema-epoch-mismatch=7 rejected:trailing-bytes=3 rejected:truncated=18 rejected:unknown-action=15 unroutable:UnknownFamily=24 unsupported:CertificateKind=6 unsupported:PropertyClass=6 unsupported:WireEpoch=6 verified=159
 SWEEP core/state-type | 240 | 720 | 189 (69 / 120) | 0 | rejected:count-out-of-range=15 rejected:inverted-variable-range=27 rejected:malformed-token=293 rejected:not-strictly-ascending=50 rejected:property-violated=96 rejected:schema-epoch-mismatch=7 rejected:trailing-bytes=1 rejected:truncated=6 unroutable:UnknownFamily=24 unsupported:CertificateKind=6 unsupported:WireEpoch=6 verified=189

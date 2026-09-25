@@ -738,6 +738,37 @@ pub enum Rejection {
         /// Index of the state in the state table.
         state: u32,
     },
+    /// An action's read is undefined at a table state (bn-iu8eh): a definedness
+    /// predicate of an action chain of the carried model is false there.
+    ///
+    /// RFC 0003, "Definedness": such a state is the typed outcome "undefined read in
+    /// `A`". RFC 0013 makes it an error that invalidates the model. The lowered guard
+    /// is false there only so that no successor is computed from the read, so the
+    /// table is closed under the lowered relation and not under the model's meaning.
+    /// Reported for the least such table state, and before any other finding of the
+    /// definedness scan except an evaluation fault.
+    UndefinedActionRead {
+        /// Index of the state in the state table.
+        state: u32,
+        /// Index, in the model's canonical predicate order, of the definedness
+        /// predicate that is false there.
+        predicate: u32,
+    },
+    /// The invariant's read is undefined at a table state (bn-iu8eh): a definedness
+    /// predicate that guards the certificate's invariant `I` (`I#defined`, or a deeper
+    /// member of its chain) is false there, or the invariant is itself a definedness
+    /// predicate and is false there.
+    ///
+    /// RFC 0003, "Definedness": the value of `I` at such a state is not a verdict, so
+    /// no invariant claim over it is valid. Reported for the least such table state,
+    /// after any undefined action read and before any violation.
+    UndefinedInvariantRead {
+        /// Index of the state in the state table.
+        state: u32,
+        /// Index, in the model's canonical predicate order, of the definedness
+        /// predicate that is false there.
+        predicate: u32,
+    },
 }
 
 impl Rejection {
@@ -778,6 +809,8 @@ impl Rejection {
             Self::SuccessorNotInTable { .. } => "successor-not-in-table",
             Self::RelationMismatch { .. } => "relation-mismatch",
             Self::InvariantViolated { .. } => "invariant-violated",
+            Self::UndefinedActionRead { .. } => "undefined-action-read",
+            Self::UndefinedInvariantRead { .. } => "undefined-invariant-read",
         }
     }
 
