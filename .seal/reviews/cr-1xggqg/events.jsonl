@@ -6,3 +6,4 @@
 {"ts":"2026-09-25T18:03:19.022440809Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-35nq0g","reason":"Informational risk-high assessment; no security finding"}}
 {"ts":"2026-09-25T18:03:27.657666823Z","author":"continuum-security","event":"ReviewerVoted","data":{"review_id":"cr-1xggqg","vote":"lgtm","reason":"LGTM for the full persisted range at acf6a42f9b1931f657f53bdc926e3505aa253fba. Static security review found no blocker. The risk:critical human gate remains separate.","target_commit":"acf6a42f9b1931f657f53bdc926e3505aa253fba"}}
 {"ts":"2026-09-25T18:03:27.701063247Z","author":"continuum-security","event":"ReviewApproved","data":{"review_id":"cr-1xggqg","target_commit":"acf6a42f9b1931f657f53bdc926e3505aa253fba"}}
+{"ts":"2026-09-25T18:33:41.056404845Z","author":"continuum-dev","event":"ReviewMerged","data":{"review_id":"cr-1xggqg","final_commit":"a0694b46887424fc855e2469a546a6f65a629649"}}
