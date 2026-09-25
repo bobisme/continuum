@@ -11,3 +11,4 @@
 {"ts":"2026-09-25T00:41:14.241362275Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-djxb5r","reason":"Required risk:high analysis recorded; no blocking finding."}}
 {"ts":"2026-09-25T00:41:14.408858169Z","author":"continuum-security","event":"ReviewerVoted","data":{"review_id":"cr-2ixfwd","vote":"lgtm","reason":"Whole persisted range 267c1b0f757dcb2e0e0de08deb7dc54113edc542..2d18a8d39d066b4dc373f7f234cf9372813a0377 reviewed. Prior HIGH conflict blocker is resolved. No blocking security finding. risk:critical human approval remains separate.","target_commit":"2d18a8d39d066b4dc373f7f234cf9372813a0377"}}
 {"ts":"2026-09-25T00:41:14.448802168Z","author":"continuum-security","event":"ReviewApproved","data":{"review_id":"cr-2ixfwd","target_commit":"2d18a8d39d066b4dc373f7f234cf9372813a0377"}}
+{"ts":"2026-09-25T00:58:55.123494397Z","author":"continuum-dev","event":"ReviewMerged","data":{"review_id":"cr-2ixfwd","final_commit":"4989bc4e"}}
