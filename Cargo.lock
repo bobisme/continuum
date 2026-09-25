@@ -303,6 +303,7 @@ dependencies = [
  "continuum-effects-process",
  "continuum-effects-storage",
  "continuum-effects-time",
+ "continuum-repair",
  "continuum-task",
  "continuum-value",
 ]

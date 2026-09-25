@@ -1,0 +1,61 @@
+[change]
+bone = "bn-2pla"
+author = "continuum-dev"
+summary = "PR-20 / IMPL-03, exact replay: continuum-repair's replay module evaluates RFC 0032 gates 1 and 4 from the transaction's crashpack, whose bytes must re-derive to its crash_ handle. The base replay passes only on the byte-identical run; the recorded failure absent fails; the failure reproduced without the recorded run, or a divergence, is inconclusive with a defect_. The candidate replay runs under the fail-closed Exact policy unless a PolicyAuthorization bound to the version's rt_ identity, snapshots and base intent is checked against it; nothing in production issues one yet (request_continue_and_disclose answers NoAuthority; owners bn-2vanm and bn-b6u4). Under Exact a clean run with eliminated or reordered steps is inconclusive; a failure fails; a divergence is inconclusive. Evaluated gates are recorded with crash_/ev_/defect_ evidence records that bind the replayer, the policy, the status and the typed INV-008 reason, Unsupported included, and the recorded evaluation_policy (with the authorization digest when authorized) is part of the rt_ identity"
+
+[semantic]
+covers = [
+  "crates/continuum-repair/src/",
+]
+reference_tests = [
+  "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_positive_exact_base_and_clean_candidate_pass_both_gates",
+  "crates/continuum-repair/src/replay.rs::an_authorization_bound_to_the_version_admits_continue_and_disclose",
+  "crates/continuum-repair/src/replay.rs::without_an_authorization_the_policy_is_exact_and_the_run_is_not_passed",
+  "crates/continuum-repair/src/replay.rs::an_authorization_for_another_transaction_snapshot_or_intent_is_refused",
+  "crates/continuum-repair/src/replay.rs::a_stale_or_tampered_authorization_is_refused",
+  "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_negative_a_base_that_does_not_replay_the_exact_failure_fails_gate_1",
+  "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_negative_a_repair_whose_failure_recurs_fails_gate_4",
+  "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_negative_an_eliminated_or_reordered_candidate_run_is_refused_under_exact",
+  "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_negative_a_tampered_crashpack_is_refused_before_it_is_read",
+  "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_negative_a_malformed_or_foreign_crashpack_is_refused",
+  "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_negative_the_wrong_base_or_candidate_content_is_refused",
+  "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_negative_a_draft_and_a_second_evaluation_are_refused",
+  "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_boundary_a_divergence_is_inconclusive_never_passed",
+  "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_boundary_an_unsupported_program_is_inconclusive",
+  "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_boundary_an_inconsistent_base_replay_is_an_engine_condition",
+  "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_boundary_the_record_grammar_is_strict",
+  "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_boundary_the_evaluation_is_deterministic",
+  "crates/continuum-asupersync/tests/pr20_impl03_exact_replay.rs::pr20_impl03_m01_reproduces_on_the_base_and_not_on_the_ack_after_sync_candidate",
+  "crates/continuum-asupersync/tests/pr20_impl03_exact_replay.rs::pr20_impl03_a_repair_that_does_not_fix_fails_gate_4",
+  "crates/continuum-asupersync/tests/pr20_impl03_exact_replay.rs::pr20_impl03_the_exact_policy_refuses_an_eliminated_or_reordered_run",
+  "crates/continuum-asupersync/tests/pr20_impl03_exact_replay.rs::pr20_impl03_a_tampered_crashpack_is_refused",
+  "crates/continuum-asupersync/tests/pr20_impl03_exact_replay.rs::pr20_impl03_a_stale_failure_binding_fails_gate_1",
+  "crates/continuum-asupersync/tests/pr20_impl03_exact_replay.rs::pr20_impl03_a_divergence_is_inconclusive",
+  "crates/continuum-asupersync/tests/pr20_impl03_exact_replay.rs::pr20_impl03_an_inconsistent_record_is_an_engine_condition",
+  "crates/continuum-asupersync/tests/pr20_impl03_exact_replay.rs::pr20_impl03_the_evidence_matches_its_golden",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_metamorphic_a_serialization_round_trip_changes_nothing", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuum-repair/tests/pr20_impl03_exact_replay.rs::pr20_impl03_differential_the_crashpack_identity_matches_an_independent_construction", oracle = "continuum-value", subject = "continuum-repair" },
+  { test = "crates/continuum-asupersync/tests/pr20_impl03_exact_replay.rs::pr20_impl03_every_m01_run_agrees_with_the_pr16_oracle", oracle = "continuum-asupersync", subject = "continuum-repair" },
+]
+
+[semantic.claim_impact]
+claims = ["C002", "C033"]
+reason = "Neither row's state or wording changes. C002 (crashpacks replay exactly within a semantic epoch) stays TARGET: gate 1 checks a replay payload's exactness against a recorded run, but no crashpack producer exists and there is no retained replay corpus in clean processes. C033 stays TARGET: gates 1 and 4 are two of the ten Phase B gates, and no repair is promoted yet"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: evaluation_policy, an already-declared string field, carries the policy token; gates[].evidence is filled with crash_, ev_ and defect_ handles that match the already-declared evidence pattern, and status is derived evaluating, an existing enum member; the three evaluated versions validate against the epoch-1 schema in validate_dossier.py"
+unaffected = { repair-transaction = "the crate still emits epoch-1 instances; no field, enum, pattern or conditional moves", crashpack = "the RecordedRun record is the replay payload a crashpack manifest names by string; the manifest's shape is not touched", promotion-receipt = "receipt.rs changes only in its unit tests, which copy a gate list that is no longer Copy; no receipt field or shape moves" }
+
+[semantic.migration]
+verdict = "Preserved"
+note = "No published artifact, schema class or epoch moves: continuum-repair still writes epoch-1 repair-transaction instances, begin and apply build byte-identical versions (every IMPL-01, IMPL-02 and PR-22 fixture is unchanged), and no daemon path serves repair.evaluate yet (bn-23pwm). The crate API changes in continuum-repair only: Gate is Clone, not Copy, and carries evidence; RepairTransaction gains evaluation_policy (the policy token, plus the authorization digest for an authorized policy; recorded by evaluate, cleared by apply, absent from begin and apply artifacts so their bytes do not move); RepairTransaction::status is no longer const and derives evaluating once an in-profile gate has an outcome; the replay module (with the Replayer trait, PolicyAuthorization, whose constructor is crate-private and test-only, and the NoAuthority seam request_continue_and_disclose) and EvidenceRef are new; evaluate takes Option<&PolicyAuthorization> and no caller-chosen policy"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-1f5td2"
+verdict = "approved"

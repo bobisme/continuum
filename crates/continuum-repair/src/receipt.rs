@@ -835,7 +835,10 @@ fn derive<H: ContentHasher>(
     )?;
     let unknowns = Unknowns::derive(
         gate_profile,
-        transaction.gates().map(|gate| (gate.name(), gate.status())),
+        transaction
+            .gates()
+            .each_ref()
+            .map(|gate| (gate.name(), gate.status())),
         &status,
         resolve_evidence(evidence.unsupported_pack_cases(repair, &after))?,
     )?;
@@ -1805,7 +1808,7 @@ mod tests {
     /// 12 still `pending`.
     fn ready(profile: GateProfile) -> RepairTransaction<Blake3Hasher> {
         let promoted = recorded(profile);
-        promoted.with_recorded_gates(promoted.gates().map(|entry| {
+        promoted.with_recorded_gates(promoted.gates().each_ref().map(|entry| {
             if entry.name() == GateName::ReceiptGeneration {
                 GateStatus::Pending
             } else {
@@ -1887,7 +1890,7 @@ mod tests {
             Err(VerifyRefusal::GateNotOnRecord(GateName::ReceiptGeneration)),
             "a receipt is not published while gate 12 is pending"
         );
-        let after = before.with_recorded_gates(before.gates().map(|entry| {
+        let after = before.with_recorded_gates(before.gates().each_ref().map(|entry| {
             if entry.name() == GateName::ReceiptGeneration {
                 GateStatus::Passed
             } else {
@@ -2153,7 +2156,7 @@ mod tests {
             .into_iter()
             .filter(|g| GateProfile::PhaseB.enforces(*g) && *g != GateName::ReceiptGeneration)
         {
-            let statuses = base.gates().map(|entry| {
+            let statuses = base.gates().each_ref().map(|entry| {
                 if entry.name() == gate {
                     GateStatus::Pending
                 } else {

@@ -44,6 +44,7 @@
 //! | [`hypothesis`] | the untrusted hypothesis, the closed change kinds, the proposal |
 //! | [`transaction`] | the transaction skeleton: `begin` (draft v1) and `apply` (applied v2+), canonical bytes, content identity |
 //! | [`patch`] | patch identity (PR-20 / IMPL-02, bn-195b): declared changes, the candidate sealed from base + changes, gate 2's comparison |
+//! | [`replay`] | exact replay (PR-20 / IMPL-03, bn-2pla): gate 1 replays the crashpack's recorded run on the base and requires the exact failure; gate 4 replays it on the candidate under the original choices; both are recorded with evidence as the next version |
 //! | [`receipt`] | the promotion-receipt skeleton (PR 22): intent identity, before/after snapshots, `gate_profile` and the `NotYetEnforced` list, composed from referenced artifacts and verified against them |
 //!
 //! # What is here: PR-22 / IMPL-01, IMPL-02, IMPL-07 and IMPL-08, the receipt skeleton (bn-1ebx, bn-cps6, bn-1cec)
@@ -65,15 +66,19 @@
 //!   names a candidate. What is left for later bones: gate 2 as a recorded gate status
 //!   (IMPL-03), and a durable store for the declared change payloads the digests name,
 //!   so that gate 2 can re-seal a published version (the daemon's).
-//! - **IMPL-03, exact replay; IMPL-05, evidence accumulation.** Every gate is `pending`
-//!   or `not_yet_enforced` with empty evidence. No operation here writes a gate
-//!   outcome or spends from the cost ledger.
+//! - **IMPL-03, exact replay, is here** ([`replay`]). [`replay::evaluate`] is the one
+//!   path that writes a gate outcome: gates 1 and 4, each with its evidence, as a new
+//!   version at `evaluating`. It spends nothing from the cost ledger. Left: daemon
+//!   wiring of `repair.evaluate` and publication of the `ev_` and `defect_` records
+//!   (bn-23pwm), and the plan §16 correspondence for gate 4 (PR 17).
+//! - **IMPL-05, evidence accumulation.** No operation here attaches evidence or spends
+//!   from the cost ledger.
 //! - **IMPL-04, semantic and intent diff.** A `model` or `rust` change that weakens a
 //!   property is detected only by the RFC 0031 diff behind gate 3. `semantic_diff` is
 //!   never emitted here.
 //! - **IMPL-06, policy verdict.** `policy_verdict` and `receipt` are never emitted,
-//!   and the status derivation is only the two rules the skeleton can reach
-//!   (`draft` iff no candidate snapshot, else `applied` because no gate has run).
+//!   and the status derivation is only the three rules this crate can reach
+//!   ([`transaction::derive_status`]: `draft`, `applied`, `evaluating`).
 //! - **Daemon wiring.** `repair.begin` and `repair.apply` are declared by the IDL but
 //!   not served; the daemon owns crashpack resolution ([`transaction::FailureBinding`]),
 //!   lineage heads (an `apply` on a non-head version is a lost compare-and-set),
@@ -113,4 +118,5 @@ pub mod handle;
 pub mod hypothesis;
 pub mod patch;
 pub mod receipt;
+pub mod replay;
 pub mod transaction;

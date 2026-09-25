@@ -358,3 +358,11 @@ tcb_class = "dev-only"
 kinds = ["dev"]
 used_by = ["continuum-asupersync"]
 rationale = "PR-15 exit evidence (bn-jw7q): continuum-asupersync's integration test tests/pr15_exit_evidence.rs drives the effect packs' Lab handlers and reads their declared profiles, beside the binding's crash and cancellation, to show that crash windows and cancellation points replay exactly. The packs may have no dependency or dev-dependency of their own (their no_std lane and the INV-015 audit judge their manifests), so the cross-pack exit layer lives in this crate's tests. A dev edge only: the adapter's library does not depend on any effect pack. Classed dev-only: no production path links it here, and the evidence re-checks every replay against its recorded bytes."
+
+[[dependency]]
+name = "continuum-repair"
+origin = "workspace"
+tcb_class = "dev-only"
+kinds = ["dev"]
+used_by = ["continuum-asupersync"]
+rationale = "PR-20 / IMPL-03 (bn-2pla): continuum-asupersync's integration test tests/pr20_impl03_exact_replay.rs instantiates continuum-repair's exact-replay gates (RFC 0032 gates 1 and 4) on the replicated register's M01 failure: a Replayer built from the binding replays the recorded schedule on the base and on the ack-after-sync candidate, and the gates are recorded on a real repair transaction. A dev edge only: the adapter's library does not depend on the repair crate, and the repair crate depends on no trace producer. Classed dev-only: no production path links it here, and a gate outcome is evidence only through the replay it cites; the test checks the base replay against the PR-16 oracle's own runs."

@@ -88,6 +88,15 @@ EXTERNAL_SCHEMA_PAIRS = {
     "schemas/repair-transaction.schema.json": (
         "crates/continuum-repair/tests/fixtures/pr20-impl01-ack-after-sync-draft.json",
         "crates/continuum-repair/tests/fixtures/pr20-impl01-ack-after-sync-applied.json",
+        # PR-20 / IMPL-03 (bn-2pla): the versions exact replay records on M01's
+        # crashpack, gates 1 and 4 with evidence: the ack-after-sync repair (both
+        # passed), a repair that does not fix it (gate 4 failed) and one the recorded
+        # choices do not determine (gate 4 inconclusive).
+        # `crates/continuum-asupersync/tests/pr20_impl03_exact_replay.rs` asserts the
+        # library renders exactly these bytes.
+        "crates/continuum-asupersync/tests/golden/pr20-impl03-m01-ack-after-sync-evaluated.json",
+        "crates/continuum-asupersync/tests/golden/pr20-impl03-m01-no-fix-evaluated.json",
+        "crates/continuum-asupersync/tests/golden/pr20-impl03-m01-double-ack-evaluated.json",
     ),
 }
 

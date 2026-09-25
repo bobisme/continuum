@@ -98,6 +98,64 @@ handle_type!(
     "^rt_[A-Za-z0-9_-]+$"
 );
 
+/// One entry of a gate's `evidence` list: a handle to an evidence-graph node or a
+/// content-addressed artifact, `^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$`
+/// (`repair-transaction.schema.json`, `gates[].evidence`; RFC 0032, "Evidence
+/// discipline").
+///
+/// The schema's pattern is the only check. Which class a gate may cite is the gate's
+/// rule, not this type's: [`crate::replay`] cites the crashpack (`crash_`), a replay run
+/// (`ev_`) and an engine-defect report (`defect_`).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EvidenceRef(String);
+
+impl EvidenceRef {
+    /// The schema pattern an evidence entry matches.
+    pub const PATTERN: &'static str = "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$";
+
+    /// Validate and wrap an evidence handle.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedHandle`] when the value does not match [`Self::PATTERN`].
+    pub fn new(handle: &str) -> Result<Self, MalformedHandle> {
+        let malformed = MalformedHandle {
+            pattern: Self::PATTERN,
+        };
+        // `^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$`, decided in one linear pass. Every class
+        // byte is also a suffix byte, so every byte after the first must be a suffix
+        // byte. Then a separator exists iff the first underscore after the first byte
+        // lies inside the leading run of class bytes and is not the last byte: an
+        // earlier separator only lengthens the suffix.
+        let bytes = handle.as_bytes();
+        let class = |b: &u8| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_';
+        let suffix = |b: &u8| b.is_ascii_alphanumeric() || *b == b'_' || *b == b'-';
+        let (Some(first), Some(rest)) = (bytes.first(), bytes.get(1..)) else {
+            return Err(malformed);
+        };
+        if !first.is_ascii_lowercase() || !rest.iter().all(suffix) {
+            return Err(malformed);
+        }
+        let class_run = rest.iter().position(|b| !class(b)).unwrap_or(rest.len());
+        match rest.iter().position(|b| *b == b'_') {
+            Some(at) if at < class_run && at + 1 < rest.len() => Ok(Self(handle.to_owned())),
+            _ => Err(malformed),
+        }
+    }
+
+    /// The handle.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for EvidenceRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

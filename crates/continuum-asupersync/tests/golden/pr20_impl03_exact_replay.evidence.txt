@@ -1,0 +1,53 @@
+# PR-20 / IMPL-03 exact replay on M01 (bn-2pla). Regenerate: PR20_IMPL03_BLESS=1 cargo test -p continuum-asupersync --test pr20_impl03_exact_replay
+witness: first of 400 M01 runs failing Agreement on plan cancel-after-submit-before-sync; log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,3,1,1,4,1,3,0,1,1,0,0,0,0,1,2,2,1,2,0,2,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0]; 27 recorded steps; crashpack crash_181067bf35b864abb0c77414ee541cde80cfc9e6f86d135d2c033cdbf515f6d6
+pr20-impl03-pos-01-m01-ack-after-sync: M01 replays exactly on the base; the ack-after-sync candidate does not fail under the original choices, but it eliminates and reorders recorded steps, so under the exact policy (no authority for a relaxed one: bn-2vanm, bn-b6u4) gate 4 is inconclusive, never passed
+  transaction: rt_a5b5242a15441ae719cc2b2379519ffab6298f90c3f24ee5328962e1db8dbab1 v3 supersedes rt_aa1e4c988c4e31cc670490d56019df4229cbead70c998ff95d937afcac7e20bd status evaluating
+  failure: crash_181067bf35b864abb0c77414ee541cde80cfc9e6f86d135d2c033cdbf515f6d6
+  base_replay passed [crash_181067bf35b864abb0c77414ee541cde80cfc9e6f86d135d2c033cdbf515f6d6, ev_441bcbf755ae667927447322f3f14fbfb5a5e6df19cc85c2f38cb8f70412ceb1]
+  exact_regression inconclusive [crash_181067bf35b864abb0c77414ee541cde80cfc9e6f86d135d2c033cdbf515f6d6, ev_5571c4ec93aa18a91eea31d7a447d87548e329b6a4047076ef4172f83428281c]
+  base: Reproduced { run: EvidenceRef("ev_441bcbf755ae667927447322f3f14fbfb5a5e6df19cc85c2f38cb8f70412ceb1") }
+  candidate: NotExact { run: EvidenceRef("ev_5571c4ec93aa18a91eea31d7a447d87548e329b6a4047076ef4172f83428281c"), eliminated: 4, reordered: 6 }
+pr20-impl03-pos-02-every-m01-run: every failing M01 run, each its own crashpack, against the ack-after-sync candidate
+  runs: 400
+  400: base_replay passed (reproduced) / exact_regression inconclusive (not-exact)
+  relaxed policy: Err(NoAuthority)
+pr20-impl03-neg-01-repair-that-does-not-fix: a candidate that only comments the replica: the failure recurs
+  transaction: rt_cf78f6f0663be7f489292e59c8245d3c132325a6c40fd71ba58105b5248f4731 v3 supersedes rt_699ff0a23e69c0cdfd1e0c040ad25f4a6543ae5d4d124e102947d24c9cbfcbda status evaluating
+  failure: crash_181067bf35b864abb0c77414ee541cde80cfc9e6f86d135d2c033cdbf515f6d6
+  base_replay passed [crash_181067bf35b864abb0c77414ee541cde80cfc9e6f86d135d2c033cdbf515f6d6, ev_441bcbf755ae667927447322f3f14fbfb5a5e6df19cc85c2f38cb8f70412ceb1]
+  exact_regression failed [crash_181067bf35b864abb0c77414ee541cde80cfc9e6f86d135d2c033cdbf515f6d6, ev_ce12fb4051a6ef431354a230ad2c7878ac6486fc4d38d28ae28e5b8880ad61c6]
+  base: Reproduced { run: EvidenceRef("ev_441bcbf755ae667927447322f3f14fbfb5a5e6df19cc85c2f38cb8f70412ceb1") }
+  candidate: Recurs { run: EvidenceRef("ev_ce12fb4051a6ef431354a230ad2c7878ac6486fc4d38d28ae28e5b8880ad61c6") }
+  runs: 400
+  400: base_replay passed (reproduced) / exact_regression failed (recurs)
+pr20-impl03-neg-02-tampered-crashpack: every single-byte change of the witness crashpack is refused CrashpackTampered; 7524 bytes
+pr20-impl03-neg-03-stale-failure-binding: a crashpack recording a failure the base does not produce under its schedule
+  transaction: rt_24d6b79d0dc00eb6be079aeb305d28fe0291d1e0e0497795d4c24181f9a117cb v3 supersedes rt_594da36f02030defaffc27f146d0f7718715799a407d46468543734ffdbfb937 status evaluating
+  failure: crash_b173239802dccadc8d74ae012249637226653b07ea1d47f78ca8f86e8640da3f
+  base_replay failed [crash_b173239802dccadc8d74ae012249637226653b07ea1d47f78ca8f86e8640da3f, ev_c97e26ca96e15cc0b0a2440a305dfaff0cf487d5a82e71473ca0ab52c001b10c]
+  exact_regression pending []
+  base: NotReproduced { run: EvidenceRef("ev_c97e26ca96e15cc0b0a2440a305dfaff0cf487d5a82e71473ca0ab52c001b10c"), journal_differs: false, failure: Different }
+  candidate: NotRun
+pr20-impl03-bnd-03-inconsistent-record: a crashpack recording the base's failure with another run's journal: an engine condition
+  transaction: rt_53d212c564eb0e8607804cccf31ae7d0ca495115f85f4b4fddcc5d39f0181f99 v3 supersedes rt_b889ab982eb7a54e2b4fdc2cf729de24fb72441c040ea7125818312fc6682555 status evaluating
+  failure: crash_495465863468e3ccab6d516ef4e9755d92753665d111c042f457e5a262ca2376
+  base_replay inconclusive [crash_495465863468e3ccab6d516ef4e9755d92753665d111c042f457e5a262ca2376, defect_dac7d6d55dde1378dbbeba74c12e3108f2787eb0c69a7d8e7f1a6cedca681b35]
+  exact_regression pending []
+  base: Inconsistent { defect: EvidenceRef("defect_dac7d6d55dde1378dbbeba74c12e3108f2787eb0c69a7d8e7f1a6cedca681b35"), journal_differs: true, eliminated: 0, reordered: 0 }
+  candidate: NotRun
+pr20-impl03-bnd-01-divergence: a candidate that acks before and after the sync: steps the recording has no choice for
+  transaction: rt_1cc83a61530217c71c404ec74f09d0f387e48b8b67d392d9db3df0fd0635acbf v3 supersedes rt_5c9b49666b1a5167fe6c0271dac3e3cc85d5c48338a556bd181f275fb5a9264c status evaluating
+  failure: crash_181067bf35b864abb0c77414ee541cde80cfc9e6f86d135d2c033cdbf515f6d6
+  base_replay passed [crash_181067bf35b864abb0c77414ee541cde80cfc9e6f86d135d2c033cdbf515f6d6, ev_441bcbf755ae667927447322f3f14fbfb5a5e6df19cc85c2f38cb8f70412ceb1]
+  exact_regression inconclusive [crash_181067bf35b864abb0c77414ee541cde80cfc9e6f86d135d2c033cdbf515f6d6, ev_647e802d5cb7c06c4745bf82f7d4c21178f05eef79ea6bbac10c8136082885c2]
+  base: Reproduced { run: EvidenceRef("ev_441bcbf755ae667927447322f3f14fbfb5a5e6df19cc85c2f38cb8f70412ceb1") }
+  candidate: Diverged { at: 27, run: EvidenceRef("ev_647e802d5cb7c06c4745bf82f7d4c21178f05eef79ea6bbac10c8136082885c2") }
+  runs: 400
+  400: base_replay passed (reproduced) / exact_regression inconclusive (diverged)
+pr20-impl03-bnd-02-unsupported: a replica statement the replayer cannot read
+  transaction: rt_121a47b00c71f4979e9bc113b1a460b092ec3ea55d100b5c75f652ba880a0c0d v3 supersedes rt_d998cd2f0f705936a4991d3081d3ec233e4dbd445896b41243aaacdc130a5cc8 status evaluating
+  failure: crash_181067bf35b864abb0c77414ee541cde80cfc9e6f86d135d2c033cdbf515f6d6
+  base_replay passed [crash_181067bf35b864abb0c77414ee541cde80cfc9e6f86d135d2c033cdbf515f6d6, ev_441bcbf755ae667927447322f3f14fbfb5a5e6df19cc85c2f38cb8f70412ceb1]
+  exact_regression inconclusive [crash_181067bf35b864abb0c77414ee541cde80cfc9e6f86d135d2c033cdbf515f6d6, ev_426867cd446b53e8309f459d384ef730d18426b210c50c7ba9bab0d29c910fa1]
+  base: Reproduced { run: EvidenceRef("ev_441bcbf755ae667927447322f3f14fbfb5a5e6df19cc85c2f38cb8f70412ceb1") }
+  candidate: Unsupported { record: EvidenceRef("ev_426867cd446b53e8309f459d384ef730d18426b210c50c7ba9bab0d29c910fa1") }

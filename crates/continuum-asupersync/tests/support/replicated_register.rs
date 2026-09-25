@@ -1400,6 +1400,43 @@ pub fn sample_logs(built: &Built, count: usize, seed: u64) -> Vec<ChoiceLog> {
     out
 }
 
+/// The admissible choice log of `built` that follows a schedule preference (PR 21,
+/// bn-4ykgg): setup first, then at each step the admissible actor whose next operation
+/// has the least `rank(actor, operation index)`, an operation `rank` leaves unranked
+/// after every ranked one, ties by actor index. With it, the operations taken after the
+/// setup, as `(actor, operation index)`, in order. `Err` with the log taken so far when
+/// every actor with operations left is parked: the program deadlocks under that
+/// preference.
+///
+/// # Errors
+///
+/// The deadlocked prefix.
+pub fn guided_run(
+    built: &Built,
+    rank: impl Fn(usize, usize) -> Option<usize>,
+) -> Result<(ChoiceLog, Vec<(usize, usize)>), ChoiceLog> {
+    let (mut sched, mut prefix) = setup_prefix(built);
+    let mut taken = Vec::new();
+    loop {
+        let enabled = sched.enabled(built);
+        if enabled.is_empty() {
+            return Ok((ChoiceLog::new(prefix), taken));
+        }
+        let Some((index, actor)) = enabled
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, a)| sched.admissible(built, *a))
+            .min_by_key(|(_, a)| (rank(*a, sched.cursors[*a]).unwrap_or(usize::MAX), *a))
+        else {
+            return Err(ChoiceLog::new(prefix));
+        };
+        taken.push((actor, sched.cursors[actor]));
+        sched.take(built, actor);
+        prefix.push(u32::try_from(index).expect("few actors"));
+    }
+}
+
 /// An inadmissible log of `built`: a greedy admissible prefix that prefers the
 /// highest-index actor, so a coordinator parks early, then a command to the parked
 /// coordinator, completed in actor order. `None` when the walk meets no parked

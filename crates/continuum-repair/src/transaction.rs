@@ -24,9 +24,9 @@
 //! # Canonical encoding
 //!
 //! One spelling: `continuum_intent::canonical_json` (RFC 0037 ID5) — keys sorted by
-//! code point, no whitespace, integers only. Optional fields the skeleton never reaches
-//! (`semantic_diff`, `policy_verdict`, `receipt`, `evaluation_policy`, `actor`, …) are
-//! omitted, never written as `null`. `changes` and each gate's `evidence` are always
+//! code point, no whitespace, integers only. Optional fields the crate never reaches
+//! (`semantic_diff`, `policy_verdict`, `receipt`, `actor`, …) are omitted, never written
+//! as `null`; `evaluation_policy` is written once an evaluation records one. `changes` and each gate's `evidence` are always
 //! written, as `[]` when empty, so an absent list and an empty one cannot share a
 //! spelling.
 
@@ -38,7 +38,7 @@ use continuum_intent::canonical_json::Json;
 use continuum_intent::contract::IntentId;
 use continuum_value::identity::ContentHasher;
 
-use crate::handle::{CrashpackId, RepairId, SnapshotId};
+use crate::handle::{CrashpackId, EvidenceRef, RepairId, SnapshotId};
 use crate::hypothesis::{Change, ChangeKind, Hypothesis, Proposal};
 use crate::patch::{PatchRefusal, SealedCandidate};
 use continuum_workspace::snapshot::WorkspaceContent;
@@ -198,8 +198,9 @@ impl GateProfile {
     }
 }
 
-/// The nine transaction statuses. This skeleton derives only [`Self::Draft`] and
-/// [`Self::Applied`]; the others need gate outcomes, a verdict, or a lineage head.
+/// The nine transaction statuses. This crate derives only [`Self::Draft`],
+/// [`Self::Applied`] and [`Self::Evaluating`] ([`derive_status`]); the others need a
+/// verdict, a terminal outcome, or a lineage head.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TransactionStatus {
     /// No candidate snapshot yet.
@@ -255,12 +256,16 @@ impl TransactionStatus {
 
 // --- gates and cost --------------------------------------------------------------
 
-/// One entry of `gates`. Evidence is always empty here: attaching and evaluating are
-/// IMPL-05 and IMPL-03.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// One entry of `gates`.
+///
+/// Evidence is empty on every gate `begin` and `apply` build. Only an evaluation writes
+/// an outcome and its evidence: today that is [`crate::replay`] for gates 1 and 4
+/// (PR-20 / IMPL-03). Attaching evidence is IMPL-05.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Gate {
     name: GateName,
     status: GateStatus,
+    evidence: Vec<EvidenceRef>,
 }
 
 impl Gate {
@@ -276,9 +281,23 @@ impl Gate {
         self.status
     }
 
-    fn json(self) -> Json {
+    /// Its evidence, in the order the evaluation recorded it.
+    #[must_use]
+    pub fn evidence(&self) -> &[EvidenceRef] {
+        &self.evidence
+    }
+
+    fn json(&self) -> Json {
         let mut fields = BTreeMap::new();
-        fields.insert("evidence".to_owned(), Json::Array(Vec::new()));
+        fields.insert(
+            "evidence".to_owned(),
+            Json::Array(
+                self.evidence
+                    .iter()
+                    .map(|entry| Json::String(entry.as_str().to_owned()))
+                    .collect(),
+            ),
+        );
         fields.insert(
             "name".to_owned(),
             Json::String(self.name.token().to_owned()),
@@ -305,6 +324,7 @@ pub fn initial_gates(profile: GateProfile) -> [Gate; 12] {
         } else {
             GateStatus::NotYetEnforced
         },
+        evidence: Vec::new(),
     })
 }
 
@@ -450,6 +470,51 @@ impl fmt::Display for ApplyRefusal {
 
 impl std::error::Error for ApplyRefusal {}
 
+/// Why an evaluation's outcomes could not be recorded as a new version. The version is
+/// not built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordRefusal {
+    /// The version is a `draft`: there is no candidate to evaluate (RFC 0032: `evaluate`
+    /// on a `draft` transaction refuses `InsufficientEvidence`).
+    NoCandidate,
+    /// The gate already has an outcome, or is outside the profile, on this version.
+    NotPending {
+        /// The gate.
+        gate: GateName,
+    },
+    /// The outcome is not `passed`, `failed` or `inconclusive`, or carries no evidence.
+    NotAnOutcome {
+        /// The gate.
+        gate: GateName,
+    },
+    /// The version was evaluated under another `evaluation_policy`.
+    PolicyMismatch,
+    /// The version cannot advance.
+    VersionExhausted,
+}
+
+impl fmt::Display for RecordRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoCandidate => f.write_str("a draft transaction has no candidate to evaluate"),
+            Self::NotPending { gate } => {
+                write!(f, "gate `{}` is not pending on this version", gate.token())
+            }
+            Self::NotAnOutcome { gate } => write!(
+                f,
+                "gate `{}` must move to passed, failed or inconclusive with evidence",
+                gate.token()
+            ),
+            Self::PolicyMismatch => {
+                f.write_str("the version was evaluated under another evaluation policy")
+            }
+            Self::VersionExhausted => f.write_str("the transaction version cannot advance"),
+        }
+    }
+}
+
+impl std::error::Error for RecordRefusal {}
+
 /// What `apply` produced: the next version, and the candidate it records, whose records
 /// the daemon publishes beside it.
 ///
@@ -549,6 +614,7 @@ pub struct RepairTransaction<H: ContentHasher> {
     gate_profile: GateProfile,
     gates: [Gate; 12],
     cost_ledger: CostLedger,
+    evaluation_policy: Option<String>,
 }
 
 impl<H: ContentHasher> Clone for RepairTransaction<H> {
@@ -566,8 +632,9 @@ impl<H: ContentHasher> Clone for RepairTransaction<H> {
             changes: self.changes.clone(),
             candidate_snapshot: self.candidate_snapshot.clone(),
             gate_profile: self.gate_profile,
-            gates: self.gates,
+            gates: self.gates.clone(),
             cost_ledger: self.cost_ledger,
+            evaluation_policy: self.evaluation_policy.clone(),
         }
     }
 }
@@ -596,6 +663,7 @@ impl<H: ContentHasher> fmt::Debug for RepairTransaction<H> {
             .field("gate_profile", &self.gate_profile)
             .field("gates", &self.gates)
             .field("cost_ledger", &self.cost_ledger)
+            .field("evaluation_policy", &self.evaluation_policy)
             .finish()
     }
 }
@@ -639,6 +707,7 @@ impl<H: ContentHasher> RepairTransaction<H> {
             gate_profile: profile,
             gates: initial_gates(profile),
             cost_ledger: CostLedger::zero(),
+            evaluation_policy: None,
         }))
     }
 
@@ -690,6 +759,7 @@ impl<H: ContentHasher> RepairTransaction<H> {
             gate_profile: self.gate_profile,
             gates: initial_gates(self.gate_profile),
             cost_ledger: self.cost_ledger,
+            evaluation_policy: None,
         });
         Ok(Applied {
             transaction,
@@ -703,7 +773,7 @@ impl<H: ContentHasher> RepairTransaction<H> {
     /// its success path.
     #[cfg(test)]
     pub(crate) fn with_recorded_gates(&self, statuses: [GateStatus; 12]) -> Self {
-        let mut gates = self.gates;
+        let mut gates = self.gates.clone();
         for (gate, status) in gates.iter_mut().zip(statuses) {
             gate.status = status;
         }
@@ -719,6 +789,7 @@ impl<H: ContentHasher> RepairTransaction<H> {
             gate_profile: self.gate_profile,
             gates,
             cost_ledger: self.cost_ledger,
+            evaluation_policy: self.evaluation_policy.clone(),
         })
     }
 
@@ -737,6 +808,7 @@ impl<H: ContentHasher> RepairTransaction<H> {
             gate_profile,
             gates,
             cost_ledger,
+            evaluation_policy,
         } = parts;
         Self {
             hasher: PhantomData,
@@ -753,6 +825,7 @@ impl<H: ContentHasher> RepairTransaction<H> {
             gate_profile,
             gates,
             cost_ledger,
+            evaluation_policy,
         }
     }
 
@@ -823,20 +896,94 @@ impl<H: ContentHasher> RepairTransaction<H> {
         self.gate_profile
     }
 
+    /// `evaluation_policy`: the policy the gate campaign ran under, absent until an
+    /// evaluation records one ([`crate::replay::EvaluationPolicy`]). `apply` clears it: a
+    /// new candidate starts a new campaign.
+    #[must_use]
+    pub fn evaluation_policy(&self) -> Option<&str> {
+        self.evaluation_policy.as_deref()
+    }
+
     /// `gates`, in gate-number order.
     #[must_use]
     pub const fn gates(&self) -> &[Gate; 12] {
         &self.gates
     }
 
-    /// `status`, derived (RFC 0032 rules 3 and 5, the two this skeleton reaches).
+    /// `status`, derived ([`derive_status`]).
     #[must_use]
-    pub const fn status(&self) -> TransactionStatus {
+    pub fn status(&self) -> TransactionStatus {
+        derive_status(
+            self.candidate_snapshot.as_ref(),
+            self.gate_profile,
+            &self.gates,
+        )
+    }
+
+    /// An evaluation's outcomes recorded as the next version: each named gate moves from
+    /// `pending` to its outcome with its evidence, every other field carries over, and
+    /// the new version supersedes this one.
+    ///
+    /// Crate-private: only an evaluation that has run a gate may record it
+    /// ([`crate::replay`]), and it has already checked everything below. The checks are
+    /// repeated here so that no caller in the crate can record around them.
+    pub(crate) fn record_outcomes(
+        &self,
+        outcomes: Vec<(GateName, GateStatus, Vec<EvidenceRef>)>,
+        policy: &str,
+    ) -> Result<Self, RecordRefusal> {
         if self.candidate_snapshot.is_none() {
-            TransactionStatus::Draft
-        } else {
-            TransactionStatus::Applied
+            return Err(RecordRefusal::NoCandidate);
         }
+        // One campaign runs under one policy: a version already evaluated under another
+        // is not continued under this one.
+        if self
+            .evaluation_policy
+            .as_deref()
+            .is_some_and(|recorded| recorded != policy)
+        {
+            return Err(RecordRefusal::PolicyMismatch);
+        }
+        let mut gates = self.gates.clone();
+        for (name, status, evidence) in outcomes {
+            let gate = gates
+                .iter_mut()
+                .find(|gate| gate.name == name)
+                .unwrap_or_else(|| unreachable!("all twelve gates are listed"));
+            // RFC 0032: "Within one campaign a gate moves from `pending` to exactly one
+            // of `passed`/`failed`/`inconclusive`", and only `not_yet_enforced` and
+            // `pending` gates carry no evidence.
+            if gate.status != GateStatus::Pending {
+                return Err(RecordRefusal::NotPending { gate: name });
+            }
+            if !matches!(
+                status,
+                GateStatus::Passed | GateStatus::Failed | GateStatus::Inconclusive
+            ) || evidence.is_empty()
+            {
+                return Err(RecordRefusal::NotAnOutcome { gate: name });
+            }
+            gate.status = status;
+            gate.evidence = evidence;
+        }
+        let version = self
+            .version
+            .checked_add(1)
+            .ok_or(RecordRefusal::VersionExhausted)?;
+        Ok(Self::seal(Unsealed {
+            version,
+            supersedes: Some(self.repair_id.clone()),
+            base_snapshot: self.base_snapshot.clone(),
+            base_intent: self.base_intent.clone(),
+            failure: self.failure.clone(),
+            hypothesis: self.hypothesis.clone(),
+            changes: self.changes.clone(),
+            candidate_snapshot: self.candidate_snapshot.clone(),
+            gate_profile: self.gate_profile,
+            gates,
+            cost_ledger: self.cost_ledger,
+            evaluation_policy: Some(policy.to_owned()),
+        }))
     }
 
     /// The identity preimage: the artifact minus `repair_id`.
@@ -852,8 +999,9 @@ impl<H: ContentHasher> RepairTransaction<H> {
             changes: self.changes.clone(),
             candidate_snapshot: self.candidate_snapshot.clone(),
             gate_profile: self.gate_profile,
-            gates: self.gates,
+            gates: self.gates.clone(),
             cost_ledger: self.cost_ledger,
+            evaluation_policy: self.evaluation_policy.clone(),
         })
     }
 
@@ -890,18 +1038,56 @@ struct Unsealed {
     gate_profile: GateProfile,
     gates: [Gate; 12],
     cost_ledger: CostLedger,
+    evaluation_policy: Option<String>,
 }
 
 fn string(value: &str) -> Json {
     Json::String(value.to_owned())
 }
 
-fn preimage(parts: &Unsealed) -> Json {
-    let status = if parts.candidate_snapshot.is_none() {
-        TransactionStatus::Draft
+/// `status`, derived from the fields a version holds (RFC 0032, "Status machine").
+///
+/// The RFC's derivation is total and ordered; this crate holds no terminal outcome, no
+/// lineage head and no policy verdict yet, so rules 1, 2 and 6–8 have nothing to read
+/// and three statuses are reachable:
+///
+/// - rule 3: no candidate ⇒ `draft`;
+/// - rule 5: no in-profile gate evaluated ⇒ `applied`;
+/// - rule 4: otherwise ⇒ `evaluating`. Some in-profile gate has an outcome, so a gate
+///   campaign has started, and it has not finished: a campaign ends with the policy
+///   verdict, which RFC 0032 requires at `ready`, `blocked`, `promoted` and `rejected`,
+///   and which nothing here computes (IMPL-06). So a version with a `failed` or
+///   `inconclusive` gate is still `evaluating`: never `ready`, never promotable, and
+///   never `blocked` or `inconclusive` until the campaign's verdict exists.
+#[must_use]
+pub fn derive_status(
+    candidate_snapshot: Option<&SnapshotId>,
+    profile: GateProfile,
+    gates: &[Gate; 12],
+) -> TransactionStatus {
+    if candidate_snapshot.is_none() {
+        return TransactionStatus::Draft;
+    }
+    let evaluated = gates.iter().any(|gate| {
+        profile.enforces(gate.name)
+            && matches!(
+                gate.status,
+                GateStatus::Passed | GateStatus::Failed | GateStatus::Inconclusive
+            )
+    });
+    if evaluated {
+        TransactionStatus::Evaluating
     } else {
         TransactionStatus::Applied
-    };
+    }
+}
+
+fn preimage(parts: &Unsealed) -> Json {
+    let status = derive_status(
+        parts.candidate_snapshot.as_ref(),
+        parts.gate_profile,
+        &parts.gates,
+    );
     let mut fields = BTreeMap::new();
     fields.insert("schema_id".to_owned(), string(SCHEMA_ID));
     fields.insert("schema_epoch".to_owned(), Json::Integer(SCHEMA_EPOCH));
@@ -945,9 +1131,12 @@ fn preimage(parts: &Unsealed) -> Json {
     );
     fields.insert(
         "gates".to_owned(),
-        Json::Array(parts.gates.iter().map(|gate| gate.json()).collect()),
+        Json::Array(parts.gates.iter().map(Gate::json).collect()),
     );
     fields.insert("cost_ledger".to_owned(), parts.cost_ledger.json());
+    if let Some(policy) = &parts.evaluation_policy {
+        fields.insert("evaluation_policy".to_owned(), string(policy));
+    }
     Json::Object(fields)
 }
 
