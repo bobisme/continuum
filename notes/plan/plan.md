@@ -2252,7 +2252,36 @@ Deliver:
 - CML core-fragment parser and elaborator (Finite fragment; enough for the
   replicated register and Wave 0 ports; the programmatic model API remains
   supported) (delivered: bn-1sf, bn-ybq, bn-36x3b, bn-2ouro — at the elaboration surface, per START_HERE PR 15a; lowering beyond bounded integers is carried by bn-15zfa, bn-3a9sr, bn-3bq78 and bn-1ln12);
-- storage/network/process packs;
+- storage/network/process packs (delivered: bn-1e40 — the phase-level integration
+  boundary over PR 15 (bn-1nn, done): network bn-3ohe, process bn-3mmf, storage bn-2fk3,
+  declared-unsupported/time bn-1oj6, and the PR-15-EXIT independent replay layer bn-jw7q
+  (cr-1j398p, 114 predicates, met). bn-1e40's own deliverable-evidence layer,
+  `crates/continuum-asupersync/tests/phase_b_del_03_deliverable_evidence.rs` (golden
+  `phase_b_del_03_deliverable_evidence.txt`, machine summary `phase-b-del-03.json`, 23
+  predicates — the declared `predicate_count` is rendered from the live list's own
+  length and checked against the array and the per-artifact totals, not hand-typed —
+  met, fail-closed against a hand-typed, independently pinned set of the 23 required
+  `(artifact, id)` pairs, not one derived from the results), mechanically checks all
+  three packs present as real dev-dependency edges and declaring their fidelity
+  profiles and cancellation contracts; the PR-15 exit suite carries no `#[ignore]` and
+  this file's own retained record is BLAKE3 digest-bound to its live golden and JSON
+  bytes; a five-test live subprocess slice of the PR-15 exit suite (`pos_04` composed
+  network+process+storage, `pos_05`/`pos_06` the register's real binding under both
+  crash semantics, `neg_01`/`neg_02` perturbation) re-executes and passes, so the
+  cross-component acceptance is a live re-run, not a re-read of frozen counts.
+  `PHASE_B_DEL_03_BLESS` writes the retained golden/JSON through a symlink-refusing
+  writer (`create_new` first; an existing planted symlink is refused via
+  `symlink_metadata`, never followed) into a private, exclusively-created scratch
+  directory under `CARGO_TARGET_TMPDIR` for its own self-test, and then always panics,
+  proven by driving it twice with byte-identical content and once against a planted
+  symlink (cr-1qktn9, fixed). Narrowed, not claimed: the pack independence rule (T07,
+  bn-3uva) and T06 (bn-22sa) and R10 (bn-2a0v) are **open** — their required controls
+  (sandboxing, dynamic footprint validation, baseline cross-check, first-party review
+  for certified mode, pack signature/provenance) are not implemented anywhere in this
+  workspace. What is mechanically true today is narrower and is what this file checks:
+  every profile every pack declares carries `HostQualification::None` and
+  `IndependenceClaim::AllDependent`, the self-declared precondition, not the
+  enforcement. T06/T07/R10 remain owned by their own bones and roll up at bn-188z9);
 - replicated register;
 - causal minimizer;
 - debugger v0;
