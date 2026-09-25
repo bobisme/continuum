@@ -1,0 +1,98 @@
+[change]
+bone = "bn-4ykgg"
+author = "continuum-dev"
+summary = "PR 21 semantic neighbor generation: continuum-repair's new neighborhood module generates gate-5 neighbors around a causal core along RFC 0032's closed strategy set (generic interleaving and message generators over any CausalCore, substrate hooks for fault placement, cancellation and value-domain edits), types every candidate against the Intent Contract's fault model and bounds before it can be realized, charges a candidate, run and work budget before the work and suspends as pending with a serialized continuation that resumes exactly, and records per-strategy coverage as canonical JSON whose promotion-receipt coverage.neighborhood projection is refused unless the campaign is complete"
+
+[semantic]
+covers = [
+  "crates/continuum-repair/src/",
+]
+reference_tests = [
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::valid_schedules_respect_the_hard_order_on_random_cores",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::rejected_candidates_never_reach_the_substrate",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::identical_inputs_give_identical_records_and_the_seed_moves_only_walks",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::an_exhausted_budget_suspends_and_resumes_exactly",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::chained_resumes_advance_monotonically_to_the_same_result",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_foreign_or_forged_continuation_is_refused",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::hostile_counts_fail_closed_not_a_panic",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_stale_record_or_continuation_is_refused",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_pending_campaign_with_an_undecided_prefix_stays_pending",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_long_scenario_identity_that_exhausts_the_budget_takes_its_charge_back",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::receipt_coverage_projects_complete_only_over_proven_realizations",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_repair_that_moves_every_causal_decision_is_never_complete",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::an_engine_error_before_exhaustion_still_suspends_with_a_continuation",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::every_suspension_boundary_resumes_to_the_same_result_and_state",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_forced_identity_collision_is_refused_and_never_complete",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::scenario_coverage_counts_distinct_content_and_every_collision_is_an_error",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::oversized_outcome_strings_are_bounded_and_make_the_campaign_an_engine_error",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::the_identity_content_check_does_not_depend_on_arrival_order",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::every_substrate_string_entry_point_is_bounded_at_a_mebibyte",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::identities_are_read_once_and_bound_as_charged",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::an_empty_scenario_identity_is_an_identity_like_any_other",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::the_core_and_its_profile_are_read_once_and_used_as_checked",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::one_profile_has_one_spelling",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_witness_that_inverts_a_hard_edge_is_refused_and_never_complete",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::no_executed_neighbor_inverts_a_hard_edge_and_no_candidate_proposes_one",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_forced_digest_collision_is_decided_on_the_bytes",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::the_core_binding_and_the_witness_are_kept_as_canonical_text",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_transitive_hard_inversion_through_an_absent_event_is_refused",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_halted_run_cannot_take_an_event_before_a_pending_hard_ancestor",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::no_content_index_decides_equality_or_inequality_and_a_hook_record_never_projects",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::retained_content_bytes_are_charged_before_they_are_kept",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::coverage_gaps_are_never_projected_as_complete",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::core_refusals_are_typed",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::the_envelope_types_each_profile",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::handles_are_checked_and_an_undisclosable_run_is_inconclusive",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::receipt_coverage_counts_match_the_record",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::strategy_tokens_round_trip_and_are_closed",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::check_candidate_matches_the_campaign",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::undecided_runs_and_silent_caps_are_never_rendered_as_passes",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_malformed_core_is_rejected_not_a_panic",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::an_exact_bound_is_admitted_and_one_past_it_is_refused_as_outside_the_envelope",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::an_exact_bound_neighbor_is_executed_and_disclosed_and_an_engine_refusal_is_never_complete",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::only_refusals_outside_the_envelope_or_of_non_neighbors_leave_a_campaign_complete",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::no_admitted_neighbor_exceeds_any_envelope_bound",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::repeated_exhausted_resumes_advance_the_ledger_and_never_repeat_free_work",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::every_exhaustion_before_the_prior_frontier_suspends_with_the_committed_state",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_resume_that_cannot_progress_is_refused_before_any_work",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::an_untrusted_resume_records_the_bytes_it_reads",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::exhaustion_before_the_campaign_exists_is_charged_and_never_repeated_for_free",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::untrusted_resumes_charge_every_byte_and_check_and_the_ledger_is_monotone",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_decision_behind_a_hard_ancestor_is_hoisted_with_it_and_taken",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_delay_moves_the_send_past_independent_events_not_its_own_successor",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::every_permitted_decision_and_delay_is_generated_and_none_is_dropped_as_invalid",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::a_halted_run_is_decided_before_its_outcome_and_resumes_to_the_same_result",
+  "crates/continuum-repair/tests/pr21_neighborhood.rs::recoveries_never_exceed_the_crashes_they_complete",
+  "crates/continuum-asupersync/tests/pr21_impl01_neighborhood.rs::m01_core_neighborhood_discriminates_the_correct_program_from_m01",
+  "crates/continuum-asupersync/tests/pr21_impl01_neighborhood.rs::identical_inputs_give_byte_identical_records",
+  "crates/continuum-asupersync/tests/pr21_impl01_neighborhood.rs::invalid_perturbations_are_rejected_not_executed",
+  "crates/continuum-asupersync/tests/pr21_impl01_neighborhood.rs::an_exhausted_budget_suspends_and_resumes_to_the_same_result",
+  "crates/continuum-asupersync/tests/pr21_impl01_neighborhood.rs::receipt_coverage_conforms_to_the_promotion_receipt_schema",
+  "crates/continuum-asupersync/tests/pr21_impl01_neighborhood.rs::the_evidence_matches_its_golden",
+  "crates/continuum-asupersync/tests/pr21_impl01_neighborhood.rs::the_correct_program_is_executed_only_on_causal_neighbors_it_realizes",
+  "crates/continuum-asupersync/tests/pr21_impl01_neighborhood.rs::every_scenario_identity_names_exactly_one_content",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-asupersync/tests/pr21_impl01_neighborhood.rs::symmetric_neighbors_keep_the_core_outcome", relation = "symmetry renaming" },
+  { test = "crates/continuum-asupersync/tests/pr21_impl01_neighborhood.rs::same_class_schedules_keep_the_core_outcome", relation = "independent-event swap" },
+]
+differential_tests = [
+  { test = "crates/continuum-asupersync/tests/pr21_impl01_neighborhood.rs::the_envelope_agrees_with_the_scenario_discipline", oracle = "continuum-asupersync", subject = "continuum-repair" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers neighborhood generation; the neighborhood-adequacy frontier row (plan 24.5, research/33, quote-id neighborhood-adequacy-catch-rate) is graded on the docs/50 gaming corpus, which does not exist, and RFC 0032 makes no adequacy claim until it does, so this change claims coverage disclosure only"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document and no wire shape changes: the full neighborhood record is crate-local (continuum.repair.neighborhood/v0), and its receipt projection conforms to promotion-receipt.schema.json coverage.neighborhood as it stands (strategy tokens from neighborhood_strategy, explored/failing/truncated/frontier, failing_neighbors with a plan 4.4 handle), checked against the schema file by a test"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-repair was a scaffold with no types; it gains the neighborhood module and edges to continuum-intent and continuum-value. continuum-asupersync gains a dev edge to continuum-repair and an additive guided_log helper in its register test support; every existing register campaign, golden and digest is unchanged"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-3hfw5b"
+verdict = "approved"

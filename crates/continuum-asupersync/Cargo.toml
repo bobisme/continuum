@@ -1,3 +1,4 @@
+
 [package]
 name = "continuum-asupersync"
 version.workspace = true
@@ -36,6 +37,8 @@ continuum-effects-time = { path = "../continuum-effects-time" }
 # PR-20 / IMPL-03 (bn-2pla): gates 1 and 4 of a repair transaction, exact replay,
 # instantiated on M01's recorded failure in `tests/pr20_impl03_exact_replay.rs`. A test
 # edge only: the adapter's library does not depend on the repair crate.
+# PR 21 (bn-4ykgg) uses the same edge for gate 5's neighborhood generation on the
+# register's causal core in `tests/pr21_impl01_neighborhood.rs`.
 continuum-repair = { path = "../continuum-repair" }
 continuum-task = { path = "../continuum-task" }
 continuum-value = { path = "../continuum-value" }

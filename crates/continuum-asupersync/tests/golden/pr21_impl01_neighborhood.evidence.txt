@@ -1,0 +1,211 @@
+# PR 21 (bn-4ykgg): semantic neighbors around M01's causal core
+
+## pr21-impl01-01-m01-core-neighborhood
+
+core: m01-scenario-core log=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,4,2,0,1,2,0,2,3,1,0,0,1,0,4,4,2,3,3,4,3,2,0,1,0,0,0,0,0,0,0,0,0,0,0] ops=768b2342f6fa23ecdbab8d8bfa0d2583e36015d3bc303205b46de26aefe40baa
+failing run: M01 on cancel-after-submit-before-sync (epochs=1 | a[v0,v1]: reserve0 submit0 confirm0 crash-repropose0=v1 reserve0 submit0 confirm0 sync0 release0 | b[v0]: reserve0 submit0 confirm0 sync0 release0 | c[v1]: reserve0 submit0 confirm0 sync0 release0), log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,4,2,0,1,2,0,2,3,1,0,0,1,0,4,4,2,3,3,4,3,2,0,1,0,0,0,0,0,0,0,0,0,0,0] ; finding Agreement(89)
+operations: 27 ; core proper (happens-before past of both acks): 21
+   0 * a0.reserve0        hard<-[]
+   1 * b0.reserve0        hard<-[]
+   2 * a0.submit0         hard<-[0]
+   3 * k0v1.recv0         hard<-[]
+   4 * c0.reserve0        hard<-[]
+   5 * a0.confirm0        hard<-[2]
+   6 * b0.submit0         hard<-[1]
+   7 * c0.submit0         hard<-[4]
+   8 * a0.crash           hard<-[5]
+   9 * c0.confirm0        hard<-[7]
+  10 * k0v0.recv0         hard<-[]
+  11 * b0.confirm0        hard<-[6]
+  12 * a1.reserve0        hard<-[8]
+  13 * a1.submit0         hard<-[12]
+  14   b0.sync0           hard<-[11]
+  15 * a1.confirm0        hard<-[13]
+  16 * k0v1.recv1         hard<-[3,9]
+  17 * k0v1.ack-reserve   hard<-[15,16]
+  18   c0.sync0           hard<-[9]
+  19 * k0v0.recv1         hard<-[5,10]
+  20 * k0v0.ack-reserve   hard<-[11,19]
+  21 * k0v1.ack-commit    hard<-[17]
+  22 * k0v0.ack-commit    hard<-[20]
+  23   c0.release0        hard<-[18]
+  24   a1.sync0           hard<-[15]
+  25   b0.release0        hard<-[14]
+  26   a1.release0        hard<-[24]
+
+correct program:
+  subject: replicated-register/correct (ack after sync) a5124c12f86039b7ab6f6eaaf6f9e924e68033b2d985484fc7795e830675ee79
+  record digest: 13253b9d03f3ca73fe07c4a87bcaa72c7a41f24beb82455464e0fa50436dcc4c
+  alternate-enabled-events         generated=8 rejected=0 [] valid=8 unsupported=0 not-realizable=8 [witness: a hard edge inverted=8] executed=0 distinct-runs=0 passed=0 failed=0 inconclusive=0 truncated=no
+  fault-window                     generated=17 rejected=4 [exceeds-fault-bound=4] valid=13 unsupported=0 not-realizable=0 [] executed=13 distinct-runs=13 passed=13 failed=0 inconclusive=0 truncated=no
+  cancellation-checkpoints         generated=6 rejected=0 [] valid=6 unsupported=0 not-realizable=0 [] executed=6 distinct-runs=6 passed=6 failed=0 inconclusive=0 truncated=no
+  value-name-permutation           generated=17 rejected=2 [outside-value-domain=2] valid=15 unsupported=0 not-realizable=0 [] executed=15 distinct-runs=15 passed=15 failed=0 inconclusive=0 truncated=no
+  message-duplication-loss-delay   generated=20 rejected=0 [] valid=20 unsupported=8 not-realizable=12 [witness: a hard edge inverted=12] executed=0 distinct-runs=0 passed=0 failed=0 inconclusive=0 truncated=no
+  schedule-perturbation            generated=31 rejected=5 [leaves-trace-class=2 violates-causal-order=3] valid=26 unsupported=0 not-realizable=26 [witness: a hard edge inverted=26] executed=0 distinct-runs=0 passed=0 failed=0 inconclusive=0 truncated=no
+  abstraction-map-variants         not run: no abstraction map: RFC 0031's map and CIR (PR 17) are not built
+  hidden-corpus-mutations          not run: no held-out corpus: the docs/50 gaming corpus does not exist
+  spent: candidates=99 runs=88 work=490422; verdict Inconclusive { reason: Unsupported }
+
+M01:
+  subject: replicated-register/M01 (ack before sync) 905e2644745943be9c0b6929bd63bd3fe9225d9bfe6e72351ae9971ba7faf3a8
+  record digest: 312590b6841d5735a471c923b93f22148c2ebe566c325e979d8b2cfc24beb641
+  alternate-enabled-events         generated=8 rejected=0 [] valid=8 unsupported=0 not-realizable=0 [] executed=8 distinct-runs=8 passed=0 failed=8 inconclusive=0 truncated=no
+  fault-window                     generated=17 rejected=4 [exceeds-fault-bound=4] valid=13 unsupported=0 not-realizable=0 [] executed=13 distinct-runs=13 passed=1 failed=12 inconclusive=0 truncated=no
+  cancellation-checkpoints         generated=6 rejected=0 [] valid=6 unsupported=0 not-realizable=0 [] executed=6 distinct-runs=6 passed=3 failed=3 inconclusive=0 truncated=no
+  value-name-permutation           generated=17 rejected=2 [outside-value-domain=2] valid=15 unsupported=0 not-realizable=0 [] executed=15 distinct-runs=15 passed=2 failed=13 inconclusive=0 truncated=no
+  message-duplication-loss-delay   generated=20 rejected=0 [] valid=20 unsupported=8 not-realizable=0 [] executed=12 distinct-runs=12 passed=0 failed=12 inconclusive=0 truncated=no
+  schedule-perturbation            generated=31 rejected=5 [leaves-trace-class=2 violates-causal-order=3] valid=26 unsupported=0 not-realizable=0 [] executed=26 distinct-runs=26 passed=0 failed=26 inconclusive=0 truncated=no
+  abstraction-map-variants         not run: no abstraction map: RFC 0031's map and CIR (PR 17) are not built
+  hidden-corpus-mutations          not run: no held-out corpus: the docs/50 gaming corpus does not exist
+  spent: candidates=99 runs=88 work=490416; verdict Inconclusive { reason: Unsupported }
+
+totals (generated/valid/executed/passed/failed): correct [99, 88, 34, 34, 0], M01 [99, 88, 80, 6, 74]
+discrimination: correct fails on 0 of 34 executed neighbors; M01 fails on 74 of 80
+distinct runs (by handle, across strategies): correct 34 executed, all passing; M01 76 executed, 70 failing
+note: every executed neighbor passed the library's causal-neighbor check on its witness; the correct program realizes few of M01's interleaving neighbors, so its full campaign is inconclusive and only its scenario profile projects
+causal-neighbor check (continuum-repair, the library's): a schedule neighbor is executed only when the run takes every core event it has, keeps every core-dependent pair in the requested order, and takes the neighbor's causal decision as requested; a scenario neighbor only when the run is of that scenario
+
+M01's failing neighbors (every one disclosed):
+  alternate-enabled-events#0:hoist(9 before 3) RuntimeToAbstract+abstract_register::Agreement ev_cc32958fa45664f96a2b968dca0fdc04652323518e310d46804e0b0605569ae8
+  alternate-enabled-events#1:hoist(15 before 3) RuntimeToAbstract+abstract_register::Agreement ev_950e07aa4bfbe71bb6906463e2c3a65e582ad48797334fbc94bb2f7b5102af95
+  alternate-enabled-events#2:hoist(10 before 5) RuntimeToAbstract+abstract_register::Agreement ev_49c4ceb0401052743e08fcec1211f04f8947ca62cae095f0db74fa4aaeb74931
+  alternate-enabled-events#3:hoist(11 before 5) RuntimeToAbstract+abstract_register::Agreement ev_92e2ef167a24bc842b7cf60a55bf0d9b8f5f138ece870cd6b1f01576a608bc4c
+  alternate-enabled-events#4:hoist(15 before 9) RuntimeToAbstract+abstract_register::Agreement ev_f1c1e38e497761821d25c0606f944355f07370b2f98ff315dfb78f4309b89182
+  alternate-enabled-events#5:hoist(11 before 10) RuntimeToAbstract+abstract_register::Agreement ev_3d969cd9208cb9f52aff98c5eb4c983b7ca1e57f87b4409cabd857c132e9c00c
+  alternate-enabled-events#6:hoist(19 before 11) RuntimeToAbstract+abstract_register::Agreement ev_a810586535f0d841f6f4094d31f24a17c616ecd3af93021d15802f738fa2c247
+  alternate-enabled-events#7:hoist(16 before 15) RuntimeToAbstract+abstract_register::Agreement ev_9c070e3102a206be407756ecf4b2ffed82c8801143f87e5fed73f52796994e09
+  fault-window#1:insert(b:crash-reserved->v0) RuntimeToAbstract+abstract_register::Agreement ev_a6e0c3ee5fb811734eedada37c20a8c4105f4d30143e14d2768d1be06caefd0b
+  fault-window#2:insert(b:crash-reserved->v1) RuntimeToAbstract ev_676233f45261fdc7e92d9659c2e5a96e801ee4edbff31a3f1232a1d1fb31eb60
+  fault-window#3:insert(b:crash-submitted->v0) RuntimeToAbstract+abstract_register::Agreement ev_4b2f782e561eba76c55d1aa67647bacd881c8c263bbb7c9f87d36b7a1f2fa620
+  fault-window#4:insert(b:crash-submitted->v1) RuntimeToAbstract+abstract_register::Agreement ev_57c15f2a9aeeb90370f96494ac03530c5c531dbfd5979d8385a4944c9f7aeb32
+  fault-window#5:insert(b:crash-synced) RuntimeToAbstract+abstract_register::Agreement ev_d4c575d6213b706034baa5e967e4a0878fd3189ffc25691cec72bcd0ea93d76d
+  fault-window#6:insert(b:crash-replied) RuntimeToAbstract+abstract_register::Agreement ev_c0ca856a31189bbe7faeec3c6fe39c1c2f07fcb92e1269c9e98c61703a39aaae
+  fault-window#7:insert(c:crash-reserved->v1) RuntimeToAbstract+abstract_register::Agreement ev_338a9f6a3643be688d59cd3f34141ce9bf0d6bbdbdc6e376863f4e1552d79b2b
+  fault-window#8:insert(c:crash-reserved->v0) RuntimeToAbstract ev_03d40013da40264ccae305b748a6d56eef10bc6aee491699d1121adcf879258c
+  fault-window#9:insert(c:crash-submitted->v1) RuntimeToAbstract+abstract_register::Agreement ev_415753b381a6f00fcaa192d71a72a173475678320bdcaaca419b1456d5bebfe1
+  fault-window#10:insert(c:crash-submitted->v0) RuntimeToAbstract+abstract_register::Agreement ev_9b977e8a4c8de46b2d396a4d189fc9860d94a1406374c3129c254130eec27351
+  fault-window#11:insert(c:crash-synced) RuntimeToAbstract+abstract_register::Agreement ev_1e8c3371b3d65914856092ae5250a6692bfa21ba4efba51353d62415fb125ecf
+  fault-window#12:insert(c:crash-replied) RuntimeToAbstract+abstract_register::Agreement ev_b8f40376d7fbd183f71c22bd4e6feb52dda0d35ca2417ae5dce0e0023ecaf445
+  cancellation-checkpoints#3:abort-retry(b) RuntimeToAbstract+abstract_register::Agreement ev_c8364966084db6052df1114f0e025086c8fbd6e623f2359889b88e4d01ea4da1
+  cancellation-checkpoints#4:abort-retry(c) RuntimeToAbstract+abstract_register::Agreement ev_3364024ea2433c1c3f26739b426d508b85b5e6f8e8ed091ba93ce467ca2763e6
+  cancellation-checkpoints#5:abort-retry(all) RuntimeToAbstract+abstract_register::Agreement ev_342d91170b93fb780c93dda913d6f4fca6920444e98fb1c2eae733f1c3e0cf91
+  value-name-permutation#0:rename(acb) RuntimeToAbstract+abstract_register::Agreement ev_3f5ebd2e5ae315b9f1a220811167e76d507246c4957a46fc82e52400d72c33f6
+  value-name-permutation#1:rename(bac) RuntimeToAbstract+abstract_register::Agreement ev_5741185a84cb5436b2266400e9394b36e25a6fc82e1c711552ac0ef123684cb3
+  value-name-permutation#2:rename(bca) RuntimeToAbstract+abstract_register::Agreement ev_fc126a589be76ca43f41ebb7580c7ca620e01b8805f3a924d9f7c9d091c60308
+  value-name-permutation#3:rename(cab) RuntimeToAbstract+abstract_register::Agreement ev_759e23b8d1425f14909d2b460926f42fa1229e430822a451a7810652b80ffa6e
+  value-name-permutation#4:rename(cba) RuntimeToAbstract+abstract_register::Agreement ev_75a2ac6d30238af115e615a0d41b5cef013daaa2a7ee20071aa9aedf1cfff5c7
+  value-name-permutation#5:swap-values RuntimeToAbstract+abstract_register::Agreement ev_a416cea32c8a2640aecff90525dedf26192c27764e8c8bd8e6614874f80d3af1
+  value-name-permutation#6:swap-values+rename(acb) RuntimeToAbstract+abstract_register::Agreement ev_0f245833b16763233d850aafb946614cd70029bef37a09843214406fdeb07032
+  value-name-permutation#7:swap-values+rename(bac) RuntimeToAbstract+abstract_register::Agreement ev_ac6e2f3e01aeddb772b3fe8b19163ea8725528967852d3272ade1b5392c08d53
+  value-name-permutation#8:swap-values+rename(bca) RuntimeToAbstract+abstract_register::Agreement ev_2346239ef12def25be3d5e0f796464563d3a3d7eb6e263cf7c5a489ce9cbc9df
+  value-name-permutation#9:swap-values+rename(cab) RuntimeToAbstract+abstract_register::Agreement ev_a17c144288dd2cde0afe61b25880e41e9757ea9628d886e3adf24de7a2a8738c
+  value-name-permutation#10:swap-values+rename(cba) RuntimeToAbstract+abstract_register::Agreement ev_34b15f11b8a4e8e4f2d1daf30ff0c6cc7445b2e256c96f9ca027eab94def85d0
+  value-name-permutation#11:value(a:0->1) RuntimeToAbstract ev_3732afb1aec3652cfa9df940eafb6e1cabb7f9c0152a1eace00cdf3adbe3a4df
+  value-name-permutation#13:retry(a:1->0) RuntimeToAbstract ev_caffe2af519984f5f88526d7b779e90b1dca2bcad0b7101b1638330674d3fc9f
+  message-duplication-loss-delay#0:delay(5,+1) RuntimeToAbstract+abstract_register::Agreement ev_acef30530a738638da508cc36220a2a6769bda3cb654a20cdad2914b040acbf2
+  message-duplication-loss-delay#1:delay(5,+2) RuntimeToAbstract+abstract_register::Agreement ev_0739550919d7bcba5ff77e856d3fb609254c5d279d275da0be34847448414fda
+  message-duplication-loss-delay#2:delay(5,+3) RuntimeToAbstract+abstract_register::Agreement ev_eb7bcb6d49e4b6987e19157a6b8a0f3ccac63a7b1f3298fb8fa7bd4f5857dd5e
+  message-duplication-loss-delay#5:delay(9,+1) RuntimeToAbstract+abstract_register::Agreement ev_6f0375ff1a4b34fcb0519c8eff0c8145c281b0a2ca2cb0b439a038f4ad8c9a18
+  message-duplication-loss-delay#6:delay(9,+2) RuntimeToAbstract+abstract_register::Agreement ev_b7a013a71cc00d51c7c92bc06503fe7065a9c4ec792e80632be19ebd94572887
+  message-duplication-loss-delay#7:delay(9,+3) RuntimeToAbstract+abstract_register::Agreement ev_44257fff4097695caaafff727a27ec925a419a4ef8be433f98f458ec4da43076
+  message-duplication-loss-delay#10:delay(11,+1) RuntimeToAbstract+abstract_register::Agreement ev_f730588c8385012d5c4bdffef4e028f0e31dab4268779ef7dc746a3525ae83f6
+  message-duplication-loss-delay#11:delay(11,+2) RuntimeToAbstract+abstract_register::Agreement ev_bb181d7d6e44442daccd1651780d9334830e2f791c10041b26839b0dd4233dac
+  message-duplication-loss-delay#12:delay(11,+3) RuntimeToAbstract+abstract_register::Agreement ev_d9eabc3897458173f6ad1f214d30e6b93733b6b513b7b3f57b9c3db8473b111f
+  message-duplication-loss-delay#15:delay(15,+1) RuntimeToAbstract+abstract_register::Agreement ev_9c070e3102a206be407756ecf4b2ffed82c8801143f87e5fed73f52796994e09
+  message-duplication-loss-delay#16:delay(15,+2) RuntimeToAbstract+abstract_register::Agreement ev_65d779cc9287333d9c0086d76e2bf3744889482a88336f594ee2465336e7b89a
+  message-duplication-loss-delay#17:delay(15,+3) RuntimeToAbstract+abstract_register::Agreement ev_d0c06ec2c639c5a4aba95bb29b5b73c714500328bce28391d6cf510604b5cc18
+  schedule-perturbation#0:swap(0,1) RuntimeToAbstract+abstract_register::Agreement ev_a8633959b78199b27fe88771f5faa6cb0d4f5dfade84874fd12bebd6bc3f4044
+  schedule-perturbation#1:swap(1,2) RuntimeToAbstract+abstract_register::Agreement ev_fa72e744e08e7c8e1598a44f6b606df4ce1db03557962caadbd0c6f423828b95
+  schedule-perturbation#2:swap(2,3) RuntimeToAbstract+abstract_register::Agreement ev_33fae63cbefb0660871f8e69c2a3831ba784a1071f4557232acdd986e058c9e0
+  schedule-perturbation#3:swap(3,4) RuntimeToAbstract+abstract_register::Agreement ev_a1e6b3ad016aba5c9f348ae0ee96416be0395eca4fbc1e29d030cfe74d608e6c
+  schedule-perturbation#4:swap(4,5) RuntimeToAbstract+abstract_register::Agreement ev_63abf2c1fb64d11036b05944ec96a7eaf7cc9605b72358ab69c24dad4c9d8876
+  schedule-perturbation#5:swap(5,6) RuntimeToAbstract+abstract_register::Agreement ev_acef30530a738638da508cc36220a2a6769bda3cb654a20cdad2914b040acbf2
+  schedule-perturbation#6:swap(6,7) RuntimeToAbstract+abstract_register::Agreement ev_69bc06e81d39c3c4dc3fbb14684bde680c8d3f99cd65f11a41c8b97febc21383
+  schedule-perturbation#7:swap(7,8) RuntimeToAbstract+abstract_register::Agreement ev_a37ad0e9178303e2ea31ae23dcceb14581e197a17480ce6c846b880213523acb
+  schedule-perturbation#8:swap(8,9) RuntimeToAbstract+abstract_register::Agreement ev_98f3f8989fb64ef36bfae0f03bcdd55998ddad263e59c603f142cd482c7a2af1
+  schedule-perturbation#9:swap(9,10) RuntimeToAbstract+abstract_register::Agreement ev_6f0375ff1a4b34fcb0519c8eff0c8145c281b0a2ca2cb0b439a038f4ad8c9a18
+  schedule-perturbation#11:swap(11,12) RuntimeToAbstract+abstract_register::Agreement ev_f730588c8385012d5c4bdffef4e028f0e31dab4268779ef7dc746a3525ae83f6
+  schedule-perturbation#13:swap(13,14) RuntimeToAbstract+abstract_register::Agreement ev_9ad2fd30554b47fca2db3f10320fa35f287630ebd927f99292ffd94abf4770b5
+  schedule-perturbation#14:swap(14,15) RuntimeToAbstract+abstract_register::Agreement ev_1e2a02f1077996d1f15157fba7fd0142ff5a3ae9e566234f166114530340b8a5
+  schedule-perturbation#17:swap(17,18) RuntimeToAbstract+abstract_register::Agreement ev_3233d490874339dc0a51f5a024b2710a691ebc48a53561f77630ec4ae7bec5b9
+  schedule-perturbation#18:swap(18,19) RuntimeToAbstract+abstract_register::Agreement ev_7a0f2b3fb4d753f1effcf1bf99a8722f9fa8569c73b09ef1873ea976f8fcc1ab
+  schedule-perturbation#20:swap(20,21) RuntimeToAbstract+abstract_register::Agreement ev_b022a252c6e4ffd4a22389233c726d3c5274d0eaba7c2b9a60d88946a5602bc9
+  schedule-perturbation#21:swap(21,22) RuntimeToAbstract+abstract_register::Agreement ev_797baf572ef566d34901df9f802edd7f2dc817f55de2940117d4fca99b823f77
+  schedule-perturbation#22:swap(22,23) RuntimeToAbstract+abstract_register::Agreement ev_f3258962d8ba3c8ee29b24cea7bf9b5d397f3e2ec4a68959e030070ba51f7f62
+  schedule-perturbation#23:walk(0) RuntimeToAbstract+abstract_register::Agreement ev_ee00063600f5a16da1fd94577d3c35a485ae47d632270d7425665c5aa20fe4b1
+  schedule-perturbation#24:walk(1) RuntimeToAbstract+abstract_register::Agreement ev_dbca4dcc86235f84ae3c11886a0e824774406587a854bd33b5ae4a1cccc67667
+  schedule-perturbation#25:walk(2) RuntimeToAbstract+abstract_register::Agreement ev_f86cfdcb5b907ece84047db153281ddb55f22c86f6d20807d97321698e1f3f92
+  schedule-perturbation#26:walk(3) RuntimeToAbstract+abstract_register::Agreement ev_c0379b5284aae88c12085445fa6c3a532f902e61fff5ebe4cc1165a8d95f86fe
+  schedule-perturbation#27:walk(4) RuntimeToAbstract+abstract_register::Agreement ev_ccc00574c67d7acfa544c078b1d6eccfa514d3b2bd435de8fb881aeffe662857
+  schedule-perturbation#28:walk(5) RuntimeToAbstract+abstract_register::Agreement ev_be90112b22109bdfd30afad946c871a6d9d535b6c4ab1158c733b3785b544da9
+  schedule-perturbation#29:walk(6) RuntimeToAbstract+abstract_register::Agreement ev_ed0170be0ab97724fe7550e679cf98fd6dfaff2bc2f8d6592a5e688f2381e75f
+  schedule-perturbation#30:walk(7) RuntimeToAbstract+abstract_register::Agreement ev_4a369b00ed9c06db2c3b57351ef469b678004e9001b439b0dd4f9b5c474cc96c
+
+M01's passing neighbors: 6
+  fault-window#0:remove-crash(a)
+  cancellation-checkpoints#0:move(a:crash-submitted->v1 to crash-reserved->v1)
+  cancellation-checkpoints#1:move(a:crash-submitted->v1 to crash-synced)
+  cancellation-checkpoints#2:abort-instead(a)
+  value-name-permutation#14:value(b:0->1)
+  value-name-permutation#16:value(c:1->0)
+
+## pr21-impl01-02-determinism
+
+same seed: byte-identical record = true (67265 bytes)
+seed 0xdeac27f6: 8 of 99 neighbors differ, all of them seeded walks: true
+
+## pr21-impl01-03-invalid-rejected
+
+  fault-window#13:insert-all(crash-reserved) -> exceeds-fault-bound(crashes 3 > 2)
+  fault-window#14:insert-all(crash-submitted) -> exceeds-fault-bound(crashes 3 > 2)
+  fault-window#15:insert-all(crash-synced) -> exceeds-fault-bound(crashes 3 > 2)
+  fault-window#16:insert-all(crash-replied) -> exceeds-fault-bound(crashes 3 > 2)
+  value-name-permutation#12:retry(a:1->2) -> outside-value-domain(2 >= 2)
+  value-name-permutation#15:value(c:1->2) -> outside-value-domain(2 >= 2)
+  schedule-perturbation#10:swap(10,11) -> leaves-trace-class(10,11)
+  schedule-perturbation#12:swap(12,13) -> violates-causal-order(13 before 12)
+  schedule-perturbation#15:swap(15,16) -> leaves-trace-class(15,16)
+  schedule-perturbation#16:swap(16,17) -> violates-causal-order(17 before 16)
+  schedule-perturbation#19:swap(19,20) -> violates-causal-order(20 before 19)
+  hand-built confirm-before-submit -> violates-causal-order(5 before 2)
+  hand-built not-a-permutation -> malformed-schedule
+  hand-built three-crashes -> exceeds-fault-bound(crashes 3 > 2)
+  hand-built four-cancellations -> exceeds-fault-bound(cancellations 4 > 3)
+  hand-built value-v2 -> outside-value-domain(2 >= 2)
+  hand-built duplicate-a-non-send -> not-a-message(2)
+  with a fault model of crash and recovery only, every message neighbor is rejected (outside-fault-model, or violates-causal-order first) and none is realized: true
+
+## pr21-impl01-04-receipt-coverage
+
+full campaign (every strategy selected): correct verdict Inconclusive { reason: Unsupported }, projection Some(Inconclusive { reason: Unsupported }); M01 verdict Inconclusive { reason: Unsupported }, projection Some(Inconclusive { reason: Unsupported })
+  (duplication and loss are unsupported on the register and two strategies do not run, so no coverage is projected: the gaps stay in the record)
+supported profile [fault-window cancellation-checkpoints value-name-permutation]:
+  subject: replicated-register/correct (ack after sync) a5124c12f86039b7ab6f6eaaf6f9e924e68033b2d985484fc7795e830675ee79
+  record digest: 6f8821c81cd3ecd826f96f9f627a93b895f93ba65897bf103a11fe55667ddba3
+  alternate-enabled-events         not run: not selected
+  fault-window                     generated=17 rejected=4 [exceeds-fault-bound=4] valid=13 unsupported=0 not-realizable=0 [] executed=13 distinct-runs=13 passed=13 failed=0 inconclusive=0 truncated=no
+  cancellation-checkpoints         generated=6 rejected=0 [] valid=6 unsupported=0 not-realizable=0 [] executed=6 distinct-runs=6 passed=6 failed=0 inconclusive=0 truncated=no
+  value-name-permutation           generated=17 rejected=2 [outside-value-domain=2] valid=15 unsupported=0 not-realizable=0 [] executed=15 distinct-runs=15 passed=15 failed=0 inconclusive=0 truncated=no
+  message-duplication-loss-delay   not run: not selected
+  schedule-perturbation            not run: not selected
+  abstraction-map-variants         not run: not selected
+  hidden-corpus-mutations          not run: not selected
+  spent: candidates=40 runs=34 work=225804; verdict Complete
+correct (Complete): {"failing_neighbors":[],"strategies":[{"explored":13,"failing":0,"strategy":"fault-window","truncated":false},{"explored":6,"failing":0,"strategy":"cancellation-checkpoints","truncated":false},{"explored":15,"failing":0,"strategy":"value-name-permutation","truncated":false}]}
+  subject: replicated-register/M01 (ack before sync) 905e2644745943be9c0b6929bd63bd3fe9225d9bfe6e72351ae9971ba7faf3a8
+  record digest: e494be1236eaac8bb2382730f4f8dea34286f3cee6039e8a8a5bd1b7b93a8f9a
+  alternate-enabled-events         not run: not selected
+  fault-window                     generated=17 rejected=4 [exceeds-fault-bound=4] valid=13 unsupported=0 not-realizable=0 [] executed=13 distinct-runs=13 passed=1 failed=12 inconclusive=0 truncated=no
+  cancellation-checkpoints         generated=6 rejected=0 [] valid=6 unsupported=0 not-realizable=0 [] executed=6 distinct-runs=6 passed=3 failed=3 inconclusive=0 truncated=no
+  value-name-permutation           generated=17 rejected=2 [outside-value-domain=2] valid=15 unsupported=0 not-realizable=0 [] executed=15 distinct-runs=15 passed=2 failed=13 inconclusive=0 truncated=no
+  message-duplication-loss-delay   not run: not selected
+  schedule-perturbation            not run: not selected
+  abstraction-map-variants         not run: not selected
+  hidden-corpus-mutations          not run: not selected
+  spent: candidates=40 runs=34 work=225798; verdict Complete
+M01 (Complete): {"failing_neighbors":[{"neighbor":"fault-window#1:insert(b:crash-reserved->v0)","run":"ev_a6e0c3ee5fb811734eedada37c20a8c4105f4d30143e14d2768d1be06caefd0b","strategy":"fault-window","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"fault-window#2:insert(b:crash-reserved->v1)","run":"ev_676233f45261fdc7e92d9659c2e5a96e801ee4edbff31a3f1232a1d1fb31eb60","strategy":"fault-window","summary":"RuntimeToAbstract"},{"neighbor":"fault-window#3:insert(b:crash-submitted->v0)","run":"ev_4b2f782e561eba76c55d1aa67647bacd881c8c263bbb7c9f87d36b7a1f2fa620","strategy":"fault-window","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"fault-window#4:insert(b:crash-submitted->v1)","run":"ev_57c15f2a9aeeb90370f96494ac03530c5c531dbfd5979d8385a4944c9f7aeb32","strategy":"fault-window","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"fault-window#5:insert(b:crash-synced)","run":"ev_d4c575d6213b706034baa5e967e4a0878fd3189ffc25691cec72bcd0ea93d76d","strategy":"fault-window","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"fault-window#6:insert(b:crash-replied)","run":"ev_c0ca856a31189bbe7faeec3c6fe39c1c2f07fcb92e1269c9e98c61703a39aaae","strategy":"fault-window","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"fault-window#7:insert(c:crash-reserved->v1)","run":"ev_338a9f6a3643be688d59cd3f34141ce9bf0d6bbdbdc6e376863f4e1552d79b2b","strategy":"fault-window","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"fault-window#8:insert(c:crash-reserved->v0)","run":"ev_03d40013da40264ccae305b748a6d56eef10bc6aee491699d1121adcf879258c","strategy":"fault-window","summary":"RuntimeToAbstract"},{"neighbor":"fault-window#9:insert(c:crash-submitted->v1)","run":"ev_415753b381a6f00fcaa192d71a72a173475678320bdcaaca419b1456d5bebfe1","strategy":"fault-window","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"fault-window#10:insert(c:crash-submitted->v0)","run":"ev_9b977e8a4c8de46b2d396a4d189fc9860d94a1406374c3129c254130eec27351","strategy":"fault-window","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"fault-window#11:insert(c:crash-synced)","run":"ev_1e8c3371b3d65914856092ae5250a6692bfa21ba4efba51353d62415fb125ecf","strategy":"fault-window","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"fault-window#12:insert(c:crash-replied)","run":"ev_b8f40376d7fbd183f71c22bd4e6feb52dda0d35ca2417ae5dce0e0023ecaf445","strategy":"fault-window","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"cancellation-checkpoints#3:abort-retry(b)","run":"ev_c8364966084db6052df1114f0e025086c8fbd6e623f2359889b88e4d01ea4da1","strategy":"cancellation-checkpoints","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"cancellation-checkpoints#4:abort-retry(c)","run":"ev_3364024ea2433c1c3f26739b426d508b85b5e6f8e8ed091ba93ce467ca2763e6","strategy":"cancellation-checkpoints","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"cancellation-checkpoints#5:abort-retry(all)","run":"ev_342d91170b93fb780c93dda913d6f4fca6920444e98fb1c2eae733f1c3e0cf91","strategy":"cancellation-checkpoints","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"value-name-permutation#0:rename(acb)","run":"ev_3f5ebd2e5ae315b9f1a220811167e76d507246c4957a46fc82e52400d72c33f6","strategy":"value-name-permutation","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"value-name-permutation#1:rename(bac)","run":"ev_5741185a84cb5436b2266400e9394b36e25a6fc82e1c711552ac0ef123684cb3","strategy":"value-name-permutation","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"value-name-permutation#2:rename(bca)","run":"ev_fc126a589be76ca43f41ebb7580c7ca620e01b8805f3a924d9f7c9d091c60308","strategy":"value-name-permutation","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"value-name-permutation#3:rename(cab)","run":"ev_759e23b8d1425f14909d2b460926f42fa1229e430822a451a7810652b80ffa6e","strategy":"value-name-permutation","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"value-name-permutation#4:rename(cba)","run":"ev_75a2ac6d30238af115e615a0d41b5cef013daaa2a7ee20071aa9aedf1cfff5c7","strategy":"value-name-permutation","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"value-name-permutation#5:swap-values","run":"ev_a416cea32c8a2640aecff90525dedf26192c27764e8c8bd8e6614874f80d3af1","strategy":"value-name-permutation","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"value-name-permutation#6:swap-values+rename(acb)","run":"ev_0f245833b16763233d850aafb946614cd70029bef37a09843214406fdeb07032","strategy":"value-name-permutation","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"value-name-permutation#7:swap-values+rename(bac)","run":"ev_ac6e2f3e01aeddb772b3fe8b19163ea8725528967852d3272ade1b5392c08d53","strategy":"value-name-permutation","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"value-name-permutation#8:swap-values+rename(bca)","run":"ev_2346239ef12def25be3d5e0f796464563d3a3d7eb6e263cf7c5a489ce9cbc9df","strategy":"value-name-permutation","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"value-name-permutation#9:swap-values+rename(cab)","run":"ev_a17c144288dd2cde0afe61b25880e41e9757ea9628d886e3adf24de7a2a8738c","strategy":"value-name-permutation","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"value-name-permutation#10:swap-values+rename(cba)","run":"ev_34b15f11b8a4e8e4f2d1daf30ff0c6cc7445b2e256c96f9ca027eab94def85d0","strategy":"value-name-permutation","summary":"RuntimeToAbstract+abstract_register::Agreement"},{"neighbor":"value-name-permutation#11:value(a:0->1)","run":"ev_3732afb1aec3652cfa9df940eafb6e1cabb7f9c0152a1eace00cdf3adbe3a4df","strategy":"value-name-permutation","summary":"RuntimeToAbstract"},{"neighbor":"value-name-permutation#13:retry(a:1->0)","run":"ev_caffe2af519984f5f88526d7b779e90b1dca2bcad0b7101b1638330674d3fc9f","strategy":"value-name-permutation","summary":"RuntimeToAbstract"}],"strategies":[{"explored":13,"failing":12,"strategy":"fault-window","truncated":false},{"explored":6,"failing":3,"strategy":"cancellation-checkpoints","truncated":false},{"explored":15,"failing":13,"strategy":"value-name-permutation","truncated":false}]}
+
+## pr21-impl01-05-symmetry
+
+  correct: value-name-permutation#0:rename(acb)=pass value-name-permutation#1:rename(bac)=pass value-name-permutation#2:rename(bca)=pass value-name-permutation#3:rename(cab)=pass value-name-permutation#4:rename(cba)=pass value-name-permutation#5:swap-values=pass value-name-permutation#6:swap-values+rename(acb)=pass value-name-permutation#7:swap-values+rename(bac)=pass value-name-permutation#8:swap-values+rename(bca)=pass value-name-permutation#9:swap-values+rename(cab)=pass value-name-permutation#10:swap-values+rename(cba)=pass
+  M01: value-name-permutation#0:rename(acb)=fail value-name-permutation#1:rename(bac)=fail value-name-permutation#2:rename(bca)=fail value-name-permutation#3:rename(cab)=fail value-name-permutation#4:rename(cba)=fail value-name-permutation#5:swap-values=fail value-name-permutation#6:swap-values+rename(acb)=fail value-name-permutation#7:swap-values+rename(bac)=fail value-name-permutation#8:swap-values+rename(bca)=fail value-name-permutation#9:swap-values+rename(cab)=fail value-name-permutation#10:swap-values+rename(cba)=fail

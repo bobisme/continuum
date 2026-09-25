@@ -1,3 +1,4 @@
+
 [package]
 name = "continuum-repair"
 version.workspace = true
@@ -6,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
-# Two workspace edges, both for PR-20 / IMPL-01 (bn-2d70).
+# Workspace edges for PR-20 (bn-2d70, bn-195b) and PR 21 (bn-4ykgg).
 #
 # - `continuum-intent`: the base intent is an `in_*` Intent Contract identity
 #   (`IntentId`), and the transaction artifact is written in the one canonical JSON
@@ -26,6 +27,13 @@ publish = false
 # - `continuum-semantic-diff`: gate 3 decides on the RFC 0031 `diff_*` artifact, and
 #   that crate's `assemble` is the one classification authority. A second classifier
 #   here would give one revision pair two verdicts.
+#
+# PR 21 (bn-4ykgg) reuses `continuum-intent` and `continuum-value`:
+#
+# - each generated gate-5 neighbor is typed against the
+#   Intent Contract's `FaultModel` and `Bounds`, the neighborhood record is spelled in
+#   the same canonical JSON, and a campaign out of budget reports `continuum-value`'s
+#   typed `InconclusiveReason`.
 [dependencies]
 continuum-intent = { path = "../continuum-intent" }
 continuum-semantic-diff = { path = "../continuum-semantic-diff" }

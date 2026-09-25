@@ -10,6 +10,17 @@
 //! A repair is a transaction with gates, not an edit: a property-weakening patch is
 //! reclassified and blocked rather than merged.
 //!
+//! # What has landed (PR 21, bn-4ykgg)
+//!
+//! - [`neighborhood`] — gate 5's semantic neighbor generation around a causal core
+//!   (RFC 0032, "Neighborhood construction"): the eight closed strategies, generic
+//!   interleaving and message generators over any [`neighborhood::CausalCore`], a
+//!   substrate hook for fault placement, cancellation and value-domain edits, every
+//!   candidate typed against the Intent Contract's fault model and bounds before it is
+//!   run, a budget charged before work, and a canonical record with its projection onto
+//!   `promotion-receipt.schema.json`'s `coverage.neighborhood`. It is not yet wired into
+//!   the transaction's gate 5 (PR 20's later bones).
+//!
 //! # Dependency-boundary contract
 //!
 //! - INV-011 — intent-preserving repair.
@@ -128,6 +139,7 @@
 pub mod diff;
 pub mod handle;
 pub mod hypothesis;
+pub mod neighborhood;
 pub mod patch;
 pub mod policy;
 pub mod receipt;
