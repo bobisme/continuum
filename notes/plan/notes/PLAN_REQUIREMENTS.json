@@ -2774,8 +2774,8 @@
         "line": 500,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "refinement/certificate status"
+      "status": "satisfied",
+      "summary": "refinement/certificate status (delivered: bn-9r5e \u2014 crates/continuum-repair/src/receipt/status.rs: RefinementCertificateStatus is derived at compose and again at verification from the CandidateEvidence seam, the evidence the daemon holds for the candidate snapshot, and never from the claim. A certificate counts only as VerifiedModelBound, which only a ModelBound verdict naming the candidate itself reaches: the seam answers that verdict only for a node evidence.verify settled validated on the bn-3hk4v model-binding path. Epoch-1 and state-type claims, temporal, SAT and SMT families, a rejected, unchecked, content-missing, redacted, stale or kernel-inconclusive node, an unserved checker or unrouted wire epoch, and a certificate bound to another snapshot are each Unverified with a typed reason. No refinement checker is deployed, so refinement coverage is Absent, typed, and never a number; nothing computes gate 9's invalidation set either. So a claim that carries coverage.refinementcoverage or coverage.certificaterebuild is refused CoverageNotDerived, and a receipt that lists gate 8 or gate 9 passed is refused GateWithoutEvidence. Every profile enforces gate 8, so no receipt verifies until PR 17 ships a refinement checker. Retained artifact pr22-impl05-ack-after-sync-certificate-status. Evidence crates/continuum-repair/tests/pr22impl05impl06evidence.rs and the receipt::tests::pr22impl05 unit tests. Not here: the daemon's CandidateEvidence implementation over its evidence graph, so no production path calls this yet, and the as-of-promotion evidence view a published receipt needs, the PromotionRecord seam. Open: the schema has no per-certificate status field and no typed absent member for refinementcoverage, so the status renders only through unknowns)"
     },
     {
       "category": "pr-deliverable",
@@ -2786,8 +2786,8 @@
         "line": 500,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "unknowns"
+      "status": "satisfied",
+      "summary": "unknowns (delivered: bn-yzu1 \u2014 crates/continuum-repair/src/receipt/unknowns.rs: Unknowns is derived by one function from the transaction record, the IMPL-05 status and the daemon's declared unsupported pack cases, with one entry per input: a gate not yet enforced, an in-profile gate pending other than gate 12 or inconclusive, refinement or rebuild coverage not computed where its gate is enforced, no certificate verified, each unverified certificate with its reason, and each unsupported pack case. Each entry renders one kind:field token that Unknown::fromtoken inverts, so the rendering is injective. A claim must list exactly the derived entries in canonical order, the byte order of the rendered entries: an omitted, invented, duplicated or reordered entry is refused with a typed VerifyRefusal, and an absent unknowns is Missing. A record that contradicts its profile and an over-bound or duplicated store answer compose nothing. A completeness test over every profile, gate status, certificate verdict and pack-case set checks that each absent or inconclusive input appears exactly once. Retained artifact pr22-impl06-ack-after-sync-unknowns. Evidence crates/continuum-repair/tests/pr22impl05impl06evidence.rs and the receipt::unknowns::tests::pr22impl06 unit tests. Not here: the daemon wiring above; unknowns from IMPL-03, IMPL-04 and IMPL-09 inputs join the same derivation when those land. Open: the schema types an entry as a bare string, so the token grammar is this module's, and a transaction gate recorded inconclusive carries no INV-008 reason to render)"
     },
     {
       "category": "pr-deliverable",

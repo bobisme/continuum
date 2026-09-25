@@ -31,6 +31,10 @@ continuum-workspace = { path = "../continuum-workspace" }
 continuum-intent = { path = "../continuum-intent" }
 continuum-value = { path = "../continuum-value" }
 continuum-workspace = { path = "../continuum-workspace" }
+# Test-only, PR-22 / IMPL-06 (bn-yzu1): the differential test reads the storage pack's
+# own declared unsupported cases, the vocabulary `receipt::unknowns::PackCase` must
+# carry. The library does not link it.
+continuum-effects-storage = { path = "../continuum-effects-storage" }
 
 [lints]
 workspace = true

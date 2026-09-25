@@ -1,5 +1,6 @@
-//! The promotion-receipt skeleton (PR 22): the three field groups PR-22 / IMPL-01, IMPL-02
-//! and IMPL-07/08 own, composed from referenced artifacts and verified against them.
+//! The promotion-receipt skeleton (PR 22): the field groups PR-22 / IMPL-01, IMPL-02,
+//! IMPL-05, IMPL-06 and IMPL-07/08 own, composed from referenced artifacts and verified
+//! against them.
 //!
 //! The normative shape is `notes/plan/schemas/promotion-receipt.schema.json`
 //! (`https://continuum.dev/schema/promotion-receipt.json`, epoch 1). The obligations the
@@ -18,6 +19,8 @@
 //! | a client-supplied receipt is checked by reference and accepts no declared status | RFC 0032 "Gate 12 is verified, not asserted"; PR 22 exit | [`verify_skeleton`] resolves the named transaction, re-composes the skeleton from the stores, and compares; no claimed value is copied into the result |
 //! | handle possession confers nothing | ADR-0037 | `receipt_id` is not read; a well-formed claim is only a claim |
 //! | a receipt's gate status is the transaction's recorded status | RFC 0032 "Status machine"; "Gate 12 is verified, not asserted" | every gate but gate 12 must match the record, else [`VerifyRefusal::GateNotOnRecord`]; no transaction records an in-profile gate `passed` today, so no claim verifies today |
+//! | refinement and certificate status come from the evidence the daemon holds for the candidate, never from the claim | RFC 0032 receipt table; RFC 0005 correction 1; INV-008 | [`status`] (PR-22 / IMPL-05): [`RefinementCertificateStatus`] is derived from [`CandidateEvidence`]; a certificate counts only when model-bound to the candidate; a gate 8 or 9 listed `passed` without derived evidence is [`VerifyRefusal::GateWithoutEvidence`], and a claimed `coverage.refinement_coverage` or `coverage.certificate_rebuild` group is [`VerifyRefusal::CoverageNotDerived`] |
+//! | `unknowns` lists every unresolved unknown; an absent array is not an empty one | RFC 0032 receipt table, correction 11; INV-007 | [`unknowns`] (PR-22 / IMPL-06): [`Unknowns`] is derived from the record, the status and the daemon's pack cases; a claim must list exactly the derived entries in canonical order |
 //! | gate 12 is `pending` on a `ready` transaction; promotion verifies the receipt, then moves gate 12 | RFC 0032 "Gate 12 is the promotion step"; "Promotion" steps 4–7 | [`verify_for_promotion`] requires gate 12 `pending` on the record and returns a [`ReceiptGenerationLicense`], the typed seam PR-20 promote consumes to record the transition; a record already showing gate 12 `passed` is [`VerifyRefusal::ReceiptGenerationAlreadyPassed`]. [`verify_skeleton`] checks a published receipt, whose record shows gate 12 `passed` |
 //!
 //! # What is not here (typed seams)
@@ -28,13 +31,16 @@
 //! a verified receipt (INV-008).
 //!
 //! - This module renders no `passed` entry at all: the whole `gates` array needs the
-//!   in-profile outcomes, which arrive with PR-20 `evaluate` and the PR-22 IMPL-03 to
-//!   IMPL-06 evidence ([`ReceiptSeam::EnforcedGateOutcomes`]).
+//!   in-profile outcomes, which arrive with PR-20 `evaluate` and the PR-22 IMPL-03 and
+//!   IMPL-04 evidence ([`ReceiptSeam::EnforcedGateOutcomes`]). The evidence behind gates
+//!   8 and 9 is IMPL-05's, and it is absent today, so no receipt that lists gate 8
+//!   `passed` verifies: every profile enforces gate 8, so no receipt verifies until a
+//!   refinement checker ships (PR 17).
 //! - The skeleton does not check that the transaction is the lineage head at `ready`;
 //!   that is `repair.promote` step 1 (RFC 0032 "Promotion"), which is not served yet.
-//! - Daemon wiring: [`IntentRegistry`], [`SealedSnapshots`] and [`TransactionStore`] are
-//!   seams the daemon implements over its intent registry, its sealed workspaces and its
-//!   transaction store. No daemon path calls this module yet. Each store MUST answer
+//! - Daemon wiring: [`IntentRegistry`], [`SealedSnapshots`], [`TransactionStore`] and
+//!   [`CandidateEvidence`] are seams the daemon implements over its intent registry, its
+//!   sealed workspaces, its transaction store and its evidence graph. No daemon path calls this module yet. Each store MUST answer
 //!   `Unknown` for a handle the caller has no standing to read: the refusals below
 //!   distinguish "does not exist" from "exists but disagrees", so an unscoped store
 //!   would make verification an existence oracle (ADR-0037).
@@ -58,12 +64,23 @@
 use core::fmt;
 use std::collections::BTreeMap;
 
+pub mod status;
+pub mod unknowns;
+
 use continuum_intent::canonical_json::{Json, JsonError};
 use continuum_intent::contract::{IntentContract, IntentId, IntentIdentity};
 use continuum_value::identity::ContentHasher;
 
 use crate::handle::{RepairId, SnapshotId};
 use crate::transaction::{GateName, GateProfile, GateStatus, RepairTransaction, Resolution};
+
+use status::EvidenceDefect;
+pub use status::{
+    CertificateNode, CertificateRecord, CertificateVerdict, CoverageGroup, EvidenceKind,
+    GroupDerivation, RefinementCertificateStatus,
+};
+pub use unknowns::{PackCase, Unknown, UnknownKind, Unknowns};
+use unknowns::{UnknownsDefect, UnknownsMismatch};
 
 /// The receipt schema's artifact-class identity (`schema_id`).
 pub const RECEIPT_SCHEMA_ID: &str = "https://continuum.dev/schema/promotion-receipt.json";
@@ -114,19 +131,25 @@ pub enum ReceiptField {
     /// `gate_profile` (PR-22 / IMPL-07).
     GateProfile,
     /// `gates`: the `not_yet_enforced` entries (PR-22 / IMPL-08) and the structure of the
-    /// list. The `passed` entries' evidence is [`ReceiptSeam::EnforcedGateOutcomes`].
+    /// list. The `passed` entries' evidence is [`ReceiptSeam::EnforcedGateOutcomes`],
+    /// except gates 8 and 9, whose evidence is IMPL-05's.
     Gates,
+    /// `unknowns` (PR-22 / IMPL-06). The `coverage` groups IMPL-05 owns,
+    /// `refinement_coverage` and `certificate_rebuild`, are checked too, but `coverage`
+    /// is not listed here: its other groups are [`ReceiptSeam::ReplayNeighborhoodMutation`].
+    Unknowns,
 }
 
 impl ReceiptField {
     /// Every owned field.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::RepairTransaction,
         Self::Intent,
         Self::BaseSnapshot,
         Self::ResultSnapshot,
         Self::GateProfile,
         Self::Gates,
+        Self::Unknowns,
     ];
 
     /// The schema property.
@@ -139,6 +162,7 @@ impl ReceiptField {
             Self::ResultSnapshot => "result_snapshot",
             Self::GateProfile => "gate_profile",
             Self::Gates => "gates",
+            Self::Unknowns => "unknowns",
         }
     }
 }
@@ -146,17 +170,13 @@ impl ReceiptField {
 /// A receipt field group this skeleton does not compose or verify, with its owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ReceiptSeam {
-    /// The evidence behind every in-profile gate listed `passed` (PR-20 `evaluate`; the
-    /// gate evidence of PR-22 IMPL-03 to IMPL-06).
+    /// The evidence behind every in-profile gate listed `passed` other than gates 8 and 9
+    /// (PR-20 `evaluate`; the gate evidence of PR-22 IMPL-03 and IMPL-04).
     EnforcedGateOutcomes,
     /// `semantic_diff`, `intent_diff` (PR-22 / IMPL-03).
     SemanticDiff,
-    /// `coverage`: replay, neighborhood, and mutation results (PR-22 / IMPL-04).
+    /// `coverage`: replay, neighborhood, mutation and parity results (PR-22 / IMPL-04).
     ReplayNeighborhoodMutation,
-    /// `coverage`: refinement and certificate status (PR-22 / IMPL-05).
-    RefinementCertificateStatus,
-    /// `unknowns` (PR-22 / IMPL-06).
-    Unknowns,
     /// `policy_decision` (PR-22 / IMPL-09).
     PolicyDecision,
     /// `cost_ledger`, `checker`, `semantic_epoch`, `epochs`, `redacted_references`
@@ -173,12 +193,10 @@ pub enum ReceiptSeam {
 
 impl ReceiptSeam {
     /// Every seam.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 7] = [
         Self::EnforcedGateOutcomes,
         Self::SemanticDiff,
         Self::ReplayNeighborhoodMutation,
-        Self::RefinementCertificateStatus,
-        Self::Unknowns,
         Self::PolicyDecision,
         Self::LedgerCheckerEpochs,
         Self::EnvelopeAndSignature,
@@ -189,11 +207,9 @@ impl ReceiptSeam {
     #[must_use]
     pub const fn owner(self) -> &'static str {
         match self {
-            Self::EnforcedGateOutcomes => "PR-20 evaluate; PR-22-IMPL-03..06",
+            Self::EnforcedGateOutcomes => "PR-20 evaluate; PR-22-IMPL-03..04",
             Self::SemanticDiff => "PR-22-IMPL-03",
             Self::ReplayNeighborhoodMutation => "PR-22-IMPL-04",
-            Self::RefinementCertificateStatus => "PR-22-IMPL-05",
-            Self::Unknowns => "PR-22-IMPL-06",
             Self::PolicyDecision => "PR-22-IMPL-09",
             Self::LedgerCheckerEpochs | Self::EnvelopeAndSignature | Self::PromotionRecord => {
                 "PR-22-EXIT"
@@ -201,15 +217,15 @@ impl ReceiptSeam {
         }
     }
 
-    /// The schema properties the seam covers. `coverage` belongs to two seams, and the
-    /// `passed` entries of `gates` to [`Self::EnforcedGateOutcomes`].
+    /// The schema properties the seam covers. The `passed` entries of `gates` belong to
+    /// [`Self::EnforcedGateOutcomes`], and `coverage`'s groups other than the two IMPL-05
+    /// owns to [`Self::ReplayNeighborhoodMutation`].
     #[must_use]
     pub const fn properties(self) -> &'static [&'static str] {
         match self {
             Self::EnforcedGateOutcomes => &["gates"],
             Self::SemanticDiff => &["intent_diff", "semantic_diff"],
-            Self::ReplayNeighborhoodMutation | Self::RefinementCertificateStatus => &["coverage"],
-            Self::Unknowns => &["unknowns"],
+            Self::ReplayNeighborhoodMutation => &["coverage"],
             Self::PolicyDecision => &["policy_decision"],
             Self::LedgerCheckerEpochs => &[
                 "checker",
@@ -373,6 +389,41 @@ pub trait TransactionStore<H: ContentHasher> {
     fn transaction(&self, repair: &RepairId) -> Resolution<RepairTransaction<H>>;
 }
 
+/// The evidence the daemon holds for a transaction's candidate snapshot (PR-22 IMPL-05
+/// and IMPL-06). The daemon implements it over its evidence graph.
+///
+/// Obligations on the implementation, which this crate cannot check:
+///
+/// - The answer is the evidence as of the named transaction version's promotion. At
+///   promotion that is the current graph. For a published receipt it is the view the
+///   promotion recorded, so a later `evidence.verify` does not change a published
+///   receipt's derivation (the graph is append-only; the view is
+///   [`ReceiptSeam::PromotionRecord`]'s concern).
+/// - [`CertificateVerdict::ModelBound`] is answered only for a certificate node that
+///   `evidence.verify` settled `validated` through the model-binding path (bn-3hk4v:
+///   wire epoch 2, finite closure, carried model byte-equal to the model the daemon holds
+///   for the one sealed snapshot the node names), with `snapshot` that sealed snapshot.
+///   A status a client attached or declared is never one: a node no daemon verification
+///   settled is [`CertificateVerdict::Unchecked`].
+/// - Pack cases are the declared unsupported cases of the effect packs the candidate's
+///   verification used.
+/// - `Unknown` for a transaction the caller has no standing to read (ADR-0037).
+pub trait CandidateEvidence {
+    /// Every certificate node the daemon holds for `candidate`, with its verdict.
+    fn certificates(
+        &self,
+        repair: &RepairId,
+        candidate: &SnapshotId,
+    ) -> Resolution<Vec<CertificateRecord>>;
+
+    /// The declared unsupported cases of the effect packs `candidate` was verified under.
+    fn unsupported_pack_cases(
+        &self,
+        repair: &RepairId,
+        candidate: &SnapshotId,
+    ) -> Resolution<Vec<PackCase>>;
+}
+
 /// Which store did not answer. A store that did not answer is not a store that said no
 /// (INV-008).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -383,6 +434,8 @@ pub enum Store {
     Snapshots,
     /// [`TransactionStore`].
     Transactions,
+    /// [`CandidateEvidence`].
+    Evidence,
 }
 
 /// Which of the two receipt snapshots.
@@ -417,6 +470,34 @@ pub enum ComposeRefusal {
     SnapshotBoundElsewhere(SnapshotRole),
     /// A store did not answer.
     StoreUnavailable(Store),
+    /// The evidence store holds no record for the candidate the caller may read.
+    EvidenceUnknown,
+    /// An evidence answer holds more entries than its bound; nothing was sorted.
+    EvidenceOverBound(EvidenceKind),
+    /// An evidence answer lists one entry twice. A store defect, refused rather than
+    /// trusted.
+    EvidenceDuplicate(EvidenceKind),
+    /// The transaction records a gate status its profile does not admit: an in-profile
+    /// gate `not_yet_enforced`, or a gate outside the profile with any other status.
+    GateRecordInconsistent(GateName),
+}
+
+impl From<EvidenceDefect> for ComposeRefusal {
+    fn from(defect: EvidenceDefect) -> Self {
+        match defect {
+            EvidenceDefect::OverBound(kind) => Self::EvidenceOverBound(kind),
+            EvidenceDefect::Duplicate(kind) => Self::EvidenceDuplicate(kind),
+        }
+    }
+}
+
+impl From<UnknownsDefect> for ComposeRefusal {
+    fn from(defect: UnknownsDefect) -> Self {
+        match defect {
+            UnknownsDefect::GateRecord(gate) => Self::GateRecordInconsistent(gate),
+            UnknownsDefect::Evidence(defect) => defect.into(),
+        }
+    }
 }
 
 impl fmt::Display for ComposeRefusal {
@@ -434,6 +515,18 @@ impl fmt::Display for ComposeRefusal {
                 write!(f, "the {role:?} snapshot is bound to another intent")
             }
             Self::StoreUnavailable(store) => write!(f, "the {store:?} store did not answer"),
+            Self::EvidenceUnknown => f.write_str("no evidence record resolves for the candidate"),
+            Self::EvidenceOverBound(kind) => {
+                write!(f, "the {kind:?} evidence answer exceeds its bound")
+            }
+            Self::EvidenceDuplicate(kind) => {
+                write!(f, "the {kind:?} evidence answer lists an entry twice")
+            }
+            Self::GateRecordInconsistent(gate) => write!(
+                f,
+                "`{}`'s recorded status contradicts the transaction's profile",
+                gate.token()
+            ),
         }
     }
 }
@@ -493,9 +586,9 @@ impl ReceiptSnapshots {
     }
 }
 
-/// The receipt fields PR-22 IMPL-01, IMPL-02, IMPL-07 and IMPL-08 own, derived from one
-/// transaction version and the stores. Built only by [`Self::compose`] and inside
-/// [`verify_skeleton`]; no constructor takes a field value.
+/// The receipt fields PR-22 IMPL-01, IMPL-02, IMPL-05, IMPL-06, IMPL-07 and IMPL-08 own,
+/// derived from one transaction version and the stores. Built only by [`Self::compose`]
+/// and inside [`verify_skeleton`]; no constructor takes a field value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceiptSkeleton {
     repair_transaction: RepairId,
@@ -503,6 +596,8 @@ pub struct ReceiptSkeleton {
     snapshots: ReceiptSnapshots,
     gate_profile: GateProfile,
     not_yet_enforced: NotYetEnforced,
+    status: RefinementCertificateStatus,
+    unknowns: Unknowns,
 }
 
 impl ReceiptSkeleton {
@@ -518,8 +613,15 @@ impl ReceiptSkeleton {
         transaction: &RepairTransaction<H>,
         registry: &impl IntentRegistry,
         snapshots: &impl SealedSnapshots,
+        evidence: &impl CandidateEvidence,
     ) -> Result<Self, ComposeRefusal> {
-        derive(transaction, registry, snapshots, Standing::Current)
+        derive(
+            transaction,
+            registry,
+            snapshots,
+            evidence,
+            Standing::Current,
+        )
     }
 
     /// `repair_transaction`.
@@ -550,6 +652,18 @@ impl ReceiptSkeleton {
     #[must_use]
     pub const fn not_yet_enforced(&self) -> &NotYetEnforced {
         &self.not_yet_enforced
+    }
+
+    /// The refinement and certificate status (PR-22 / IMPL-05).
+    #[must_use]
+    pub const fn status(&self) -> &RefinementCertificateStatus {
+        &self.status
+    }
+
+    /// `unknowns` (PR-22 / IMPL-06).
+    #[must_use]
+    pub const fn unknowns(&self) -> &Unknowns {
+        &self.unknowns
     }
 
     fn anchor(&self) -> (String, Json) {
@@ -602,6 +716,32 @@ impl ReceiptSkeleton {
         ]))
     }
 
+    /// IMPL-05's fragment: the `unknowns` entries the refinement and certificate status
+    /// contributes, and `repair_transaction`. The status renders nothing in `coverage`
+    /// ([`status`]).
+    #[must_use]
+    pub fn status_fields(&self) -> Json {
+        Json::Object(BTreeMap::from([
+            self.anchor(),
+            (
+                ReceiptField::Unknowns.property().to_owned(),
+                self.unknowns.status_entries_json(),
+            ),
+        ]))
+    }
+
+    /// IMPL-06's fragment: `unknowns` and `repair_transaction`.
+    #[must_use]
+    pub fn unknown_fields(&self) -> Json {
+        Json::Object(BTreeMap::from([
+            self.anchor(),
+            (
+                ReceiptField::Unknowns.property().to_owned(),
+                self.unknowns.entries_json(),
+            ),
+        ]))
+    }
+
     /// Every field this skeleton renders, as one receipt fragment.
     #[must_use]
     pub fn fields_json(&self) -> Json {
@@ -610,6 +750,7 @@ impl ReceiptSkeleton {
             self.intent_fields(),
             self.snapshot_fields(),
             self.profile_fields(),
+            self.unknown_fields(),
         ] {
             if let Json::Object(part) = fragment {
                 fields.extend(part);
@@ -649,10 +790,15 @@ fn bound_snapshot(
     }
 }
 
+fn resolve_evidence<T>(answer: Resolution<T>) -> Result<T, ComposeRefusal> {
+    resolve(answer, ComposeRefusal::EvidenceUnknown, Store::Evidence)
+}
+
 fn derive<H: ContentHasher>(
     transaction: &RepairTransaction<H>,
     registry: &impl IntentRegistry,
     snapshots: &impl SealedSnapshots,
+    evidence: &impl CandidateEvidence,
     standing: Standing,
 ) -> Result<ReceiptSkeleton, ComposeRefusal> {
     let after = transaction
@@ -682,6 +828,17 @@ fn derive<H: ContentHasher>(
     bound_snapshot(snapshots, &after, SnapshotRole::After, &handle)?;
 
     let gate_profile = transaction.gate_profile();
+    let repair = transaction.repair_id();
+    let status = RefinementCertificateStatus::derive(
+        resolve_evidence(evidence.certificates(repair, &after))?,
+        &after,
+    )?;
+    let unknowns = Unknowns::derive(
+        gate_profile,
+        transaction.gates().map(|gate| (gate.name(), gate.status())),
+        &status,
+        resolve_evidence(evidence.unsupported_pack_cases(repair, &after))?,
+    )?;
     Ok(ReceiptSkeleton {
         repair_transaction: transaction.repair_id().clone(),
         intent: ReceiptIntent {
@@ -691,6 +848,8 @@ fn derive<H: ContentHasher>(
         snapshots: ReceiptSnapshots { before, after },
         gate_profile,
         not_yet_enforced: NotYetEnforced::of(gate_profile),
+        status,
+        unknowns,
     })
 }
 
@@ -732,6 +891,8 @@ pub enum ClaimRefusal {
     GateCount,
     /// A gate is listed twice.
     DuplicateGate(GateName),
+    /// `coverage` is not an object, or names a group the schema does not declare.
+    MalformedCoverage,
 }
 
 impl fmt::Display for ClaimRefusal {
@@ -748,6 +909,7 @@ impl fmt::Display for ClaimRefusal {
             Self::Malformed(field) => write!(f, "`{}` is malformed", field.property()),
             Self::GateCount => f.write_str("`gates` does not list exactly twelve gates"),
             Self::DuplicateGate(gate) => write!(f, "`{}` is listed twice", gate.token()),
+            Self::MalformedCoverage => f.write_str("`coverage` is malformed"),
         }
     }
 }
@@ -764,6 +926,52 @@ pub struct ClaimedReceipt {
     result_snapshot: SnapshotId,
     gate_profile: GateProfile,
     gates: [ClaimedGateStatus; 12],
+    unknowns: Vec<String>,
+    coverage_groups: Vec<CoverageGroup>,
+}
+
+/// Every group the schema's closed `coverage` object declares, sorted by code point.
+const COVERAGE_PROPERTIES: [&str; 7] = [
+    "certificate_rebuild",
+    "defect_mutants",
+    "incremental_parity",
+    "neighborhood",
+    "property_mutation",
+    "refinement_coverage",
+    "replay",
+];
+
+/// The IMPL-05 groups a claimed `coverage` carries. Other groups are IMPL-04's and are
+/// not read beyond their names.
+fn claimed_coverage(value: Option<&Json>) -> Result<Vec<CoverageGroup>, ClaimRefusal> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let groups = value.as_object().ok_or(ClaimRefusal::MalformedCoverage)?;
+    if groups
+        .keys()
+        .any(|key| COVERAGE_PROPERTIES.binary_search(&key.as_str()).is_err())
+    {
+        return Err(ClaimRefusal::MalformedCoverage);
+    }
+    Ok(CoverageGroup::ALL
+        .into_iter()
+        .filter(|group| groups.contains_key(group.property()))
+        .collect())
+}
+
+fn claimed_unknowns(value: &Json) -> Result<Vec<String>, ClaimRefusal> {
+    let malformed = ClaimRefusal::Malformed(ReceiptField::Unknowns);
+    value
+        .as_array()
+        .ok_or_else(|| malformed.clone())?
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| malformed.clone())
+        })
+        .collect()
 }
 
 const fn gate_index(gate: GateName) -> usize {
@@ -893,8 +1101,10 @@ impl ClaimedReceipt {
     ///
     /// Strict where the schema is: an undeclared top-level key, a handle off its pattern,
     /// a token off its enum, a gate list that is not twelve unique `{gate, status}`
-    /// entries, or a status other than `passed` and `not_yet_enforced` is refused. Fields
-    /// outside [`ReceiptField`] are not read.
+    /// entries, a status other than `passed` and `not_yet_enforced`, an `unknowns` that is
+    /// absent or not an array of strings, or a `coverage` that is not an object of
+    /// declared groups is refused. Other fields are not read, and of `coverage` only the
+    /// presence of the two IMPL-05 groups.
     ///
     /// # Errors
     ///
@@ -924,6 +1134,13 @@ impl ClaimedReceipt {
                 .get(ReceiptField::Gates.property())
                 .ok_or(ClaimRefusal::Missing(ReceiptField::Gates))?,
         )?;
+        // RFC 0032 correction 11: an absent `unknowns` is not an empty one.
+        let unknowns = claimed_unknowns(
+            fields
+                .get(ReceiptField::Unknowns.property())
+                .ok_or(ClaimRefusal::Missing(ReceiptField::Unknowns))?,
+        )?;
+        let coverage_groups = claimed_coverage(fields.get("coverage"))?;
         Ok(Self {
             repair_transaction,
             intent,
@@ -931,6 +1148,8 @@ impl ClaimedReceipt {
             result_snapshot,
             gate_profile,
             gates,
+            unknowns,
+            coverage_groups,
         })
     }
 
@@ -986,6 +1205,21 @@ pub enum VerifyRefusal {
     /// certified before it was verified (RFC 0032: gate 12 is `pending` on a `ready`
     /// transaction and moves only after verification).
     ReceiptGenerationAlreadyPassed,
+    /// The claim carries a `coverage` group the daemon's evidence does not derive: a
+    /// forged refinement or certificate-rebuild measurement.
+    CoverageNotDerived(CoverageGroup),
+    /// A derived unknown is missing from the claim's `unknowns`.
+    UnknownOmitted(UnknownKind),
+    /// The claim's `unknowns` lists an entry the derivation does not produce.
+    UnknownNotDerived,
+    /// The claim's `unknowns` lists one entry twice.
+    UnknownDuplicated,
+    /// The claim's `unknowns` holds the derived entries in another order.
+    UnknownsNotCanonical,
+    /// A gate is listed `passed`, on the claim and on the record, but the evidence it
+    /// rests on is absent (gate 8: no refinement coverage; gate 9: no rebuild coverage).
+    /// An uncomputable result is never a passed gate (RFC 0032 correction 7).
+    GateWithoutEvidence(GateName),
 }
 
 impl fmt::Display for VerifyRefusal {
@@ -1027,6 +1261,22 @@ impl fmt::Display for VerifyRefusal {
             Self::ReceiptGenerationAlreadyPassed => {
                 f.write_str("receipt_generation is already passed before the receipt was verified")
             }
+            Self::CoverageNotDerived(group) => {
+                write!(f, "`{group}` is claimed, and no evidence derives it")
+            }
+            Self::UnknownOmitted(kind) => {
+                write!(f, "`unknowns` omits a derived `{}` entry", kind.prefix())
+            }
+            Self::UnknownNotDerived => f.write_str("`unknowns` lists an entry nothing derives"),
+            Self::UnknownDuplicated => f.write_str("`unknowns` lists an entry twice"),
+            Self::UnknownsNotCanonical => {
+                f.write_str("`unknowns` is not in the derived canonical order")
+            }
+            Self::GateWithoutEvidence(gate) => write!(
+                f,
+                "`{}` is listed passed, and the evidence it rests on is absent",
+                gate.token()
+            ),
         }
     }
 }
@@ -1042,6 +1292,17 @@ impl From<ClaimRefusal> for VerifyRefusal {
 impl From<ComposeRefusal> for VerifyRefusal {
     fn from(refusal: ComposeRefusal) -> Self {
         Self::Compose(refusal)
+    }
+}
+
+impl From<UnknownsMismatch> for VerifyRefusal {
+    fn from(mismatch: UnknownsMismatch) -> Self {
+        match mismatch {
+            UnknownsMismatch::Duplicated => Self::UnknownDuplicated,
+            UnknownsMismatch::Omitted(kind) => Self::UnknownOmitted(kind),
+            UnknownsMismatch::NotDerived => Self::UnknownNotDerived,
+            UnknownsMismatch::NotCanonical => Self::UnknownsNotCanonical,
+        }
     }
 }
 
@@ -1129,18 +1390,30 @@ fn resolve_transaction<H: ContentHasher>(
 
 /// The shared check: re-derive, compare the owned fields, then compare every gate with
 /// the record. Gate 12's expected record depends on `stage`.
+/// The refusal for a claimed IMPL-05 coverage group. The `match` is exhaustive, so a
+/// derived member added later must say how its values are compared.
+const fn claimed_group_refusal(
+    status: &RefinementCertificateStatus,
+    group: CoverageGroup,
+) -> Option<VerifyRefusal> {
+    match status.coverage(group) {
+        GroupDerivation::Absent => Some(VerifyRefusal::CoverageNotDerived(group)),
+    }
+}
+
 fn verify_at<H: ContentHasher>(
     claim: &ClaimedReceipt,
     stage: VerificationStage,
     transaction: &RepairTransaction<H>,
     registry: &impl IntentRegistry,
     snapshots: &impl SealedSnapshots,
+    evidence: &impl CandidateEvidence,
 ) -> Result<ReceiptSkeleton, VerifyRefusal> {
     let standing = match stage {
         VerificationStage::Promotion => Standing::Current,
         VerificationStage::Published => Standing::Historical,
     };
-    let derived = derive(transaction, registry, snapshots, standing)?;
+    let derived = derive(transaction, registry, snapshots, evidence, standing)?;
 
     if claim.gate_profile != derived.gate_profile {
         return Err(VerifyRefusal::ProfileMismatch {
@@ -1193,6 +1466,28 @@ fn verify_at<H: ContentHasher>(
             return Err(VerifyRefusal::GateNotOnRecord(gate));
         }
     }
+    // IMPL-05: a coverage group is present only when the evidence derives it, and never
+    // today (`status`).
+    if let Some(refusal) = claim
+        .coverage_groups
+        .iter()
+        .find_map(|group| claimed_group_refusal(&derived.status, *group))
+    {
+        return Err(refusal);
+    }
+    // IMPL-06: the claimed list is the derived list, entry for entry.
+    unknowns::compare(&claim.unknowns, &derived.unknowns)?;
+    // IMPL-05: an enforced gate 8 or 9 is listed `passed` (the checks above leave no
+    // other status for it), so its evidence must exist.
+    for group in CoverageGroup::ALL {
+        if derived.gate_profile.enforces(group.gate()) {
+            match derived.status.coverage(group) {
+                GroupDerivation::Absent => {
+                    return Err(VerifyRefusal::GateWithoutEvidence(group.gate()));
+                }
+            }
+        }
+    }
     Ok(derived)
 }
 
@@ -1210,13 +1505,16 @@ fn verify_at<H: ContentHasher>(
 /// [`VerifyRefusal`], for the first check that fails, in this order: the transaction,
 /// the re-derivation, `gate_profile`, `intent`, `base_snapshot`, `result_snapshot`,
 /// `gates` against the profile, then `gates` against the record, each in gate-number
-/// order. No transaction records an in-profile gate `passed` until PR-20 `evaluate`
-/// lands, so every claim is refused today, at the latest [`VerifyRefusal::GateNotOnRecord`].
+/// order; then the IMPL-05 `coverage` groups, `unknowns`, and the evidence behind gates
+/// 8 and 9. No transaction records an in-profile gate `passed` until PR-20 `evaluate`
+/// lands, and no refinement checker computes gate 8's evidence, so every claim is
+/// refused today, at the latest [`VerifyRefusal::GateWithoutEvidence`].
 pub fn verify_skeleton<H: ContentHasher>(
     claim: &ClaimedReceipt,
     transactions: &impl TransactionStore<H>,
     registry: &impl IntentRegistry,
     snapshots: &impl SealedSnapshots,
+    evidence: &impl CandidateEvidence,
 ) -> Result<SkeletonVerification, VerifyRefusal> {
     let transaction = resolve_transaction(claim, transactions)?;
     let derived = verify_at(
@@ -1225,6 +1523,7 @@ pub fn verify_skeleton<H: ContentHasher>(
         &transaction,
         registry,
         snapshots,
+        evidence,
     )?;
     Ok(SkeletonVerification { derived })
 }
@@ -1288,6 +1587,7 @@ pub fn verify_for_promotion<H: ContentHasher>(
     transactions: &impl TransactionStore<H>,
     registry: &impl IntentRegistry,
     snapshots: &impl SealedSnapshots,
+    evidence: &impl CandidateEvidence,
 ) -> Result<ReceiptGenerationLicense, VerifyRefusal> {
     let transaction = resolve_transaction(claim, transactions)?;
     let derived = verify_at(
@@ -1296,6 +1596,7 @@ pub fn verify_for_promotion<H: ContentHasher>(
         &transaction,
         registry,
         snapshots,
+        evidence,
     )?;
     Ok(ReceiptGenerationLicense { derived })
 }
@@ -1335,7 +1636,60 @@ mod tests {
         IntentContract::decode(CONTRACT).unwrap()
     }
 
-    struct World(Vec<RepairTransaction<Blake3Hasher>>);
+    /// A certificate the test world holds for the candidate.
+    #[derive(Clone)]
+    enum Cert {
+        /// Model-bound to whatever candidate the seam is asked about.
+        BoundToCandidate,
+        /// Any other verdict.
+        Verdict(CertificateVerdict),
+    }
+
+    /// The transactions, and the evidence the daemon holds for every candidate.
+    struct World(
+        Vec<RepairTransaction<Blake3Hasher>>,
+        Vec<(&'static str, Cert)>,
+    );
+
+    impl World {
+        /// The transactions, with one model-bound certificate on the candidate.
+        fn of(transactions: Vec<RepairTransaction<Blake3Hasher>>) -> Self {
+            Self(transactions, vec![("ev_bound", Cert::BoundToCandidate)])
+        }
+    }
+
+    impl CandidateEvidence for World {
+        fn certificates(
+            &self,
+            _: &RepairId,
+            candidate: &SnapshotId,
+        ) -> Resolution<Vec<CertificateRecord>> {
+            Resolution::Found(
+                self.1
+                    .iter()
+                    .map(|(handle, cert)| {
+                        let verdict = match cert {
+                            Cert::BoundToCandidate => CertificateVerdict::ModelBound {
+                                snapshot: candidate.clone(),
+                            },
+                            Cert::Verdict(verdict) => verdict.clone(),
+                        };
+                        CertificateRecord::new(CertificateNode::new(handle).unwrap(), verdict)
+                    })
+                    .collect(),
+            )
+        }
+
+        fn unsupported_pack_cases(
+            &self,
+            _: &RepairId,
+            _: &SnapshotId,
+        ) -> Resolution<Vec<PackCase>> {
+            Resolution::Found(vec![
+                PackCase::new("storage/append-log-v1", "flush-dishonesty").unwrap(),
+            ])
+        }
+    }
 
     impl FailureBinding for World {
         fn failure_base(&self, failure: &CrashpackId) -> Resolution<SnapshotId> {
@@ -1382,7 +1736,7 @@ mod tests {
         let applied = RepairTransaction::<Blake3Hasher>::begin(
             CrashpackId::new(CRASH).unwrap(),
             profile,
-            &World(Vec::new()),
+            &World::of(Vec::new()),
         )
         .unwrap()
         .apply(
@@ -1415,9 +1769,16 @@ mod tests {
         }))
     }
 
-    fn claim_bytes(tx: &RepairTransaction<Blake3Hasher>) -> Vec<u8> {
-        let skeleton =
-            ReceiptSkeleton::compose(tx, &World(Vec::new()), &World(Vec::new())).unwrap();
+    /// The honest claim for `tx` under `world`'s evidence: the derived fields, including
+    /// `unknowns`, and every in-profile gate `passed`.
+    fn claim_bytes(tx: &RepairTransaction<Blake3Hasher>, world: &World) -> Vec<u8> {
+        let mut fields = claim_fields(tx, world);
+        fields.remove("coverage");
+        Json::Object(fields).to_canonical_bytes()
+    }
+
+    fn claim_fields(tx: &RepairTransaction<Blake3Hasher>, world: &World) -> BTreeMap<String, Json> {
+        let skeleton = ReceiptSkeleton::compose(tx, world, world, world).unwrap();
         let mut fields = match skeleton.fields_json() {
             Json::Object(fields) => fields,
             _ => unreachable!(),
@@ -1437,7 +1798,7 @@ mod tests {
             })
             .collect();
         fields.insert("gates".to_owned(), Json::Array(gates));
-        Json::Object(fields).to_canonical_bytes()
+        fields
     }
 
     /// The record a `ready` transaction carries: gates 1–11 of the profile `passed`, gate
@@ -1456,30 +1817,43 @@ mod tests {
     fn check_promotion(
         tx: &RepairTransaction<Blake3Hasher>,
     ) -> Result<ReceiptGenerationLicense, VerifyRefusal> {
-        let world = World(vec![tx.clone()]);
-        let claim = ClaimedReceipt::parse(&claim_bytes(tx)).unwrap();
-        verify_for_promotion(&claim, &world, &world, &world)
+        let world = World::of(vec![tx.clone()]);
+        let claim = ClaimedReceipt::parse(&claim_bytes(tx, &world)).unwrap();
+        verify_for_promotion(&claim, &world, &world, &world, &world)
     }
 
     fn check_published(
         tx: &RepairTransaction<Blake3Hasher>,
     ) -> Result<SkeletonVerification, VerifyRefusal> {
-        let world = World(vec![tx.clone()]);
-        let claim = ClaimedReceipt::parse(&claim_bytes(tx)).unwrap();
-        verify_skeleton(&claim, &world, &world, &world)
+        let world = World::of(vec![tx.clone()]);
+        let claim = ClaimedReceipt::parse(&claim_bytes(tx, &world)).unwrap();
+        verify_skeleton(&claim, &world, &world, &world, &world)
     }
 
-    /// cr-tz8fwi: at promotion the record shows gate 12 `pending`, and verification of the
-    /// skeleton's fields succeeds there — it is what licenses gate 12's transition.
+    /// Verify `fields` at promotion against `world`, which must hold `tx`.
+    fn promote_fields(
+        fields: BTreeMap<String, Json>,
+        world: &World,
+    ) -> Result<ReceiptGenerationLicense, VerifyRefusal> {
+        let claim = ClaimedReceipt::parse(&Json::Object(fields).to_canonical_bytes())?;
+        verify_for_promotion(&claim, world, world, world, world)
+    }
+
+    /// cr-tz8fwi: at promotion the record shows gate 12 `pending`, and every check of the
+    /// record passes there. The receipt is then refused only for gate 8's absent evidence
+    /// (IMPL-05): no refinement checker computes a coverage delta, so no licence is issued
+    /// under any profile until one ships.
     #[test]
-    fn promotion_verifies_against_a_record_with_gate_12_pending() {
+    fn promotion_passes_the_record_with_gate_12_pending_and_stops_at_gate_8_evidence() {
         for profile in GateProfile::ALL {
-            let tx = ready(profile);
-            let license = check_promotion(&tx).unwrap();
-            assert_eq!(license.repair_transaction(), tx.repair_id());
-            assert_eq!(license.gate(), GateName::ReceiptGeneration);
-            assert_eq!(license.derived().gate_profile(), profile);
-            assert_eq!(license.unverified(), &ReceiptSeam::ALL);
+            assert_eq!(
+                check_promotion(&ready(profile)),
+                Err(VerifyRefusal::GateWithoutEvidence(
+                    GateName::RefinementCoverage
+                )),
+                "{}",
+                profile.token()
+            );
         }
     }
 
@@ -1495,55 +1869,279 @@ mod tests {
         }
     }
 
-    /// The whole sequence: verify at `ready` (gate 12 pending) → the licence → promote
-    /// records gate 12 passed (simulated by the test recorder; PR-20 owns it) → the
-    /// published receipt verifies, and promotion verification no longer does.
+    /// The whole sequence: at `ready` (gate 12 pending) promotion passes the record; a
+    /// receipt is not published while gate 12 is pending; after gate 12 moves (simulated
+    /// by the test recorder; PR-20 owns it) the published check passes the record too,
+    /// and promotion verification no longer does. Both stop at gate 8's evidence.
     #[test]
-    fn the_promotion_sequence_verifies_then_moves_gate_12() {
+    fn the_promotion_sequence_checks_gate_12_at_each_stage() {
         let before = ready(GateProfile::PhaseB);
-        let license = check_promotion(&before).unwrap();
+        assert_eq!(
+            check_promotion(&before),
+            Err(VerifyRefusal::GateWithoutEvidence(
+                GateName::RefinementCoverage
+            ))
+        );
         assert_eq!(
             check_published(&before),
             Err(VerifyRefusal::GateNotOnRecord(GateName::ReceiptGeneration)),
             "a receipt is not published while gate 12 is pending"
         );
         let after = before.with_recorded_gates(before.gates().map(|entry| {
-            if entry.name() == license.gate() {
+            if entry.name() == GateName::ReceiptGeneration {
                 GateStatus::Passed
             } else {
                 entry.status()
             }
         }));
-        let published = check_published(&after).unwrap();
         assert_eq!(
-            published.receipt_verdict(),
-            ReceiptVerdict::Incomplete {
-                unverified: &ReceiptSeam::ALL
-            }
+            check_published(&after),
+            Err(VerifyRefusal::GateWithoutEvidence(
+                GateName::RefinementCoverage
+            ))
         );
         assert_eq!(
             check_promotion(&after),
             Err(VerifyRefusal::ReceiptGenerationAlreadyPassed)
         );
-        // The published record's owned fields are the licence's, anchor aside.
-        assert_eq!(published.derived().intent(), license.derived().intent());
+    }
+
+    /// Under `phase-d` both gates 8 and 9 are enforced; gate 8 is refused first.
+    #[test]
+    fn pr22_impl05_gate_evidence_is_checked_in_gate_order() {
+        for profile in [GateProfile::PhaseD, GateProfile::Default] {
+            assert_eq!(
+                check_published(&recorded(profile)),
+                Err(VerifyRefusal::GateWithoutEvidence(
+                    GateName::RefinementCoverage
+                ))
+            );
+        }
+    }
+
+    /// pr22-impl05 forged status: a claim that matches the record and the unknowns, and
+    /// adds a refinement or certificate-rebuild coverage group, is refused — the numbers
+    /// are a measurement no daemon evidence derives.
+    #[test]
+    fn pr22_impl05_negative_a_forged_coverage_group_is_refused() {
+        let tx = ready(GateProfile::PhaseD);
+        let world = World::of(vec![tx.clone()]);
+        let refinement = Json::Object(BTreeMap::from([
+            ("after".to_owned(), Json::Integer(1)),
+            ("before".to_owned(), Json::Integer(1)),
+            ("declared_decrease".to_owned(), Json::Bool(false)),
+            ("delta".to_owned(), Json::Integer(0)),
+        ]));
+        let rebuild = Json::Object(BTreeMap::from([
+            ("invalidated".to_owned(), Json::Integer(0)),
+            ("rebuilt".to_owned(), Json::Integer(0)),
+            ("stale".to_owned(), Json::Integer(0)),
+        ]));
+        for (group, value) in [
+            (CoverageGroup::RefinementCoverage, refinement),
+            (CoverageGroup::CertificateRebuild, rebuild),
+        ] {
+            let mut fields = claim_fields(&tx, &world);
+            fields.insert(
+                "coverage".to_owned(),
+                Json::Object(BTreeMap::from([(group.property().to_owned(), value)])),
+            );
+            assert_eq!(
+                promote_fields(fields, &world),
+                Err(VerifyRefusal::CoverageNotDerived(group))
+            );
+        }
+        // Another group is IMPL-04's and is not read beyond its name; an undeclared one
+        // is refused by the reader.
+        let mut other = claim_fields(&tx, &world);
+        other.insert(
+            "coverage".to_owned(),
+            Json::Object(BTreeMap::from([("replay".to_owned(), Json::Null)])),
+        );
         assert_eq!(
-            published.derived().snapshots(),
-            license.derived().snapshots()
+            promote_fields(other, &world),
+            Err(VerifyRefusal::GateWithoutEvidence(
+                GateName::RefinementCoverage
+            ))
+        );
+        let mut undeclared = claim_fields(&tx, &world);
+        undeclared.insert(
+            "coverage".to_owned(),
+            Json::Object(BTreeMap::from([("adequacy".to_owned(), Json::Null)])),
+        );
+        assert_eq!(
+            promote_fields(undeclared, &world),
+            Err(VerifyRefusal::Claim(ClaimRefusal::MalformedCoverage))
         );
     }
 
-    /// A published receipt verifies its owned fields only, for every profile.
+    fn set_unknowns(fields: &mut BTreeMap<String, Json>, entries: Vec<String>) {
+        fields.insert(
+            "unknowns".to_owned(),
+            Json::Array(entries.into_iter().map(Json::String).collect()),
+        );
+    }
+
+    fn derived_unknowns(tx: &RepairTransaction<Blake3Hasher>, world: &World) -> Vec<String> {
+        ReceiptSkeleton::compose(tx, world, world, world)
+            .unwrap()
+            .unknowns()
+            .tokens()
+    }
+
+    /// pr22-impl05/06 forged status: a claim that drops the unknown for an unverified
+    /// certificate — presenting it as if it counted — is refused, for every reason a
+    /// certificate can fail to count. So is one that drops `certificate_none_verified`
+    /// when the daemon holds no verified certificate, and one that drops the refinement
+    /// or not-yet-enforced entries.
     #[test]
-    fn a_published_receipt_verifies_its_owned_fields_only() {
-        for profile in GateProfile::ALL {
-            let verified = check_published(&recorded(profile)).unwrap();
-            assert_eq!(verified.derived().gate_profile(), profile);
-            let expected: Vec<GateName> = GateName::ALL
-                .into_iter()
-                .filter(|gate| profile.enforces(*gate))
+    fn pr22_impl05_negative_a_forged_certificate_status_is_refused() {
+        let tx = ready(GateProfile::PhaseB);
+        let verdicts = [
+            CertificateVerdict::Rejected,
+            CertificateVerdict::Unchecked,
+            CertificateVerdict::ModelBound {
+                snapshot: SnapshotId::new("ws_some_other_snapshot").unwrap(),
+            },
+            CertificateVerdict::InsufficientEvidence(
+                status::InsufficientReason::TrustsModelCorrespondence,
+            ),
+            CertificateVerdict::InsufficientEvidence(
+                status::InsufficientReason::FamilyNotModelBound,
+            ),
+            CertificateVerdict::InsufficientEvidence(status::InsufficientReason::NoSealedSnapshot),
+            CertificateVerdict::InsufficientEvidence(status::InsufficientReason::NoHeldModel),
+            CertificateVerdict::InsufficientEvidence(status::InsufficientReason::ContentMissing),
+            CertificateVerdict::InsufficientEvidence(status::InsufficientReason::CheckerNotServed),
+            CertificateVerdict::InsufficientEvidence(status::InsufficientReason::WireUnsupported),
+            CertificateVerdict::KernelInconclusive,
+            CertificateVerdict::Redacted,
+            CertificateVerdict::Stale,
+        ];
+        for verdict in verdicts {
+            let world = World(
+                vec![tx.clone()],
+                vec![
+                    ("ev_bound", Cert::BoundToCandidate),
+                    ("ev_claimed", Cert::Verdict(verdict.clone())),
+                ],
+            );
+            let honest = derived_unknowns(&tx, &world);
+            let forged: Vec<String> = honest
+                .iter()
+                .filter(|entry| !entry.starts_with("certificate_unverified:ev_claimed:"))
+                .cloned()
                 .collect();
-            assert_eq!(verified.enforced_gates_unverified(), expected);
+            assert_eq!(forged.len() + 1, honest.len(), "{verdict:?}");
+            let mut fields = claim_fields(&tx, &world);
+            set_unknowns(&mut fields, forged);
+            assert_eq!(
+                promote_fields(fields, &world),
+                Err(VerifyRefusal::UnknownOmitted(
+                    UnknownKind::CertificateUnverified
+                )),
+                "{verdict:?}"
+            );
+        }
+
+        // Missing certificate: the daemon holds none, so the receipt must say so.
+        let world = World(vec![tx.clone()], Vec::new());
+        let honest = derived_unknowns(&tx, &world);
+        assert!(honest.contains(&"certificate_none_verified".to_owned()));
+        for (dropped, kind) in [
+            (
+                "certificate_none_verified",
+                UnknownKind::NoVerifiedCertificate,
+            ),
+            (
+                "refinement_not_computed:checker_not_deployed",
+                UnknownKind::RefinementNotComputed,
+            ),
+            (
+                "gate_not_yet_enforced:certificate_rebuild",
+                UnknownKind::GateNotYetEnforced,
+            ),
+            (
+                "unsupported_pack_case:storage/append-log-v1:flush-dishonesty",
+                UnknownKind::UnsupportedPackCase,
+            ),
+        ] {
+            let mut fields = claim_fields(&tx, &world);
+            set_unknowns(
+                &mut fields,
+                honest.iter().filter(|e| *e != dropped).cloned().collect(),
+            );
+            assert_eq!(
+                promote_fields(fields, &world),
+                Err(VerifyRefusal::UnknownOmitted(kind)),
+                "{dropped}"
+            );
+        }
+    }
+
+    /// pr22-impl06 negative: an invented, duplicated or reordered entry, and a missing
+    /// `unknowns`, are each refused; the honest list passes to the gate-evidence check.
+    #[test]
+    fn pr22_impl06_negative_the_claimed_unknowns_must_be_the_derived_list() {
+        let tx = ready(GateProfile::PhaseB);
+        let world = World::of(vec![tx.clone()]);
+        let honest = derived_unknowns(&tx, &world);
+        assert!(honest.len() >= 3);
+
+        let mut fields = claim_fields(&tx, &world);
+        set_unknowns(&mut fields, honest.clone());
+        assert_eq!(
+            promote_fields(fields, &world),
+            Err(VerifyRefusal::GateWithoutEvidence(
+                GateName::RefinementCoverage
+            ))
+        );
+
+        let mut invented = honest.clone();
+        invented.push("gate_pending:base_replay".to_owned());
+        let mut duplicated = honest.clone();
+        duplicated.push(honest[0].clone());
+        let mut reordered = honest.clone();
+        reordered.swap(0, 1);
+        for (entries, refusal) in [
+            (invented, VerifyRefusal::UnknownNotDerived),
+            (duplicated, VerifyRefusal::UnknownDuplicated),
+            (reordered, VerifyRefusal::UnknownsNotCanonical),
+        ] {
+            let mut fields = claim_fields(&tx, &world);
+            set_unknowns(&mut fields, entries);
+            assert_eq!(promote_fields(fields, &world), Err(refusal));
+        }
+
+        let mut absent = claim_fields(&tx, &world);
+        absent.remove("unknowns");
+        assert_eq!(
+            promote_fields(absent, &world),
+            Err(VerifyRefusal::Claim(ClaimRefusal::Missing(
+                ReceiptField::Unknowns
+            )))
+        );
+        let mut not_strings = claim_fields(&tx, &world);
+        not_strings.insert("unknowns".to_owned(), Json::Array(vec![Json::Integer(1)]));
+        assert_eq!(
+            promote_fields(not_strings, &world),
+            Err(VerifyRefusal::Claim(ClaimRefusal::Malformed(
+                ReceiptField::Unknowns
+            )))
+        );
+    }
+
+    /// A published receipt passes every record check, for every profile, and stops at
+    /// gate 8's evidence.
+    #[test]
+    fn a_published_receipt_passes_its_record_checks_under_every_profile() {
+        for profile in GateProfile::ALL {
+            assert_eq!(
+                check_published(&recorded(profile)),
+                Err(VerifyRefusal::GateWithoutEvidence(
+                    GateName::RefinementCoverage
+                ))
+            );
         }
     }
 

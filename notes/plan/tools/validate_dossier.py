@@ -91,10 +91,11 @@ EXTERNAL_SCHEMA_PAIRS = {
     ),
 }
 
-# Receipt fragments `continuum-repair`'s PR-22 skeleton suite emits (bn-1ebx, bn-cps6,
-# bn-1cec). A skeleton is not a whole receipt: the schema requires fields that other
-# PR-22 bones own, so no fragment is checked against a derived schema. Each is checked
-# against the schema's own subschemas, with the schema's `$defs` in scope:
+# Receipt fragments `continuum-repair`'s PR-22 suites emit (bn-1ebx, bn-cps6, bn-1cec;
+# bn-9r5e and bn-yzu1 in `tests/pr22_impl05_impl06_evidence.rs`). A skeleton is not a
+# whole receipt: the schema requires fields that other PR-22 bones own, so no fragment
+# is checked against a derived schema. Each is checked against the schema's own
+# subschemas, with the schema's `$defs` in scope:
 #
 # - `properties`: the fragment is an object, every key is a declared top-level property,
 #   and each value validates against that property's subschema;
@@ -109,6 +110,8 @@ EXTERNAL_SCHEMA_FRAGMENTS = {
         ("crates/continuum-repair/tests/fixtures/pr22-impl02-ack-after-sync-snapshots.json", "properties"),
         ("crates/continuum-repair/tests/fixtures/pr22-impl07-ack-after-sync-gate-profile.json", "properties"),
         ("crates/continuum-repair/tests/fixtures/pr22-impl07-phase-b-not-yet-enforced.json", "gates.items"),
+        ("crates/continuum-repair/tests/fixtures/pr22-impl05-ack-after-sync-certificate-status.json", "properties"),
+        ("crates/continuum-repair/tests/fixtures/pr22-impl06-ack-after-sync-unknowns.json", "properties"),
     ),
 }
 
@@ -245,8 +248,8 @@ def check_schema_fragments() -> int:
                     raise AssertionError(formatted)
             count += 1
     registered = sum(len(fragments) for fragments in EXTERNAL_SCHEMA_FRAGMENTS.values())
-    assert registered == 4 and count == registered, (
-        f"{count} of {registered} schema fragments checked; the PR-22 skeleton registers four"
+    assert registered == 6 and count == registered, (
+        f"{count} of {registered} schema fragments checked; the PR-22 suites register six"
     )
     return count
 

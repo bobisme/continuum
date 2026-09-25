@@ -1,0 +1,50 @@
+[change]
+bone = "bn-9r5e"
+author = "continuum-dev"
+summary = "PR-22 IMPL-05 and IMPL-06 (bn-9r5e, bn-yzu1): continuum-repair derives the receipt's refinement and certificate status and its unknowns from the transaction record and a new CandidateEvidence daemon seam, never from the claim; a certificate counts only when model-bound to the candidate, refinement and rebuild coverage are typed absent, a forged coverage group or a gate 8/9 listed passed without evidence is refused, and a claimed unknowns list must equal the derived list entry for entry"
+
+[semantic]
+covers = [
+  "crates/continuum-repair/src/receipt.rs",
+  "crates/continuum-repair/src/receipt/",
+]
+reference_tests = [
+  "crates/continuum-repair/tests/pr22_impl05_impl06_evidence.rs::pr22_impl05_positive_only_the_model_bound_candidate_certificate_counts",
+  "crates/continuum-repair/tests/pr22_impl05_impl06_evidence.rs::pr22_impl06_positive_the_applied_transactions_unknowns_are_listed_exactly_once",
+  "crates/continuum-repair/tests/pr22_impl05_impl06_evidence.rs::pr22_impl05_negative_a_missing_certificate_appears_as_an_unknown",
+  "crates/continuum-repair/tests/pr22_impl05_impl06_evidence.rs::pr22_impl05_negative_a_certificate_bound_to_another_snapshot_is_not_verified",
+  "crates/continuum-repair/tests/pr22_impl05_impl06_evidence.rs::pr22_impl05_negative_an_unusable_evidence_answer_composes_nothing",
+  "crates/continuum-repair/tests/pr22_impl05_impl06_evidence.rs::pr22_impl06_negative_a_claim_is_checked_against_the_record_first",
+  "crates/continuum-repair/tests/pr22_impl05_impl06_evidence.rs::pr22_impl06_boundary_every_profile_lists_its_gates_once",
+  "crates/continuum-repair/src/receipt.rs::pr22_impl05_negative_a_forged_coverage_group_is_refused",
+  "crates/continuum-repair/src/receipt.rs::pr22_impl05_negative_a_forged_certificate_status_is_refused",
+  "crates/continuum-repair/src/receipt.rs::pr22_impl06_negative_the_claimed_unknowns_must_be_the_derived_list",
+  "crates/continuum-repair/src/receipt.rs::pr22_impl05_gate_evidence_is_checked_in_gate_order",
+  "crates/continuum-repair/src/receipt/unknowns.rs::pr22_impl06_every_absent_or_inconclusive_input_appears_exactly_once",
+  "crates/continuum-repair/src/receipt/status.rs::pr22_impl05_only_a_model_bound_verdict_on_the_candidate_verifies",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-repair/tests/pr22_impl05_impl06_evidence.rs::pr22_impl06_boundary_store_order_is_invisible_and_each_input_adds_one_entry", relation = "set/map insertion order" },
+  { test = "crates/continuum-repair/src/receipt/unknowns.rs::pr22_impl06_the_token_rendering_round_trips_and_is_injective", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuum-repair/tests/pr22_impl05_impl06_evidence.rs::pr22_impl06_differential_the_storage_packs_declared_cases_are_each_one_unknown", oracle = "continuum-effects-storage", subject = "continuum-repair" },
+]
+
+[semantic.claim_impact]
+claims = ["C018", "C020", "C033"]
+reason = "No row's state or wording changes. C018 stays scoped to epoch-2 finite closure: the receipt counts a certificate only through the bn-3hk4v model-bound verdict and adds no checker. C020 stays OBSERVED on the intent layer. C033 stays TARGET: no receipt can verify, because gate 8 has no refinement evidence under any profile"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the crate fills the epoch-1 receipt's existing unknowns array of strings with a closed token grammar and renders no coverage group; validate_dossier.py checks the two new retained fragments against the schema's own property subschemas"
+unaffected = { promotion-receipt = "the unknowns entries are strings, as the schema types them; coverage.refinement_coverage and coverage.certificate_rebuild are never rendered, and a claim carrying them is refused rather than read", repair-transaction = "read only: gate statuses are read from the transaction record, whose shape does not change", evidence-graph-node = "not read directly: the daemon seam carries the verdict evidence.verify settled" }
+
+[semantic.migration]
+verdict = "Revalidate"
+note = "continuum-repair: ReceiptSkeleton::compose, verify_skeleton and verify_for_promotion take one more store, CandidateEvidence; ClaimedReceipt now requires unknowns; ReceiptSeam loses RefinementCertificateStatus and Unknowns, and ReceiptField gains Unknowns. No daemon path calls this module, no wire shape or IDL operation changes, and the only new edge is a test-only dev-dependency on continuum-effects-storage"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-3od0bs"
+verdict = "approved"

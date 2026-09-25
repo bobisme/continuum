@@ -348,8 +348,8 @@ name = "continuum-effects-storage"
 origin = "workspace"
 tcb_class = "dev-only"
 kinds = ["dev"]
-used_by = ["continuum-asupersync"]
-rationale = "PR-15 exit evidence (bn-jw7q): continuum-asupersync's integration test tests/pr15_exit_evidence.rs drives the effect packs' Lab handlers and reads their declared profiles, beside the binding's crash and cancellation, to show that crash windows and cancellation points replay exactly. The packs may have no dependency or dev-dependency of their own (their no_std lane and the INV-015 audit judge their manifests), so the cross-pack exit layer lives in this crate's tests. A dev edge only: the adapter's library does not depend on any effect pack. Classed dev-only: no production path links it here, and the evidence re-checks every replay against its recorded bytes."
+used_by = ["continuum-asupersync", "continuum-repair"]
+rationale = "PR-15 exit evidence (bn-jw7q): continuum-asupersync's integration test tests/pr15_exit_evidence.rs drives the effect packs' Lab handlers and reads their declared profiles, beside the binding's crash and cancellation, to show that crash windows and cancellation points replay exactly. The packs may have no dependency or dev-dependency of their own (their no_std lane and the INV-015 audit judge their manifests), so the cross-pack exit layer lives in this crate's tests. A dev edge only: the adapter's library does not depend on any effect pack. Classed dev-only: no production path links it here, and the evidence re-checks every replay against its recorded bytes. continuum-repair (bn-yzu1, PR-22 / IMPL-06) takes the pack's own declared unsupported cases, PROFILE_NAME and UNSUPPORTED, as the oracle of a differential test: each declared case must be one well-formed receipt unknown that reads back as that case; restating the pack's table in the repair crate would make the test compare the grammar with itself, and the library does not link it."
 
 [[dependency]]
 name = "continuum-effects-time"
