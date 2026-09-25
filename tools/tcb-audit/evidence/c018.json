@@ -85,7 +85,7 @@
     "tools/tcb-audit/mutants.toml",
     "tools/tcb-audit/public-api.txt"
   ],
-  "checker_inputs_sha256": "91ffdd88e3e3fcb75409fe86deb123ed1b09b68d8b110ae950eb398ba1493c91",
+  "checker_inputs_sha256": "9099a23f74d34e7f11ab308dec2c8309711f4b70136e02a790e72def67eda76b",
   "checking_base": [
     "continuum-certificate",
     "continuum-kernel-core",

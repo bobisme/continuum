@@ -1,0 +1,15 @@
+# Committed claim quarantine register (bn-34mw).
+#
+# One line per quarantined claim: <claim> <subject slot> <oracle slot> <defect handle>
+# (format: continuum_corpus::differential::QuarantineLedger::parse).
+#
+# A cross-engine disagreement halts every docs/18 claim its lane names
+# (continuum_corpus::differential::LANES). The differential run in
+# tests/cross_engine_differential.rs fails while a quarantine it produced is missing
+# here as a whole line (claim, both slots, and that defect's handle: a line recorded
+# for one defect never covers another), and fails while any claim listed here is
+# asserted OBSERVED or stronger in tools/governance/claims-baseline.json. A line is removed only with clean evidence:
+# a run in which the lane agrees again (RFC 0030 "Quarantine": cleared only by
+# evidence, never by time or restart).
+#
+# No claim is quarantined.

@@ -6,5 +6,24 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# The cross-engine differential harness (bn-34mw, docs/19 §1 and §5) lives here with
+# the Tribunal's corpus inputs because both are oracle tooling that ADR-0029 keeps out
+# of every release artifact. No release binary links this crate: every edge onto it is
+# a `[dev-dependencies]` edge, and `tests/oracle_tooling_is_test_only.rs` proves that
+# from `cargo metadata` dependency kinds, not from a text scan.
+#
+# The library links only the model plane (`continuum-model-core`) and the shared
+# declarative vocabulary (`continuum-value`: the INV-008 inconclusive reasons and the
+# BLAKE3 content hasher). Engines plug in through `differential::Engine`; the engine
+# and kernel adapters are test code over dev edges, so the library never links an
+# engine or the checking base (`tools/check_crate_boundaries.py:37-39`).
+[dependencies]
+continuum-model-core = { path = "../continuum-model-core" }
+continuum-value = { path = "../continuum-value" }
+
+[dev-dependencies]
+continuum-engine-reference = { path = "../continuum-engine-reference" }
+continuum-kernel-core = { path = "../continuum-kernel-core" }
+
 [lints]
 workspace = true

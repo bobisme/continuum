@@ -1,0 +1,81 @@
+[change]
+bone = "bn-34mw"
+author = "continuum-dev"
+summary = "continuum-corpus: the cross-engine differential harness (docs/19 §1 and §5) — engines behind one Engine adapter trait compared on normalized semantics (verdicts, reachable and deadlocked states, counterexample replay, INV-008 typed inconclusive reasons); a disagreement minimizes its fixture by delta debugging, emits a defect_* report (plan §4.7) and quarantines the lane's docs/18 claims against a committed register and the claims baseline"
+
+[semantic]
+covers = [
+  "crates/continuum-corpus/src/",
+]
+reference_tests = [
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::the_corpus_exercises_every_compared_field",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::ddmin_is_deterministic_and_one_minimal",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::budget_exhaustion_is_inconclusive_not_disagreement",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::unsupported_semantics_is_inconclusive_not_disagreement",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::every_lane_names_registered_claims",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::the_committed_register_holds_the_gate",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::the_register_parser_refuses_malformed_lines",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::the_gate_fails_closed_on_an_unknown_claim",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::a_harness_refuses_two_engines_in_one_slot",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::an_omitted_invariant_is_a_coverage_disagreement",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::the_same_engine_error_on_both_sides_is_a_defect",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::a_typed_inconclusive_on_both_sides_is_undecided",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::a_fixture_without_invariants_is_counted_not_read_as_agreement",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::every_harness_error_is_engine_free",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::a_contract_mismatch_is_a_defect_not_a_refusal",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::undefined_reads_are_compared_by_kind_and_checked_against_the_model",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::undefined_claims_fail_closed_on_every_fault",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::an_undefined_read_at_an_unproven_state_is_never_agreement",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::the_model_level_field_accepts_only_action_reads",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::a_replayed_path_to_a_defined_read_is_a_defect",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::a_holds_beside_an_errored_exploration_is_unexplored",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::a_defect_encoding_cannot_be_forged_by_a_field_value",
+  "crates/continuum-corpus/tests/cross_engine_differential.rs::the_run_is_deterministic",
+  "crates/continuum-corpus/tests/oracle_tooling_is_test_only.rs::no_release_binary_links_the_differential_harness",
+  "crates/continuum-corpus/tests/oracle_tooling_is_test_only.rs::an_injected_release_edge_onto_the_harness_is_rejected",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::stable_reordering_of_declarations_preserves_every_lane", relation = "stable reordering of declarations" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_fixture_read_back_from_a_model_has_the_same_identity", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::the_seeded_corpus_agrees_across_every_engine_pair", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_planted_lost_transition_is_detected_quarantined_reported_and_minimized", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_forged_counterexample_is_caught_by_replay", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_budget_stop_laundered_into_holds_is_a_disagreement", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_laundered_holds_is_caught_when_both_sides_are_stopped", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_one_sided_engine_error_is_reported_and_quarantined", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_panicking_engine_is_caught_reported_and_quarantined", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::an_engine_answering_no_invariants_is_a_coverage_defect", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_panic_in_a_projection_only_engine_is_reported_as_the_panic", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::engine_faults_on_both_sides_are_reported_and_quarantined", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::panic_attribution_holds_with_a_faulty_or_panicking_other_side", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_panic_in_identity_or_fields_is_a_defect_quarantining_every_lane_of_its_slot", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_fault_met_while_minimizing_is_reported", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_transient_fault_quarantines_its_slot_from_the_first_observation", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::every_ledger_entry_names_a_report_encoding_its_evidence", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::two_transient_slots_each_rest_on_their_own_encoded_fault", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::ignoring_definedness_is_a_disagreement", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_swapped_undefined_kind_is_a_disagreement", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::an_undefined_read_claimed_where_the_read_is_defined_is_caught", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_dropped_model_level_undefined_action_is_a_disagreement", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_budget_stop_does_not_turn_definedness_precedence_into_a_defect", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+  { test = "crates/continuum-corpus/tests/cross_engine_differential.rs::a_fault_is_reported_before_a_semantic_disagreement", oracle = "continuum-engine-reference", subject = "continuum-corpus" },
+]
+
+[semantic.claim_impact]
+claims = ["C005", "C006", "C018", "C023"]
+reason = "The harness's lane table names these four claims as the ones a cross-engine disagreement halts: C006 (closure oracle and the future explicit engine against the reference explorer), C018 and C023 (the kernel deciding the reference's certificates from wire bytes), C005 (the tiny exhaustive oracle and the future DPOR engine). The seeded corpus shows no disagreement on any lane that runs, so no claim is quarantined and no row changes state or wording; the committed register is empty. The explicit and DPOR slots report absent, so this change adds no evidence for C005 and none for an optimized engine under C006."
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes, and none is invented: notes/plan/schemas/ has no defect_* document (the IDL declares only DefectHandle) and no claim-quarantine document, so the defect report is a harness-local canonical text hashed to its defect_ handle and the quarantine register is a harness-local line format, both stated in the module documentation and to be projected onto a schema when one lands"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-corpus was a documentation-only scaffold; the differential module is new surface with no prior artifact to migrate. No other crate's code changed: the engine and kernel adapters are this crate's test code over dev edges, and no release binary links the crate (tests/oracle_tooling_is_test_only.rs)."
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-2r0m24"
+verdict = "approved"

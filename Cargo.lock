@@ -369,6 +369,12 @@ dependencies = [
 [[package]]
 name = "continuum-corpus"
 version = "0.0.0"
+dependencies = [
+ "continuum-engine-reference",
+ "continuum-kernel-core",
+ "continuum-model-core",
+ "continuum-value",
+]
 
 [[package]]
 name = "continuum-dap"
