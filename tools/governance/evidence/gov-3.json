@@ -1,7 +1,7 @@
 {
   "check": "tools/governance/check_claim_governance.py",
   "claim_registry": {
-    "active_claims": 30,
+    "active_claims": 28,
     "declared_states": [
       "HYPOTHESIS",
       "TARGET",
@@ -25,7 +25,6 @@
       "C002",
       "C003",
       "C004",
-      "C005",
       "C007",
       "C008",
       "C009",
@@ -36,7 +35,6 @@
       "C014",
       "C016",
       "C017",
-      "C018",
       "C019",
       "C021",
       "C022",
@@ -117,7 +115,7 @@
         "text": "- Context Packs are bounded, carry omission manifests and expansion handles, and improve agent benchmark effectiveness;"
       },
       {
-        "line": 2465,
+        "line": 2467,
         "path": "notes/plan/plan.md",
         "reason": "plan \u00a722's mirror of the same G2 criterion. Both copies are grandfathered separately so paying one off does not silently cover the other.",
         "rule": "claim-verb-discipline",
@@ -138,6 +136,7 @@
     "GOV-3-01": {
       "boundary": "Proxy. Only assertive uses (copula or perfect + `observed` in predicate position) are seen; an observation reported as a noun phrase or a bare table cell is not.",
       "fixtures_caught": [
+        "claim-c005-prohibited-wording.md",
         "claim-c006-prohibited-wording.md",
         "claim-c020-prohibited-wording.md",
         "claim-c023-prohibited-wording.md",
@@ -170,6 +169,7 @@
     "GOV-3-02": {
       "boundary": "Proxy. Only assertive uses are seen, and the corpus requirement is satisfied by any scope preposition \u2014 the check cannot tell a named corpus from a vague one.",
       "fixtures_caught": [
+        "claim-c005-prohibited-wording.md",
         "claim-c006-prohibited-wording.md",
         "claim-c020-prohibited-wording.md",
         "claim-c023-prohibited-wording.md",
@@ -203,6 +203,7 @@
       "boundary": "Proxy. A numeral or a scope preposition counts as the bound; the check does not verify the bound is the one the evidence actually holds within.",
       "fixtures_caught": [
         "claim-bounded-no-bound.md",
+        "claim-c005-prohibited-wording.md",
         "claim-c006-prohibited-wording.md",
         "claim-c020-prohibited-wording.md",
         "claim-c023-prohibited-wording.md",
@@ -235,6 +236,7 @@
       "boundary": "Proxy. Same bound test as `bounded`. The check cannot verify exhaustiveness \u2014 only that a bound is stated alongside the word.",
       "fixtures_caught": [
         "claim-bounded-no-bound.md",
+        "claim-c005-prohibited-wording.md",
         "claim-c006-prohibited-wording.md",
         "claim-c020-prohibited-wording.md",
         "claim-c023-prohibited-wording.md",
@@ -266,6 +268,7 @@
     "GOV-3-05": {
       "boundary": "Proxy. The check verifies that assumptions are *named* after `under`; it cannot verify they are the assumptions the proof actually needs.",
       "fixtures_caught": [
+        "claim-c005-prohibited-wording.md",
         "claim-c006-prohibited-wording.md",
         "claim-c020-prohibited-wording.md",
         "claim-c023-prohibited-wording.md",
@@ -298,6 +301,7 @@
     "GOV-3-06": {
       "boundary": "Proxy. The check verifies an artifact or checker is named in the sentence; it does not re-check the certificate.",
       "fixtures_caught": [
+        "claim-c005-prohibited-wording.md",
         "claim-c006-prohibited-wording.md",
         "claim-c020-prohibited-wording.md",
         "claim-c023-prohibited-wording.md",
@@ -330,6 +334,7 @@
     "GOV-3-07": {
       "boundary": "Proxy. The check rejects a hypothesis stated alongside a stronger claim word; it cannot judge whether a statement should have been a hypothesis.",
       "fixtures_caught": [
+        "claim-c005-prohibited-wording.md",
         "claim-c006-prohibited-wording.md",
         "claim-c020-prohibited-wording.md",
         "claim-c023-prohibited-wording.md",
@@ -445,7 +450,7 @@
   },
   "self_test": {
     "failures": [],
-    "fixtures": 19,
+    "fixtures": 21,
     "status": "pass"
   },
   "status": "pass"

@@ -6,5 +6,21 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# The reducer consumes the model core and nothing else (plan §20: search consumes the
+# model core, never the other way round). It links no other engine: docs/33 pairs the
+# DPOR reducer with an *unreduced differential oracle*, and a reducer that shared the
+# oracle's code could not be audited by it.
+[dependencies]
+continuum-model-core = { path = "../continuum-model-core" }
+
+# The C005 differential (`tests/c005_differential.rs`) runs the unreduced reference
+# engine as the oracle, and elaborates the dossier's CML examples to models. Dev
+# position only: dev-dependencies are reported, not enforced, "because a differential
+# test may legitimately link an engine it would never ship against"
+# (`tools/check_crate_boundaries.py:37-39`).
+[dev-dependencies]
+continuum-engine-reference = { path = "../continuum-engine-reference" }
+continuum-cml-elab = { path = "../continuum-cml-elab" }
+
 [lints]
 workspace = true

@@ -400,6 +400,11 @@ version = "0.0.0"
 [[package]]
 name = "continuum-engine-dpor"
 version = "0.0.0"
+dependencies = [
+ "continuum-cml-elab",
+ "continuum-engine-reference",
+ "continuum-model-core",
+]
 
 [[package]]
 name = "continuum-engine-explicit"

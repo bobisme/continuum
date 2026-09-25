@@ -1,0 +1,80 @@
+[change]
+bone = "bn-voq4"
+author = "continuum-dev"
+summary = "continuum-engine-dpor: the RFC 0004 baseline reducer for finite safety — stateful persistent (stubborn-closure) sets over a footprint-derived conflict relation, sleep sets with visits keyed by (state, sleep set) and donation only once a label's strongly connected component is complete, observer visibility (INV-013), the stack proviso, typed INV-008 outcomes with charge-before-work bounds, a reduction witness, and an independent witness checker; C005 differential corpus and mutation campaign"
+
+[semantic]
+covers = [
+  "crates/continuum-engine-dpor/src/",
+]
+reference_tests = [
+  "crates/continuum-engine-dpor/tests/c005_differential.rs::c005_bnd_01_a_bound_is_never_a_pass",
+  "crates/continuum-engine-dpor/tests/c005_differential.rs::c005_bnd_02_a_violation_inside_a_bound_is_genuine",
+  "crates/continuum-engine-dpor/tests/c005_differential.rs::c005_bnd_03_a_reachable_fault_is_an_engine_error",
+  "crates/continuum-engine-dpor/tests/c005_differential.rs::c005_bnd_04_an_unknown_predicate_is_refused",
+  "crates/continuum-engine-dpor/tests/c005_differential.rs::c005_reduced_runs_are_deterministic",
+  "crates/continuum-engine-dpor/tests/c005_checker_independence.rs::the_checker_imports_only_the_shared_schema",
+  "crates/continuum-engine-dpor/tests/c005_checker_independence.rs::the_checker_derives_its_own_footprints_and_components",
+  "crates/continuum-engine-dpor/src/mutation.rs::every_seeded_fault_is_caught_by_the_differential",
+  "crates/continuum-engine-dpor/src/mutation.rs::the_sound_reducer_passes_the_same_campaign",
+  "crates/continuum-engine-dpor/src/checker_tests.rs::a_stubborn_set_that_is_not_closed_is_rejected",
+  "crates/continuum-engine-dpor/src/checker_tests.rs::a_donation_inside_a_component_is_rejected",
+  "crates/continuum-engine-dpor/src/checker_tests.rs::a_cycle_without_a_full_visit_is_rejected",
+  "crates/continuum-engine-dpor/src/checker_tests.rs::an_unjustified_sleep_member_is_rejected",
+  "crates/continuum-engine-dpor/src/bits.rs::set_algebra_matches_a_reference_set",
+  "crates/continuum-engine-dpor/src/checker_tests.rs::a_huge_outcome_fanout_is_refused_before_any_proportional_work",
+  "crates/continuum-engine-dpor/src/checker_tests.rs::the_exact_work_boundary_grows_with_the_outcome_count",
+  "crates/continuum-engine-dpor/src/checker_tests.rs::a_huge_witness_list_is_refused_before_it_is_read",
+  "crates/continuum-engine-dpor/src/checker_tests.rs::no_accepted_witness_touches_more_than_it_paid",
+  "crates/continuum-engine-dpor/src/checker_tests.rs::an_out_of_range_edge_label_is_dangling_under_any_budget",
+  "crates/continuum-engine-dpor/src/checker_tests.rs::the_stubborn_table_is_paid_before_it_is_built_even_for_all_full_witnesses",
+  "crates/continuum-engine-dpor/src/checker_tests.rs::every_donation_search_is_paid_before_the_insert",
+  "crates/continuum-engine-dpor/src/mutation.rs::obligations_are_reserved_before_any_is_read",
+  "crates/continuum-engine-dpor/src/mutation.rs::every_state_index_search_is_paid",
+  "crates/continuum-engine-dpor/src/mutation.rs::the_proviso_collection_is_paid_before_it_is_built",
+  "crates/continuum-engine-dpor/src/mutation.rs::finalization_is_paid_before_the_report_is_assembled",
+  "crates/continuum-engine-dpor/tests/c005_differential.rs::c005_bnd_06_a_reduced_fault_must_be_one_of_the_reachable_faults",
+  "crates/continuum-engine-dpor/tests/c005_differential.rs::c005_bnd_07_terminal_states_are_compared_when_they_are_allowed",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-engine-dpor/tests/c005_differential.rs::c005_alpha_renaming_preserves_every_verdict_and_projection", relation = "alpha-renaming" },
+]
+differential_tests = [
+  { test = "crates/continuum-engine-dpor/tests/c005_differential.rs::c005_exhaustive_differential_corpus", oracle = "continuum-engine-reference", subject = "continuum-engine-dpor" },
+]
+
+[semantic.claim_impact]
+claims = ["C005"]
+reason = "this change is C005's evidence: the reducer and its differential corpus against the unreduced reference engine (1013 models under two obligation scopes; on the 969 that do not fault, every one of 5391 verdicts including 652 RFC 0003 undefined-read outcomes, the visible projections, the terminal states under both completion policies and 2847 counterexample and undefined-read paths agree, and every witness is accepted by the independent checker; on the 44 that fault, both engines report an engine error and the reduced fault is one of the reachable faults an unreduced walk finds) and a mutation campaign in which each of six seeded reducer faults is caught; docs/18 C005 moves from TARGET to OBSERVED scoped to that corpus, with the claims-baseline revision naming bn-voq4"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document moves: the report, the reduction witness and the checker's result are in-process Rust types of a crate that had no public API before, no daemon operation or wire artifact carries them yet, and no source here names a schema class URI"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-engine-dpor was a documented stub with no items; check, check_witness, dependence, OBLIGATION_UNITS, CheckError::WorkBelowObligations and every type are new surface, so no caller of any crate changes and no stored artifact is re-derived; the crate's one new normal edge is continuum-model-core, and its dev edges (continuum-engine-reference, continuum-cml-elab) are recorded in dependency-rationale.toml"
+
+[por_reduction]
+covers = [
+  "crates/continuum-engine-dpor/src/",
+]
+no_reduction_tests = [
+  { test = "crates/continuum-engine-dpor/tests/c005_differential.rs::c005_exhaustive_differential_corpus", oracle = "continuum-engine-reference", subject = "continuum-engine-dpor" },
+]
+dependence_mutation_tests = [
+  "crates/continuum-engine-dpor/src/mutation.rs::every_seeded_fault_is_caught_by_the_differential",
+]
+
+[por_reduction.property_analysis]
+tier = "Tier A"
+note = "continuum-engine-dpor reduces for Tier A only: finite-state invariants and the deadlock question. Visibility is the read footprint of the invariants and of every definedness predicate the check consults (RFC 0003: each invariant's chain and every action's chain), so every reachable visible valuation, every reachable deadlock and the existence of a reachable evaluation fault is preserved under persistent sets, component-closed sleep sets and the stack proviso; the crate has no liveness entry point, so no safety reduction is reused for Tier B or C (RFC 0004 'Fairness and liveness interaction')"
+
+[por_reduction.performance]
+metric = "explored executions/configurations"
+note = "continuum-engine-dpor on the C005 corpus: 21018 stored states against the unreduced reference engine's 27111 on the 957 non-faulted generated models (fewer on 375; 20258 under the first invariant alone), 60 against 182 on the eight non-faulted adversarial models, and no reduction on the four dossier models, whose invariants read every variable; on the generated models the reducer fires 36551 labels where the oracle has 59015 state-changing (action, target) steps, two counts of different units. Wall time and memory are not measured here"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-1wuzry"
+verdict = "approved"

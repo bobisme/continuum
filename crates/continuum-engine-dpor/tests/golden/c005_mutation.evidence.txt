@@ -1,0 +1,65 @@
+# C005 mutation evidence (bn-voq4): seeded reducer faults against the unreduced oracle.
+# Corpus: tests/support/handmade.rs plus generated seeds 0..1000 (tests/support/corpus.rs).
+# Regenerate: cargo test -p continuum-engine-dpor --lib mutation, then review the
+# .new file it writes beside this one on drift and move it over.
+# docs/19 §4 mutation kind of c005-mut-01: declare conflicting events independent
+
+[c005-mut-01-drop-write-read-dependence]
+models (each under both scopes): 1009
+differential detects: 73
+  under the narrow scope: 65
+  by category: projections=41 terminals=55 verdicts=11
+  by the terminal-state comparison alone: 31
+checker rejects: 316
+first detecting model: guard-read
+adversarial models detecting it: guard-read,enabling,wakeup
+
+[c005-mut-02-skip-enabling-backtrack-insertion]
+models (each under both scopes): 1009
+differential detects: 13
+  under the narrow scope: 13
+  by category: projections=4 terminals=10 verdicts=2
+  by the terminal-state comparison alone: 9
+checker rejects: 365
+first detecting model: enabling
+adversarial models detecting it: enabling
+
+[c005-mut-03-skip-proviso-backtrack-insertion]
+models (each under both scopes): 1009
+differential detects: 54
+  under the narrow scope: 51
+  by category: fault=3 projections=51 verdicts=27
+  by the terminal-state comparison alone: 0
+checker rejects: 89
+first detecting model: ignoring
+adversarial models detecting it: ignoring
+
+[c005-mut-04-no-sleep-set-wakeup]
+models (each under both scopes): 1009
+differential detects: 151
+  under the narrow scope: 131
+  by category: projections=80 terminals=115 verdicts=22
+  by the terminal-state comparison alone: 69
+checker rejects: 502
+first detecting model: guard-read
+adversarial models detecting it: guard-read,enabling,wakeup
+
+[c005-mut-05-donate-into-open-component]
+models (each under both scopes): 1009
+differential detects: 27
+  under the narrow scope: 24
+  by category: fault=3 projections=24 verdicts=10
+  by the terminal-state comparison alone: 0
+checker rejects: 416
+first detecting model: seed 9
+adversarial models detecting it: 
+
+[c005-mut-06-hide-definedness-reads]
+models (each under both scopes): 1009
+differential detects: 23
+  under the narrow scope: 23
+  by category: projections=23 verdicts=1
+  by the terminal-state comparison alone: 0
+checker rejects: 234
+first detecting model: hidden-undefined
+adversarial models detecting it: hidden-undefined,undefined-invariant

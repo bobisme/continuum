@@ -20,7 +20,7 @@ REFUTED
 | C002 | Crashpacks replay exactly within a semantic epoch | retained replay corpus, clean processes | TARGET |
 | C003 | CIR preserves relevant partial-order behavior | reference semantics and projection theorems/tests | HYPOTHESIS |
 | C004 | Asupersync adapter captures all supported nondeterminism | API inventory, lint/MIR audits, mutation corpus | TARGET |
-| C005 | Baseline DPOR preserves finite safety verdicts | exhaustive differential corpus | TARGET |
+| C005 | Baseline DPOR preserves finite safety verdicts | exhaustive differential corpus | OBSERVED |
 | C006 | Exact finite explorer has no fingerprint unsoundness | exact equality and collision injection | OBSERVED |
 | C007 | Abstract model Agreement holds in configured scope | checked finite certificate | TARGET |
 | C008 | Runtime implementation refines abstract register in configured scope | checked refinement evidence | TARGET |
@@ -76,6 +76,59 @@ CI should reject bare “verified,” “sound,” “complete,” “determinis
 ## Evidence records
 
 A row leaves `TARGET` only with a record here that names the scope of its evidence.
+
+C005 is observed on the baseline reducer `continuum_engine_dpor::check`
+(`stateful-persistent-sleep-dpor/v0`) over one corpus of 1013 finite models. That
+corpus is the whole scope. The evidence is
+`crates/continuum-engine-dpor/tests/c005_differential.rs` with its ledger
+`tests/golden/c005_differential.evidence.txt`, and the mutation campaign
+`crates/continuum-engine-dpor/src/mutation.rs` with its ledger
+`tests/golden/c005_mutation.evidence.txt` (bn-voq4). The oracle is the unreduced
+reference engine. The corpus holds four dossier models, nine adversarial models,
+and the generated seeds 0 to 999. The dossier models are the abstract register and
+the durable register under their committed run configurations, the durable register
+at one epoch, and the TV-009 Die Hard port. The replicated register and the Forge
+ack protocol do not lower, and the ledger records their typed refusal codes. A fifth
+of the generated models and two adversarial models declare definedness predicates
+(RFC 0003), for actions and for invariants, at depth one and nested. Each model is
+checked twice: under every invariant with deadlock a defect, and under its first
+invariant alone with terminal states allowed. 44 models reach an evaluation fault.
+Both engines stop at the first fault they reach, so on those models only the fault
+is compared: both report an engine error, and the reduced fault is one of the
+reachable faults an unreduced walk finds. These models are counted apart and left
+out of every state total. On the other 969 models the reducer and the oracle agree
+on all 5391 obligation verdicts (invariants and the deadlock question, both scopes),
+including the typed outcome "undefined read" of RFC 0003 in 652 comparisons, where
+each reduced undefined read names a definedness predicate that is false at a state
+the oracle marks the same way, and equals the checker's own reading. They also
+agree on the reachable states projected onto the variables the check reads (the
+invariants and every definedness predicate it consults), and on the set of terminal
+states under both completion policies (with terminal states allowed, the reduced
+report gives a count and the checker the set, and both are compared). Each of the
+2847 reduced counterexamples and undefined-read paths replays in the model the oracle
+explores. The independent witness checker accepts all 969 reduction witnesses. The
+test fails if any comparison category is empty, or if faulted or inconclusive models
+pass a tenth of a group. On the generated corpus the reducer stores 21018 states
+where the oracle reaches 27111, and fewer states on 375 of the 1000 models; under
+the first invariant alone it stores 20258. Stored states are compared projected onto
+the oracle's set of read variables, not the reducer's own. On the dossier models it stores every
+state, because their invariants read every variable. Six seeded reducer faults are
+each caught by the differential: a dropped write/read dependence, a skipped enabling
+insertion, a skipped proviso, a missing sleep-set wakeup, a sleep donation into an
+open component, and definedness reads left out of the visible set. The last one loses
+reachable valuations of the definedness variables on 23 models and changes an
+undefined-read verdict on one, the `hidden-undefined` adversarial model: in this
+corpus an undefined read is usually reached on some other interleaving as well. The
+corpus found the fifth fault in the first version of this reducer. Limits: the reducer is the
+stateful persistent-set and sleep-set form, and RFC 0004's stateless source-DPOR
+with vector clocks is not implemented (RFC 0004 correction 1). The obligations are
+finite safety only, with no liveness. A model is in scope when the oracle completes
+it within 2^18 states and 2^22 transitions. The preservation argument for persistent
+sets with visibility and the proviso is the literature's. The rule that a label
+sleeps only once the component its edge leads to is complete is this reducer's own
+addition, argued in `src/checker.rs` and not machine-checked. The checker checks
+each premise per witness, not the theorem. Observer-indexed reduction is C014, a
+separate row.
 
 C006 is observed on the reference explorer, `bfs::explore` in
 `continuum-engine-reference`. That explorer is the whole scope. The evidence is

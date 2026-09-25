@@ -85,7 +85,7 @@
     "tools/tcb-audit/mutants.toml",
     "tools/tcb-audit/public-api.txt"
   ],
-  "checker_inputs_sha256": "82e908d6f63fcaf0456ba7221c283519a9014b3f2739ecc26807ef09492397fa",
+  "checker_inputs_sha256": "59422281835d8bcaafe7f2f4aa71ec780393e1d2255f5d323091f5640f4635d0",
   "checking_base": [
     "continuum-certificate",
     "continuum-kernel-core",
@@ -1026,7 +1026,7 @@
       }
     },
     "scaffold_engines_code_lines": {
-      "continuum-engine-dpor": 0,
+      "continuum-engine-dpor": 3681,
       "continuum-engine-explicit": 0,
       "continuum-engine-liveness": 0,
       "continuum-engine-symbolic": 0
