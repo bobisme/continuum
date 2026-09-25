@@ -45,6 +45,7 @@
 //! | [`transaction`] | the transaction skeleton: `begin` (draft v1) and `apply` (applied v2+), canonical bytes, content identity |
 //! | [`patch`] | patch identity (PR-20 / IMPL-02, bn-195b): declared changes, the candidate sealed from base + changes, gate 2's comparison |
 //! | [`replay`] | exact replay (PR-20 / IMPL-03, bn-2pla): gate 1 replays the crashpack's recorded run on the base and requires the exact failure; gate 4 replays it on the candidate under the original choices; both are recorded with evidence as the next version |
+//! | [`policy`] | the policy verdict (PR-20 / IMPL-06, bn-b6u4): a pure function from a version's recorded gates under its profile to a typed verdict bound to its `rt_` identity (promote-eligible, blocked, inconclusive with typed reasons, privileged intent revision required); the only issuer of a `ContinueAndDisclose` authorization, which issues none |
 //! | [`receipt`] | the promotion-receipt skeleton (PR 22): intent identity, before/after snapshots, `gate_profile` and the `NotYetEnforced` list, composed from referenced artifacts and verified against them |
 //! | [`diff`] | semantic and intent diff (PR-20 / IMPL-04, bn-1b69): the RFC 0031 `diff_*` artifact between base and candidate, computed from the stores; a repair or a privileged intent revision; gate 3's status; claimed diffs refused unless byte-equal |
 //!
@@ -79,9 +80,13 @@
 //!   the base intent; [`diff`] (bn-1b69) computes the RFC 0031 diff behind gate 3, which
 //!   catches a candidate bound to a changed intent. Writing `semantic_diff` into a
 //!   version and recording gate 3 belong to the evaluation path that records a version.
-//! - **IMPL-06, policy verdict.** `policy_verdict` and `receipt` are never emitted,
-//!   and the status derivation is only the three rules this crate can reach
-//!   ([`transaction::derive_status`]: `draft`, `applied`, `evaluating`).
+//! - **IMPL-06, policy verdict, is here** ([`policy`]). [`policy::PolicyVerdict`] is
+//!   computed from a version's record, bound to its `rt_` identity, refused for any
+//!   other version, and holds a claimed verdict against a recomputation. It is not
+//!   written into the artifact: `policy_verdict` and `receipt` are never emitted, and
+//!   the status derivation is still only the three rules this crate can reach
+//!   ([`transaction::derive_status`]: `draft`, `applied`, `evaluating`), because which
+//!   status a partial campaign has is an open RFC 0032 question (bn-2vanm).
 //! - **Daemon wiring.** `repair.begin` and `repair.apply` are declared by the IDL but
 //!   not served; the daemon owns crashpack resolution ([`transaction::FailureBinding`]),
 //!   lineage heads (an `apply` on a non-head version is a lost compare-and-set),
@@ -121,6 +126,7 @@ pub mod diff;
 pub mod handle;
 pub mod hypothesis;
 pub mod patch;
+pub mod policy;
 pub mod receipt;
 pub mod replay;
 pub mod transaction;

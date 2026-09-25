@@ -793,6 +793,39 @@ impl<H: ContentHasher> RepairTransaction<H> {
         })
     }
 
+    /// Test-only: [`Self::with_recorded_gates`], with one placeholder evidence handle on
+    /// every gate that has an outcome, as RFC 0032 requires of a gate that passed
+    /// (the policy verdict refuses a passed gate without evidence).
+    #[cfg(test)]
+    pub(crate) fn with_recorded_gates_evidenced(&self, statuses: [GateStatus; 12]) -> Self {
+        let mut recorded = self.with_recorded_gates(statuses);
+        for gate in &mut recorded.gates {
+            if matches!(
+                gate.status,
+                GateStatus::Passed | GateStatus::Failed | GateStatus::Inconclusive
+            ) {
+                gate.evidence = vec![
+                    EvidenceRef::new(&format!("ev_unit_{}", gate.name.token()))
+                        .unwrap_or_else(|_| unreachable!("a gate token is a handle suffix")),
+                ];
+            }
+        }
+        Self::seal(Unsealed {
+            version: recorded.version,
+            supersedes: recorded.supersedes.clone(),
+            base_snapshot: recorded.base_snapshot.clone(),
+            base_intent: recorded.base_intent.clone(),
+            failure: recorded.failure.clone(),
+            hypothesis: recorded.hypothesis.clone(),
+            changes: recorded.changes.clone(),
+            candidate_snapshot: recorded.candidate_snapshot.clone(),
+            gate_profile: recorded.gate_profile,
+            gates: recorded.gates.clone(),
+            cost_ledger: recorded.cost_ledger,
+            evaluation_policy: recorded.evaluation_policy.clone(),
+        })
+    }
+
     fn seal(parts: Unsealed) -> Self {
         let identity = RepairIdentity(preimage(&parts).to_canonical_bytes());
         let repair_id = identity.mint::<H>();

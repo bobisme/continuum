@@ -755,8 +755,9 @@ pub enum AuthorizationAbsence {
 pub const fn request_continue_and_disclose<H: ContentHasher>(
     transaction: &RepairTransaction<H>,
 ) -> Result<PolicyAuthorization, AuthorizationAbsence> {
-    let _ = transaction;
-    Err(AuthorizationAbsence::NoAuthority)
+    // The policy layer is the only place an authorization may be issued, and it issues
+    // one only on a protected policy grant, which no RFC defines yet (bn-b6u4, bn-2vanm).
+    crate::policy::authorize_continue_and_disclose(transaction, None)
 }
 
 /// Which bound field of an authorization does not match the transaction evaluated.
@@ -873,6 +874,50 @@ impl EvidenceRecord {
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    /// What the record states about the gate it supports: the gate, the status and the
+    /// typed INV-008 reason. Read by the policy verdict ([`crate::policy`]).
+    ///
+    /// `None` unless the bytes re-derive to the handle under `H` first, so a record
+    /// whose bytes were altered states nothing, and unless the prefix up to the reason
+    /// parses under this module's grammar. Only that prefix is read.
+    pub(crate) fn statement<H: ContentHasher>(
+        &self,
+    ) -> Option<(GateName, GateStatus, Option<InconclusiveReason>)> {
+        let (class, tag) = [RUN, DEFECT]
+            .into_iter()
+            .find(|(_, tag)| self.bytes.starts_with(tag))?;
+        if self.handle.as_str() != format!("{class}_{}", H::hash(&self.bytes).to_token()) {
+            return None;
+        }
+        let mut reader = Reader(self.bytes.get(tag.len()..)?);
+        if reader.take(1).ok()? != [REPLAY_ENCODING_VERSION] {
+            return None;
+        }
+        let gate = reader.field().ok()?;
+        // The crashpack, the program, the replayer and the policy.
+        for _ in 0..4 {
+            reader.field().ok()?;
+        }
+        let status = reader.field().ok()?;
+        let reason = reader.field().ok()?;
+        let gate = GateName::ALL
+            .into_iter()
+            .find(|name| name.token().as_bytes() == gate)?;
+        let status = GateStatus::ALL
+            .into_iter()
+            .find(|candidate| candidate.token().as_bytes() == status)?;
+        let reason = if reason.is_empty() {
+            None
+        } else {
+            Some(
+                InconclusiveReason::ALL
+                    .into_iter()
+                    .find(|candidate| candidate.as_str().as_bytes() == reason)?,
+            )
+        };
+        Some((gate, status, reason))
     }
 }
 
@@ -1705,6 +1750,88 @@ mod tests {
             Err(ExactReplayRefusal::Authorization(
                 AuthorizationMismatch::Digest
             ))
+        );
+    }
+
+    #[test]
+    fn a_record_states_its_reason_only_when_its_bytes_name_it() {
+        use crate::policy::{GateReasons, ReplayRecords};
+        let crash = CrashpackId::new("crash_unit").unwrap();
+        let program = SnapshotId::new("ws_unit").unwrap();
+        let mut out = Vec::new();
+        let (ambiguity, engine, passed) = {
+            let mut made = Records::<Blake3Hasher> {
+                crash: &crash,
+                replayer: "unit/1",
+                policy: EvaluationPolicy::Exact.token(),
+                out: &mut out,
+                hasher: PhantomData,
+            };
+            let gate = GateName::ExactRegression;
+            (
+                made.record(
+                    RUN,
+                    gate,
+                    &program,
+                    &Answer::Unsupported,
+                    GateStatus::Inconclusive,
+                    Some(InconclusiveReason::AbstractionAmbiguity),
+                ),
+                made.record(
+                    DEFECT,
+                    gate,
+                    &program,
+                    &Answer::Unsupported,
+                    GateStatus::Inconclusive,
+                    Some(InconclusiveReason::EngineError),
+                ),
+                made.record(
+                    RUN,
+                    gate,
+                    &program,
+                    &Answer::Unsupported,
+                    GateStatus::Passed,
+                    None,
+                ),
+            )
+        };
+        assert_eq!(
+            out[0].statement::<Blake3Hasher>(),
+            Some((
+                GateName::ExactRegression,
+                GateStatus::Inconclusive,
+                Some(InconclusiveReason::AbstractionAmbiguity)
+            ))
+        );
+        // One altered byte: the bytes no longer name the handle, so nothing is stated.
+        let mut tampered = out[0].clone();
+        let last = tampered.bytes.len() - 1;
+        tampered.bytes[last] ^= 1;
+        assert_eq!(tampered.statement::<Blake3Hasher>(), None);
+
+        let read = |records: &[EvidenceRecord], cites: &[&EvidenceRef]| {
+            let cites: Vec<EvidenceRef> = cites.iter().map(|cite| (*cite).clone()).collect();
+            ReplayRecords::<Blake3Hasher>::new(records)
+                .inconclusive_reason(GateName::ExactRegression, &cites)
+        };
+        let crash_cite = EvidenceRef::new(crash.as_str()).unwrap();
+        assert_eq!(
+            read(&out, &[&crash_cite, &ambiguity]),
+            Resolution::Found(InconclusiveReason::AbstractionAmbiguity)
+        );
+        // Two cited records that disagree on the reason.
+        assert_eq!(read(&out, &[&ambiguity, &engine]), Resolution::Unknown);
+        // A cited record that states another status, alone or beside a good one.
+        assert_eq!(read(&out, &[&passed]), Resolution::Unknown);
+        assert_eq!(read(&out, &[&ambiguity, &passed]), Resolution::Unknown);
+        // A cited record that was not supplied.
+        assert_eq!(read(&out[..1], &[&ambiguity, &engine]), Resolution::Unknown);
+        // A record whose bytes were altered.
+        assert_eq!(read(&[tampered], &[&ambiguity]), Resolution::Unknown);
+        // No record supplied at all.
+        assert_eq!(
+            read(&[], &[&crash_cite, &ambiguity]),
+            Resolution::Unavailable
         );
     }
 }

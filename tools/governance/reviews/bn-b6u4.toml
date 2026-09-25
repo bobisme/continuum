@@ -1,0 +1,58 @@
+[change]
+bone = "bn-b6u4"
+author = "continuum-dev"
+summary = "PR-20 / IMPL-06, policy verdict: continuum-repair's policy module computes a typed verdict from a transaction version's recorded gate statuses under its gate profile, never a bool. PromoteEligible (allow) only when every gate 1-11 of the profile passed (gate 12 is the promotion step); Blocked (block) on any failed gate with every failed and undecided gate named, failure dominating inconclusiveness; Inconclusive (no PolicyDecision) naming each pending gate and each inconclusive gate with the typed INV-008 reason its cited evidence records, or its typed absence; PrivilegedIntentRevisionRequired when gate 3 failed or a bound RFC 0031 classification is review or block, whatever the other gates say, with the RFC 0031 join (block for any failed gate) as its decision. Inadmissible gate lists, and a gate 1-11 passed on no evidence, are refused. PolicyVerdict binds the rt_ handle and identity bytes, is refused for any other version, and recheck refuses a claimed decision that the recomputation does not carry. The policy layer is the only issuer of a ContinueAndDisclose PolicyAuthorization, on a grant type with no values, so request_continue_and_disclose delegates to it and still answers NoAuthority (decision owned by bn-2vanm)"
+
+[semantic]
+covers = [
+  "crates/continuum-repair/src/",
+]
+reference_tests = [
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_positive_all_required_gates_passed_is_promote_eligible",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_positive_a_real_exact_replay_version_is_bound_and_names_its_pending_gates",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_negative_each_failed_gate_blocks",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_negative_each_pending_gate_blocks_eligibility",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_negative_each_inconclusive_gate_blocks_with_its_reason",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_negative_failure_dominates_and_undecided_gates_are_disclosed",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_negative_a_protected_change_forces_the_privileged_path",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_negative_real_inconclusive_replay_preserves_its_typed_reason",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_negative_a_real_gate_1_failure_blocks",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_negative_a_stale_version_is_refused",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_negative_a_forged_verdict_claim_is_refused_by_recompute",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_negative_no_authority_issues_continue_and_disclose",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_boundary_every_gate_profile_admits_exactly_its_gates",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_boundary_the_gate_list_is_the_twelve_gates_by_identity",
+  "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_property_random_gate_vectors_agree_with_the_rfc_reference",
+  "crates/continuum-repair/src/policy.rs::every_required_gate_passed_is_promote_eligible_under_every_profile",
+  "crates/continuum-repair/src/policy.rs::a_verdict_for_one_version_is_stale_for_its_successor",
+  "crates/continuum-repair/src/policy.rs::a_forged_allow_claim_is_refused_by_recompute",
+  "crates/continuum-repair/src/policy.rs::a_classification_of_another_transaction_is_refused",
+  "crates/continuum-repair/src/policy.rs::no_grant_exists_so_no_authorization_is_issued",
+  "crates/continuum-repair/src/policy.rs::a_passed_gate_without_evidence_is_refused",
+  "crates/continuum-repair/src/policy.rs::a_review_classification_never_lowers_a_failed_gate_3",
+  "crates/continuum-repair/src/replay.rs::a_record_states_its_reason_only_when_its_bytes_name_it",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_metamorphic_gate_order_is_irrelevant", relation = "set/map insertion order" },
+]
+differential_tests = [
+  { test = "crates/continuum-repair/tests/pr20_impl06_policy_verdict.rs::pr20_impl06_differential_the_decision_is_the_rfc_0031_join", oracle = "continuum-intent", subject = "continuum-repair" },
+]
+
+[semantic.claim_impact]
+claims = ["C033"]
+reason = "The row's state and wording do not change. C033 stays TARGET: the verdict is computed over the gates a version records, but only gates 1 and 4 have an evaluation, the verdict is not written into the transaction artifact, and no repair is promoted because repair.promote is not served (bn-23pwm)"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the verdict is not written into the repair-transaction artifact (policy_verdict stays omitted, status derivation is unchanged), and its wire decision reuses the IDL's closed PolicyDecision (allow, review, block) through continuum-intent's existing type"
+unaffected = { repair-transaction = "no field is written that was not written before; every IMPL-01, IMPL-02 and IMPL-03 artifact and rt_ identity is byte-identical", promotion-receipt = "receipt.rs is untouched; policy_decision on the receipt stays PR-22 / IMPL-09's", semantic-diff = "the RFC 0031 decision is read as a value, never produced here" }
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-repair only. No published artifact, schema class or epoch moves, and no rt_ identity changes. The crate API gains the policy module (decide, Verdict, PolicyVerdict, VerdictClaim, GateReasons, ReplayRecords, IntentClassification, ContinueAndDiscloseGrant, authorize_continue_and_disclose). replay::request_continue_and_disclose keeps its signature and answer (NoAuthority) and now delegates to the policy layer; EvidenceRecord gains a crate-private statement reader used only by ReplayRecords; RepairTransaction gains a cfg(test) helper, with_recorded_gates_evidenced"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-1xggqg"
+verdict = "approved"
