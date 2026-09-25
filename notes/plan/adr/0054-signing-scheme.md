@@ -374,9 +374,42 @@ operations below 3.9 with `UnsupportedSemanticFeature`. What changed:
   which keys were minted locally, so a state edited to claim a peer key as own, with no
   adopted link about it, is not detected; the state file's owner-only permissions are the
   control.
-- **Not persisted.** Held intent bundles and the import records: after a restart,
-  `intent.accept` naming a bundle held before it fails closed until the bundle is
-  imported again.
+- **Held bundles and import records persist (bn-3snfi).** No wire change: the
+  custody state also carries each bundle an import verified, by its `inb_` handle with
+  its signed bytes, and the import records — each contract an import entered, with the
+  bundle it last entered from. They live in the keystore's one state file (version 2,
+  `CTMSTA02`; a version-1 file reads as holding none), so an import's adopted facts, its
+  bundle, and its records commit at the one rename, whole or not at all, under the
+  custody's answer rules: a refused write is `PublicationAborted` and changes nothing,
+  an unconfirmed one is `OutcomeUnknown` and quarantines, and an import with nothing
+  new to record writes nothing. Reads are bounded before any bundle is copied (at most
+  1024 bundles of at most 4 MiB, 64 MiB together, charged bundle by bundle; at most
+  65 536 records; every handle at most 256 bytes). At launch, before any key is used or
+  anything is swept, every held bundle must decode, recompute to the handle it is
+  recorded under, be authenticated by its own signature, and carry only attested links;
+  every record must name a held bundle exporting a canonical, well-formed contract of
+  that `in_` identity; and every adopted link must be carried by a held bundle. Any
+  failure is a typed `LaunchRefusal` (`HeldBundle`, `ImportRecord`, `UncarriedLink`).
+  Then the bundles are held again and every recorded contract re-enters the registry at
+  `proposed`, so `intent.accept` naming a bundle held before a restart is decided as it
+  was before it. Signer standing and a restored revision's lineage are not re-checked at
+  launch: `intent.accept` re-verifies the chain, re-checks the predecessor's protected
+  fields, and requires the predecessor to be the accepted head, failing closed, and an
+  imported proposal is never accepted locally. Stated limits: a bundle this daemon exported
+  and nobody imported stays in memory only, because `intent.export_bundle` has no
+  `OutcomeUnknown` to answer an unconfirmed write with (importing it records it); the
+  intent registry itself is not persisted, and `intent.reject` records nothing (it has
+  no custody failure to answer), so a restart re-enters a rejected import at
+  `proposed` — exactly what importing its bundle again would do — and it is still
+  accepted only through its bundle; every state write rewrites the held bundles, up
+  to 64 MiB, and a launch re-hashes and re-checks all of them (contracts, W1–W10, and
+  every carried link's signatures); held bundles are never evicted, so the bound of 1024
+  bundles or 64 MiB, which a restart used to reset, now holds across restarts until an
+  eviction path exists (after it, an import of a new bundle is `QuotaExhausted`); and a
+  version-1 state that holds an adopted link is refused at launch (`UncarriedLink`),
+  because version 1 recorded no bundle to carry it — no production store of that
+  version existed (it merged with bn-18w74 the same day, and no shipped binary launched
+  one).
 
 ## Alternatives considered
 

@@ -109,7 +109,7 @@
 //! [`PolicyVerb::is_weaker_or_equal`]: continuum_intent::change_policy::PolicyVerb::is_weaker_or_equal
 //! [`SigningAuthority::check_acceptance_chain`]: super::signing::SigningAuthority::check_acceptance_chain
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use continuum_intent::canonical_json::Json;
 use continuum_intent::change_policy::{PolicyField, PolicyTable, PolicyVerb};
@@ -118,9 +118,9 @@ use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::ReferenceStore;
 
 use super::admission::Derived;
-use super::bundle::{BundleBody, BundleContract, decode_signed, encode_signed};
+use super::bundle::{BundleBody, BundleContract, SignedBundle, decode_signed, encode_signed};
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
-use super::signing::{AcceptanceClaim, require_signing_version};
+use super::signing::{AcceptanceClaim, CustodyRefusal, require_signing_version};
 use super::state::{Acceptance, DaemonState, IntentRecord, RegistryStatus};
 use super::{Services, identity};
 use crate::protocol::envelope::{StructuralVerdictValue, Verdict};
@@ -933,12 +933,15 @@ fn bundle_handle(services: &Services, content: &[u8]) -> Result<IntentBundleHand
                 "no content identity could be derived for the bundle",
             )
         })?;
-    identity::bundle_to_wire(&stored).map_err(|_| {
-        Fault::new(
-            ErrorCode::MalformedRequest,
-            "the derived bundle identity is not a well-formed bundle handle",
-        )
-    })
+    identity::bundle_to_wire(&stored)
+        .ok()
+        .filter(|handle| handle.as_str().len() <= super::bundle::MAX_BUNDLE_HANDLE_LEN)
+        .ok_or_else(|| {
+            Fault::new(
+                ErrorCode::MalformedRequest,
+                "the derived bundle identity is not a well-formed bundle handle within its bound",
+            )
+        })
 }
 
 /// `intent.export_bundle`: sign the named contracts, their records, the local allowed set,
@@ -1197,14 +1200,17 @@ fn import_bundle(
         .not_retryable());
     }
 
-    // The facts are recorded through the custody first; a refusal there changes nothing.
-    let adopted = state.signing_mut().adopt(adoption)?;
-    // Nothing below can fail: the facts are committed with everything else, or not at all.
+    // The facts, the bundle, and the import records of the contracts it enters are
+    // recorded through the custody as one write first (bn-3snfi); a refusal there changes
+    // nothing.
+    let (adopted, held, recorded) = state
+        .signing_mut()
+        .commit_import(adoption, &handle, signed, &fresh)?;
+    // Nothing below can fail: the contracts enter with everything else, or not at all. An
+    // unconfirmed write keeps the change, like every unconfirmed signing change, and the
+    // answer below is `OutcomeUnknown`.
     for (intent, contract, record) in entries {
         if fresh.contains(&intent) {
-            state
-                .signing_mut()
-                .record_import(intent.clone(), handle.clone());
             state.put_intent(
                 intent,
                 IntentRecord {
@@ -1218,7 +1224,7 @@ fn import_bundle(
             );
         }
     }
-    let held = state.signing_mut().hold(handle.clone(), signed);
+    recorded.answer()?;
     let changed = held || adopted > 0 || !fresh.is_empty();
     Ok(Effect::new(
         Payload::IntentImportBundle(IntentImportBundleResponse {
@@ -1233,6 +1239,151 @@ fn import_bundle(
             StructuralOutcome::Unchanged
         }),
     ))
+}
+
+/// What a restart restores from the custody's held bundles and import records (bn-3snfi),
+/// each checked by [`restore_imports`].
+#[derive(Debug)]
+pub(crate) struct RestoredImports {
+    /// The held bundles, decoded, by their recomputed identities.
+    pub(crate) bundles: Vec<(IntentBundleHandle, SignedBundle)>,
+    /// The import records.
+    pub(crate) records: BTreeMap<IntentHandle, IntentBundleHandle>,
+    /// The contract each record re-enters at `proposed`, read from its bundle.
+    pub(crate) intents: Vec<(IntentHandle, IntentRecord)>,
+}
+
+/// Check the held bundles and import records a restored custody state carries, before any
+/// of them is used or anything is swept (bn-3snfi), and read what they re-enter.
+///
+/// Every held bundle is within the held-bundle bounds (charged, count and bytes, before
+/// any is decoded), decodes under [`decode_signed`]'s bounds, is the identity it is
+/// recorded under (recomputed from its bytes), is authenticated by its own signature, and
+/// carries only links every key they concern signed — what import checked before it held
+/// the bundle. Every import record names a held bundle that exports the contract, whose
+/// bytes are canonical, recompute to its `in_*` (RFC 0037 I5), pass W1–W10 as import
+/// checks them (I4), and carry a well-formed registry record. Every adopted link is carried
+/// by a held bundle, because an adoption holds its bundle in the same write. Signer
+/// standing is not re-checked here: a bundle whose signer was revoked after the import
+/// stays held, and `intent.accept` re-verifies its chain, failing closed.
+///
+/// A re-entered contract is `proposed`, never higher (I2), whatever it was before the
+/// restart: the registry itself is not persisted, so a restart re-enters exactly what
+/// importing each recorded bundle again would.
+///
+/// # Errors
+///
+/// [`CustodyRefusal::HeldBundle`], [`CustodyRefusal::ImportRecord`], or
+/// [`CustodyRefusal::UncarriedLink`]; nothing is repaired.
+pub(crate) fn restore_imports(
+    services: &Services,
+    bundles: &BTreeMap<String, std::sync::Arc<[u8]>>,
+    imports: &BTreeMap<String, String>,
+    adopted: &[continuum_evidence::signing::SignerLink],
+) -> Result<RestoredImports, CustodyRefusal> {
+    use continuum_evidence::signing::{ArtifactSignature, SignedArtifactKind};
+    // Charged before anything is decoded: the count, then every length together.
+    let bytes = bundles
+        .values()
+        .fold(0usize, |total, content| total.saturating_add(content.len()));
+    if bundles.len() > super::signing::MAX_HELD_BUNDLES
+        || bytes > super::signing::MAX_HELD_BUNDLE_BYTES
+        || imports.len() > super::signing::MAX_HELD_BUNDLES * super::bundle::MAX_BUNDLE_CONTRACTS
+    {
+        return Err(CustodyRefusal::HeldBundle);
+    }
+    let mut held: BTreeMap<IntentBundleHandle, SignedBundle> = BTreeMap::new();
+    for (name, content) in bundles {
+        let handle = IntentBundleHandle::new(name).map_err(|_| CustodyRefusal::HeldBundle)?;
+        let signed = super::bundle::decode_signed_shared(std::sync::Arc::clone(content))
+            .map_err(|_| CustodyRefusal::HeldBundle)?;
+        let recomputed =
+            bundle_handle(services, content).map_err(|_| CustodyRefusal::HeldBundle)?;
+        if recomputed != handle {
+            return Err(CustodyRefusal::HeldBundle);
+        }
+        let authentic = ArtifactSignature::decode(signed.signature()).is_ok_and(|signature| {
+            signature.authenticates(
+                SignedArtifactKind::IntentBundle,
+                &super::bundle::signed_bytes_identity(signed.body_bytes()),
+            )
+        });
+        if !authentic || !super::signing::links_are_attested(&signed.body().links) {
+            return Err(CustodyRefusal::HeldBundle);
+        }
+        held.insert(handle, signed);
+    }
+
+    let mut records = BTreeMap::new();
+    let mut intents = Vec::with_capacity(imports.len());
+    for (name, bundle) in imports {
+        let intent = IntentHandle::new(name).map_err(|_| CustodyRefusal::ImportRecord)?;
+        let bundle = IntentBundleHandle::new(bundle).map_err(|_| CustodyRefusal::ImportRecord)?;
+        let entry = held
+            .get(&bundle)
+            .and_then(|signed| signed.body().contract(&intent))
+            .ok_or(CustodyRefusal::ImportRecord)?;
+        let contract =
+            IntentContract::decode(&entry.contract).map_err(|_| CustodyRefusal::ImportRecord)?;
+        if contract.to_artifact_bytes() != entry.contract
+            || mint(&contract, services).ok().as_ref() != Some(&intent)
+        {
+            return Err(CustodyRefusal::ImportRecord);
+        }
+        let environment = CheckEnvironment::new().with_minted_intent_id(intent.as_str());
+        if !contract.check(&environment).is_well_formed() {
+            return Err(CustodyRefusal::ImportRecord);
+        }
+        let record = BundleRecord::parse(&entry.record, &intent)
+            .map_err(|_| CustodyRefusal::ImportRecord)?;
+        intents.push((
+            intent.clone(),
+            IntentRecord {
+                contract,
+                status: RegistryStatus::Proposed,
+                supersedes: record.supersedes,
+                superseded_by: None,
+                acceptance: None,
+            },
+        ));
+        records.insert(intent, bundle);
+    }
+
+    // Every adopted link is carried by a held bundle. The adopted links are bounded
+    // (`validate_custody` checked `MAX_BUNDLE_LINKS`), so they are indexed once by their
+    // encoding, and each held bundle's links — bounded by the held-bundle bytes charged
+    // above — are looked up in that index.
+    let mut uncarried: BTreeSet<Vec<u8>> = adopted.iter().map(|link| link.encode()).collect();
+    for signed in held.values() {
+        if uncarried.is_empty() {
+            break;
+        }
+        for link in &signed.body().links {
+            uncarried.remove(&link.encode());
+        }
+    }
+    if !uncarried.is_empty() {
+        return Err(CustodyRefusal::UncarriedLink);
+    }
+
+    Ok(RestoredImports {
+        bundles: held.into_iter().collect(),
+        records,
+        intents,
+    })
+}
+
+/// Hold the bundles and import records [`restore_imports`] validated again, and re-enter
+/// every recorded contract into the registry at `proposed` (bn-3snfi): the restart's
+/// counterpart of the writes `import_bundle` makes, and the registry's only other writer
+/// beside it and `intent.lock`.
+pub(crate) fn reenter_imports(state: &mut DaemonState, restored: RestoredImports) {
+    state
+        .signing_mut()
+        .restore_bundles(restored.bundles, restored.records);
+    for (handle, record) in restored.intents {
+        state.put_intent(handle, record);
+    }
 }
 
 /// Whether `successor` keeps every field `predecessor`'s policy protects, and does not

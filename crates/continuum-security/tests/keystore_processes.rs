@@ -170,7 +170,8 @@ fn amplification_body() {
     assert!(matches!(store.open(), Err(KeystoreError::Corrupt(_))));
 
     // 3. 16 MiB that would decode as one sequence of nulls: the format has no whole-log
-    //    value to decode, and the file is over its size bound.
+    //    value to decode. (Since bn-3snfi the size bound admits held bundles, so this file is
+    //    within it and is refused by its section structure, still in bounded memory.)
     // Anti-vacuity: materializing that value would itself exceed the child's limit.
     assert!(std::mem::size_of::<Value>() * 16 * 1024 * 1024 > MEMORY_LIMIT_KIB * 1024);
     let mut whole = vec![0u8; 16 * 1024 * 1024];

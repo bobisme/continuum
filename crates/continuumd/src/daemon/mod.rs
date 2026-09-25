@@ -1377,11 +1377,18 @@ impl Builder {
     /// 2. [`ReceiptSigner::restored`]: every part checked against the registry and the
     ///    daemon's invariants — the record bound, the recovery reserve, own keys, link
     ///    attestation and topology, pre-signed revocations — before the key is used;
-    /// 3. [`sweep`](continuum_evidence::signing::SigningCustody::sweep): any secret the
+    /// 3. the held intent bundles and import records (bn-3snfi) checked the same way: each
+    ///    bundle bounded, decoded, its identity recomputed from its bytes, authenticated by
+    ///    its own signature, its links attested; each record naming a held bundle that
+    ///    exports a well-formed contract of that identity; each adopted link carried by a
+    ///    held bundle ([`intent::restore_imports`]);
+    /// 4. [`sweep`](continuum_evidence::signing::SigningCustody::sweep): any secret the
     ///    validated state does not hold (a crash between a change and its clean-up) is
     ///    removed;
-    /// 4. the key is installed, `entropy` becomes the daemon's key-entropy capability, and
-    ///    the custody records every later change ([`signing_custody`](Self::signing_custody)).
+    /// 5. the key is installed, the bundles are held again and every recorded contract
+    ///    re-enters the registry at `proposed`, `entropy` becomes the daemon's key-entropy
+    ///    capability, and the custody records every later change
+    ///    ([`signing_custody`](Self::signing_custody)).
     ///
     /// The daemon performs no I/O here: every effect is the custody's.
     ///
@@ -1401,14 +1408,20 @@ impl Builder {
         let (state, key) = custody
             .load_or_mint(actor, &mut *entropy)
             .map_err(LaunchRefusal::Custody)?;
+        // The bundle parts are shared bytes: kept aside before the state is consumed.
+        let bundles = state.held_bundles().clone();
+        let imports = state.imports().clone();
+        let adopted = state.adopted_links().to_vec();
         let signer = ReceiptSigner::restored(key, state).map_err(LaunchRefusal::Install)?;
+        let restored = intent::restore_imports(&self.services, &bundles, &imports, &adopted)
+            .map_err(|refusal| LaunchRefusal::Install(InstallRefusal::Custody(refusal)))?;
+        drop((bundles, imports, adopted));
         custody
             .sweep(signer.identity())
             .map_err(LaunchRefusal::Custody)?;
-        Ok(self
-            .receipt_signer(signer)
-            .key_entropy(entropy)
-            .signing_custody(custody))
+        let mut builder = self.receipt_signer(signer).key_entropy(entropy);
+        intent::reenter_imports(&mut builder.state, restored);
+        Ok(builder.signing_custody(custody))
     }
 
     /// Add signers to the local allowed-signers policy (plan §18.6's organizational

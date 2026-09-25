@@ -5103,8 +5103,12 @@ rule signing.custody {
   A daemon MAY keep its signing authority in durable custody (bn-18w74,
   ADR-0054). It then records every change `signing.mint`,
   `signing.rotate`, `signing.revoke`, and an `intent.import_bundle` that
-  adopts standing facts make, before the change takes effect, as one
-  atomic record with one commit point. The answer follows the record:
+  adopts standing facts, holds a new bundle, or enters a contract make,
+  before the change takes effect, as one atomic record with one commit
+  point: an import's adopted facts, the bundle it verified, and the
+  record of each contract it entered are one custody write, and an
+  import with nothing new to record writes nothing (bn-3snfi). The
+  answer follows the record:
   - a failure before the commit point changes nothing, in the daemon or
     in custody, and is `PublicationAborted`;
   - a record whose commit point passed but whose durability is not
@@ -5116,7 +5120,16 @@ rule signing.custody {
     any crash.
   A restart loads whichever record is durable, validates it in full,
   removes what no durable record names, and clears the mark; only then
-  does it sign. `OutcomeUnknown` is defined from 3.9. A daemon with
+  does it sign. Validation covers the held bundles and import records:
+  each held bundle decodes within its bounds, is the identity it is
+  recorded under, is authenticated by its own signature, and carries
+  only attested links; each import record names a held bundle that
+  exports a well-formed contract of that identity; and every adopted
+  link is carried by a held bundle. A state that fails any of these is
+  refused, never repaired. The restart then holds the bundles again and
+  re-enters each recorded contract at `proposed`, never higher, so an
+  `intent.accept` naming a bundle held before the restart is decided as
+  it was before it. `OutcomeUnknown` is defined from 3.9. A daemon with
   durable custody refuses the four operations above on a connection
   negotiated below 3.9 with `UnsupportedSemanticFeature`, before
   anything changes, so no older client can receive an outcome its

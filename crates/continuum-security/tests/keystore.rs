@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use continuum_evidence::actor::ActorId;
 use continuum_evidence::signing::{
@@ -23,8 +24,9 @@ use continuum_evidence::signing::{
 use continuum_security::entropy::OsEntropy;
 use continuum_security::keystore::{
     CustodyWrite, KEY_FILE_LABEL, KEY_FILE_LEN, KeystoreError, KeystoreFaults, LEGACY_FILES,
-    LOCK_FILE, LocalKeystore, MAX_STATE_FILE_LEN, PersistPhase, STATE_FILE, STATE_TEMP_FILE,
-    decode_state, encode_state, key_file_name,
+    LOCK_FILE, LocalKeystore, MAX_BUNDLE_LEN, MAX_HANDLE_LEN, MAX_HELD_BUNDLE_BYTES,
+    MAX_HELD_BUNDLES, MAX_IMPORT_RECORDS, MAX_STATE_FILE_LEN, PersistPhase, STATE_FILE,
+    STATE_MAGIC, STATE_MAGIC_V1, STATE_TEMP_FILE, decode_state, encode_state, key_file_name,
 };
 use continuum_value::identity::ContentIdentity;
 use continuum_value::value::Value;
@@ -422,7 +424,8 @@ fn a_persisted_rotation_round_trips_and_removes_the_retired_key() {
 /// Metamorphic, serialization round trip: a custody state written by `encode_state` and
 /// read by `decode_state` is the same state, and writing it again gives the same bytes —
 /// for a first-use state, one with a rotation, a pre-signed revocation, a published
-/// revocation, and adopted links, and each of those with its sections empty.
+/// revocation, and adopted links, each of those with its sections empty, and states with
+/// held bundles and import records (bn-3snfi).
 #[test]
 fn a_custody_state_survives_the_serialization_round_trip() {
     use continuum_evidence::signing::{LocalSigner, RevocationReason};
@@ -481,7 +484,23 @@ fn a_custody_state_survives_the_serialization_round_trip() {
         Vec::new(),
         BTreeMap::new(),
     );
-    for state in [first, rotated, empty_sections] {
+    // bn-3snfi: the held bundles and the import records, as opaque handles and bytes.
+    let with_bundles = rotated.clone().with_held_bundles(
+        BTreeMap::from([
+            ("inb_a".to_owned(), Arc::from(b"first bundle".as_slice())),
+            ("inb_b".to_owned(), Arc::from(vec![7u8; 300].as_slice())),
+        ]),
+        BTreeMap::from([
+            ("in_x".to_owned(), "inb_b".to_owned()),
+            ("in_y".to_owned(), "inb_a".to_owned()),
+            ("in_z".to_owned(), "inb_b".to_owned()),
+        ]),
+    );
+    let bundles_only = first.clone().with_held_bundles(
+        BTreeMap::from([("inb_only".to_owned(), Arc::from(b"x".as_slice()))]),
+        BTreeMap::new(),
+    );
+    for state in [first, rotated, empty_sections, with_bundles, bundles_only] {
         let bytes = encode_state(&state).expect("encodes");
         let read = decode_state(&bytes).expect("decodes");
         assert_eq!(read, state, "decode after encode is the identity");
@@ -1353,5 +1372,241 @@ fn a_store_directory_another_user_owns_is_refused() {
             uid: 0,
             expected: uid
         })
+    );
+}
+
+// --- bn-3snfi: held bundles and import records -----------------------------------------
+
+/// The bytes of `state` up to its bundle sections: `state` must hold no bundle and no
+/// import record, so its encoding ends in the two empty counts.
+fn before_bundles(state: &SigningCustodyState) -> Vec<u8> {
+    assert!(state.held_bundles().is_empty() && state.imports().is_empty());
+    let mut bytes = encode_state(state).expect("encodes");
+    assert_eq!(bytes.split_off(bytes.len() - 8), vec![0u8; 8]);
+    bytes
+}
+
+fn framed(out: &mut Vec<u8>, bytes: &[u8]) {
+    out.extend_from_slice(&u32::try_from(bytes.len()).expect("fits").to_be_bytes());
+    out.extend_from_slice(bytes);
+}
+
+/// The bundle sections as raw bytes: `bundles` in the order given, then `imports`, each
+/// a contract handle and a raw bundle index.
+fn sections(bundles: &[(&[u8], &[u8])], imports: &[(&[u8], u16)]) -> Vec<u8> {
+    let mut out = u32::try_from(bundles.len())
+        .expect("fits")
+        .to_be_bytes()
+        .to_vec();
+    for (handle, content) in bundles {
+        framed(&mut out, handle);
+        framed(&mut out, content);
+    }
+    out.extend_from_slice(&u32::try_from(imports.len()).expect("fits").to_be_bytes());
+    for (intent, index) in imports {
+        framed(&mut out, intent);
+        out.extend_from_slice(&index.to_be_bytes());
+    }
+    out
+}
+
+/// Every malformed held-bundle or import-record section is a typed refusal, decided
+/// before the part it concerns is copied: a count over its bound, an empty, oversize, or
+/// truncated bundle, bundles past the byte bound together, an empty, oversize, or non-text
+/// handle, bundles or records out of order or repeated, a record naming a bundle the
+/// state does not hold, and trailing bytes. A well-formed section written by hand decodes.
+#[test]
+fn a_malformed_held_bundle_section_fails_closed() {
+    let (_, store) = minted_fixed("bundle-sections", 61);
+    let base = store.open().expect("opens").state().clone();
+    let prefix = before_bundles(&base);
+    let decode = |tail: Vec<u8>| {
+        let mut bytes = prefix.clone();
+        bytes.extend_from_slice(&tail);
+        decode_state(&bytes)
+    };
+    let corrupt = |what: &'static str| Err(KeystoreError::Corrupt(what));
+
+    // Anti-vacuity: the hand-written sections are the encoder's.
+    let good = decode(sections(
+        &[(b"inb_a", b"ab"), (b"inb_b", b"c")],
+        &[(b"in_x", 1)],
+    ))
+    .expect("a well-formed section decodes");
+    assert_eq!(good.imports()["in_x"], "inb_b");
+    assert_eq!(&*good.held_bundles()["inb_a"], b"ab");
+    let mut encoded = prefix.clone();
+    encoded.extend_from_slice(&sections(
+        &[(b"inb_a", b"ab"), (b"inb_b", b"c")],
+        &[(b"in_x", 1)],
+    ));
+    assert_eq!(encode_state(&good).expect("encodes"), encoded);
+
+    let mut over = (MAX_HELD_BUNDLES + 1).to_be_bytes().to_vec();
+    over.extend_from_slice(&0u32.to_be_bytes());
+    assert_eq!(decode(over), corrupt("the held bundles exceed their bound"));
+    let mut claim = 1u32.to_be_bytes().to_vec();
+    framed(&mut claim, b"inb_a");
+    claim.extend_from_slice(&(MAX_BUNDLE_LEN + 1).to_be_bytes());
+    assert_eq!(decode(claim), corrupt("a held bundle is empty or oversize"));
+    assert_eq!(
+        decode(sections(&[(b"inb_a", b"")], &[])),
+        corrupt("a held bundle is empty or oversize")
+    );
+    let mut truncated = sections(&[(b"inb_a", b"abcdef")], &[]);
+    truncated.truncate(truncated.len() - 7);
+    assert_eq!(decode(truncated), corrupt("a held bundle is truncated"));
+    assert_eq!(
+        decode(sections(&[(b"", b"a")], &[])),
+        corrupt("a bundle handle is truncated, oversize, or not text")
+    );
+    let long = vec![b'a'; MAX_HANDLE_LEN as usize + 1];
+    assert_eq!(
+        decode(sections(&[(&long, b"a")], &[])),
+        corrupt("a bundle handle is truncated, oversize, or not text")
+    );
+    assert_eq!(
+        decode(sections(&[(b"inb_\xff", b"a")], &[])),
+        corrupt("a bundle handle is truncated, oversize, or not text")
+    );
+    for pair in [
+        [(b"inb_b".as_slice(), b"a".as_slice()), (b"inb_a", b"b")],
+        [(b"inb_a", b"a"), (b"inb_a", b"b")],
+    ] {
+        assert_eq!(
+            decode(sections(&pair, &[])),
+            corrupt("the held bundles are not strictly ordered")
+        );
+    }
+    let mut records = (MAX_IMPORT_RECORDS + 1).to_be_bytes().to_vec();
+    let mut tail = 0u32.to_be_bytes().to_vec();
+    tail.append(&mut records);
+    assert_eq!(
+        decode(tail),
+        corrupt("the import records exceed their bound")
+    );
+    assert_eq!(
+        decode(sections(&[(b"inb_a", b"a")], &[(b"in_x", 1)])),
+        corrupt("an import record names a bundle the state does not hold")
+    );
+    assert_eq!(
+        decode(sections(&[], &[(b"in_x", 0)])),
+        corrupt("an import record names a bundle the state does not hold")
+    );
+    for pair in [
+        [(b"in_y".as_slice(), 0u16), (b"in_x", 0)],
+        [(b"in_x", 0), (b"in_x", 0)],
+    ] {
+        assert_eq!(
+            decode(sections(&[(b"inb_a", b"a")], &pair)),
+            corrupt("the import records are not strictly ordered")
+        );
+    }
+    let mut short = sections(&[(b"inb_a", b"a")], &[(b"in_x", 0)]);
+    short.pop();
+    assert_eq!(decode(short), corrupt("an import record is truncated"));
+    let mut trailing = sections(&[(b"inb_a", b"a")], &[]);
+    trailing.push(0);
+    assert_eq!(
+        decode(trailing),
+        corrupt("the state file has trailing bytes")
+    );
+
+    // The encoder refuses what the decoder would: an empty handle, and a record naming a
+    // bundle the state does not hold.
+    let empty = base.clone().with_held_bundles(
+        BTreeMap::from([(String::new(), Arc::from(b"a".as_slice()))]),
+        BTreeMap::new(),
+    );
+    assert!(matches!(
+        encode_state(&empty),
+        Err(KeystoreError::Corrupt(_))
+    ));
+    let dangling = base.clone().with_held_bundles(
+        BTreeMap::new(),
+        BTreeMap::from([("in_x".to_owned(), "inb_a".to_owned())]),
+    );
+    assert!(matches!(
+        encode_state(&dangling),
+        Err(KeystoreError::Corrupt(_))
+    ));
+}
+
+/// The byte bound over all held bundles is charged bundle by bundle, before the bundle
+/// that would pass it is copied: sixteen bundles at the size bound fill it exactly, and
+/// one more byte is refused.
+#[test]
+fn the_held_bundle_byte_bound_is_charged_before_the_bundle_is_read() {
+    let (_, store) = minted_fixed("bundle-bytes", 62);
+    let base = store.open().expect("opens").state().clone();
+    let mut bytes = before_bundles(&base);
+    let fill = usize::try_from(MAX_HELD_BUNDLE_BYTES / u64::from(MAX_BUNDLE_LEN)).expect("fits");
+    assert_eq!(
+        u64::from(MAX_BUNDLE_LEN) * fill as u64,
+        MAX_HELD_BUNDLE_BYTES
+    );
+    let content = vec![1u8; MAX_BUNDLE_LEN as usize];
+    bytes.extend_from_slice(&u32::try_from(fill + 1).expect("fits").to_be_bytes());
+    for at in 0..fill {
+        framed(&mut bytes, format!("inb_{at:02}").as_bytes());
+        framed(&mut bytes, &content);
+    }
+    drop(content);
+    // The last bundle claims one byte and carries none: the refusal is the byte bound,
+    // decided before the (absent) byte would be taken.
+    framed(&mut bytes, b"inb_zz");
+    bytes.extend_from_slice(&1u32.to_be_bytes());
+    assert!(bytes.len() as u64 <= MAX_STATE_FILE_LEN);
+    assert_eq!(
+        decode_state(&bytes).map(|_| ()),
+        Err(KeystoreError::Corrupt(
+            "the held bundles exceed their byte bound"
+        ))
+    );
+}
+
+/// A state file of the first version (bn-18w74) reads as the same state with no held
+/// bundle and no import record, and is written back as the second version. The first
+/// version never carries the bundle sections: with them it has trailing bytes.
+#[test]
+fn a_first_version_state_file_reads_as_one_holding_no_bundle() {
+    let (dir, mut store) = minted_fixed("first-version", 63);
+    let state = store.open().expect("opens").state().clone();
+    let mut v1 = before_bundles(&state);
+    v1[..STATE_MAGIC.len()].copy_from_slice(&STATE_MAGIC_V1);
+    assert_eq!(decode_state(&v1).expect("reads"), state);
+    rewrite(&dir.join(STATE_FILE), &v1);
+    assert_eq!(store.open().expect("opens").state(), &state);
+    SigningCustody::persist(&mut store, &state, None).expect("persists");
+    assert_eq!(
+        fs::read(dir.join(STATE_FILE)).expect("state")[..STATE_MAGIC.len()],
+        STATE_MAGIC
+    );
+    let mut with_sections = v1.clone();
+    with_sections.extend_from_slice(&[0u8; 8]);
+    assert_eq!(
+        decode_state(&with_sections).map(|_| ()),
+        Err(KeystoreError::Corrupt("the state file has trailing bytes"))
+    );
+}
+
+/// A held bundle travels with the state through `persist` and `open`, in the one state
+/// file (bn-3snfi): nothing else is written. The keystore holds bytes; the daemon
+/// recomputes their identity at launch (`continuumd`'s `bundle_custody.rs`).
+#[test]
+fn held_bundles_persist_in_the_state_file_and_nothing_else() {
+    let (dir, mut store) = minted_fixed("bundle-persist", 64);
+    let state = store.open().expect("opens").state().clone();
+    let files_before = snapshot(&dir).len();
+    let next = state.with_held_bundles(
+        BTreeMap::from([("inb_q".to_owned(), Arc::from(vec![9u8; 4096].as_slice()))]),
+        BTreeMap::from([("in_q".to_owned(), "inb_q".to_owned())]),
+    );
+    SigningCustody::persist(&mut store, &next, None).expect("persists");
+    assert_eq!(store.open().expect("reopens").state(), &next);
+    assert_eq!(
+        snapshot(&dir).len(),
+        files_before,
+        "no file beside the state"
     );
 }

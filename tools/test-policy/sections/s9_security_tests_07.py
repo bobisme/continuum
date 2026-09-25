@@ -42,6 +42,10 @@ docs/19 §9's seventh bullet names two things in one phrase. Searched independen
    registry's signers) through the `SigningCustody` capability, atomically, and
    `Builder::launch_signing` builds a daemon from it, re-validating everything before a
    key is used; `crates/continuumd/tests/signing_custody.rs` drives each restart path.
+   bn-3snfi adds the bundles an import verified and its import records to the same
+   state, committed in the import's one custody write and re-validated at launch
+   (identity recomputed, signature authenticated, links attested, records resolved,
+   every adopted link carried); `crates/continuumd/tests/bundle_custody.rs` drives it.
    What stays out of scope is stated in `ABSENCE`, and none of it is verification.
 2. **Content-addressed provenance — real, landed, non-stub.** Two production
    mechanisms bind an artifact's claimed identity to its actual bytes and reject a
@@ -119,6 +123,7 @@ RECEIPT_SIGNING_PATH = ROOT / "crates/continuumd/tests/receipt_signing.rs"
 DAEMON_SIGNING_RS_PATH = ROOT / "crates/continuumd/src/daemon/signing.rs"
 DAEMON_SIGNING_PATH = ROOT / "crates/continuumd/tests/daemon_signing.rs"
 CUSTODY_PATH = ROOT / "crates/continuumd/tests/signing_custody.rs"
+BUNDLE_CUSTODY_PATH = ROOT / "crates/continuumd/tests/bundle_custody.rs"
 CARGO_TOML_PATHS = sorted((ROOT / "crates").glob("*/Cargo.toml")) + [ROOT / "Cargo.toml"]
 
 OBLIGATIONS = {
@@ -179,10 +184,16 @@ _BOUNDARY_07_SIGNATURE = (
     "RFC 8032 §7.1 known-answer vectors and a pinned envelope signature."
 )
 _ABSENCE_07 = (
-    "Outside this obligation, stated so it is not read as covered. Held intent bundles "
-    "and the record of which contracts an import entered are not persisted: after a "
-    "restart, `intent.accept` naming a bundle held before it fails closed "
-    "(`AcceptanceChainInvalid`) until the bundle is imported again. A verifier that "
+    "Outside this obligation, stated so it is not read as covered. Since bn-3snfi a "
+    "bundle an import verified, and the record of which contracts each import entered, "
+    "persist in the signing custody and are re-validated at launch, so `intent.accept` "
+    "naming a bundle held before a restart is decided as before it; two things still do "
+    "not persist. A bundle this daemon exported and nobody imported is held in memory only "
+    "(`intent.export_bundle` has no `OutcomeUnknown` to answer an unconfirmed write with), "
+    "so after a restart an acceptance naming it fails closed until it is imported. The "
+    "intent registry itself is not persisted: a restart re-enters every recorded import at "
+    "`proposed`, a rejected one included, exactly as importing its bundle again would, and "
+    "it is still accepted only through its bundle. A verifier that "
     "never received a bundle carrying a revocation cannot know of it; adoption is "
     "monotone, so once any bundle carries it the revocation is never unlearned. research/35 "
     "now names an eleventh red-team class, `forged or unattested signing lineage` "
@@ -374,6 +385,20 @@ RUST_TESTS: list[tuple[Path, str]] = [
     (CUSTODY_PATH, "a_custody_daemon_refuses_signing_writes_below_3_9"),
     (CUSTODY_PATH, "every_record_keeps_its_link_or_entry_across_a_restart"),
     (CUSTODY_PATH, "a_compromised_own_key_without_its_revocation_link_is_refused"),
+    # Held intent bundles and import records across a restart (bn-3snfi).
+    (CUSTODY_PATH, "an_adopted_link_no_held_bundle_carries_is_refused"),
+    (BUNDLE_CUSTODY_PATH, "an_imported_bundle_survives_a_restart_and_its_proposal_accepts"),
+    (BUNDLE_CUSTODY_PATH, "a_reimport_after_a_restart_changes_nothing_and_writes_nothing"),
+    (BUNDLE_CUSTODY_PATH, "every_import_answer_agrees_with_every_state_a_crash_can_leave"),
+    (BUNDLE_CUSTODY_PATH, "a_tampered_held_bundle_or_import_record_is_refused_at_launch"),
+    (BUNDLE_CUSTODY_PATH, "an_exported_bundle_is_recorded_only_once_it_is_imported"),
+    (BUNDLE_CUSTODY_PATH, "a_rejected_import_re_enters_at_proposed_after_a_restart_and_needs_its_bundle"),
+    (BUNDLE_CUSTODY_PATH, "a_replayed_import_is_answered_from_the_ledger_and_writes_nothing"),
+    (BUNDLE_CUSTODY_PATH, "an_import_below_3_9_is_refused_before_anything_is_recorded"),
+    (KEYSTORE_TESTS_PATH, "a_malformed_held_bundle_section_fails_closed"),
+    (KEYSTORE_TESTS_PATH, "the_held_bundle_byte_bound_is_charged_before_the_bundle_is_read"),
+    (KEYSTORE_TESTS_PATH, "a_first_version_state_file_reads_as_one_holding_no_bundle"),
+    (KEYSTORE_TESTS_PATH, "held_bundles_persist_in_the_state_file_and_nothing_else"),
 ]
 
 
@@ -559,6 +584,11 @@ _SIGNING_PATHS: dict[str, list[str]] = {
         "return Err(KeystoreError::SymlinkedStore);",
         "if count > MAX_AUDIT_RECORDS {",
         ".replay_record(parsed)",
+        # bn-3snfi: held bundles and import records in the one state file, bounded and
+        # charged before each bundle is copied.
+        "fn encode_bundles(out: &mut Vec<u8>, state: &SigningCustodyState)",
+        "if total > MAX_HELD_BUNDLE_BYTES {",
+        "let count = self.count(MAX_IMPORT_RECORDS, \"the import records exceed their bound\")?;",
     ],
     "crates/continuumd/src/daemon/mod.rs": [
         "pub fn receipt_signer(mut self, signer: ReceiptSigner)",
@@ -569,6 +599,8 @@ _SIGNING_PATHS: dict[str, list[str]] = {
         "if !errors::defined_at(",
         "let signer = ReceiptSigner::restored(key, state).map_err(LaunchRefusal::Install)?;",
         "signing::validate_custody(&state, signer.identity()).map_err(InstallRefusal::Custody)?;",
+        # bn-3snfi: held bundles and import records are re-validated before the sweep.
+        "let restored = intent::restore_imports(&self.services, &bundles, &imports, &adopted)",
     ],
     # bn-3glnv: the signing authority — the one production verifier outside
     # `continuum-evidence`, and the receipt, bundle, and pack signers.
@@ -600,6 +632,9 @@ _SIGNING_PATHS: dict[str, list[str]] = {
         "authority.room(4, Reserve::HeldKey)?;",
         "if entry.contract != claim.contract {",
         "fn holds_other_bundle(",
+        # bn-3snfi: an import's facts, bundle, and records commit as one custody write.
+        "pub(crate) fn commit_import(",
+        "match self.commit(checkpoint, held.as_ref(), None) {",
     ],
     # cr-2unxyh: the RFC 0037 A1 acceptance chain — the statement each element signs and
     # the in-order check; its verifier is `signing.rs`'s.

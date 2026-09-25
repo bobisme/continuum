@@ -1,0 +1,48 @@
+[change]
+bone = "bn-3snfi"
+author = "continuum-dev"
+summary = "Held intent bundles and import records persist across restart (plan 4.2.1, ADR-0054): continuum-evidence's SigningCustodyState gains the held bundles (handle and signed bytes) and the import records; continuumd commits an import's adopted facts, bundle, and records as one custody write and re-validates them at launch before the sweep, re-entering each recorded contract at proposed; continuum-security's keystore state file version 2 records them with bounded, charged-before-copy reads"
+
+[semantic]
+covers = [
+  "crates/continuum-evidence/src/signing.rs",
+]
+reference_tests = [
+  "crates/continuumd/tests/bundle_custody.rs::an_imported_bundle_survives_a_restart_and_its_proposal_accepts",
+  "crates/continuumd/tests/bundle_custody.rs::every_import_answer_agrees_with_every_state_a_crash_can_leave",
+  "crates/continuumd/tests/bundle_custody.rs::a_tampered_held_bundle_or_import_record_is_refused_at_launch",
+  "crates/continuumd/tests/bundle_custody.rs::an_exported_bundle_is_recorded_only_once_it_is_imported",
+  "crates/continuumd/tests/bundle_custody.rs::a_rejected_import_re_enters_at_proposed_after_a_restart_and_needs_its_bundle",
+  "crates/continuumd/tests/bundle_custody.rs::a_replayed_import_is_answered_from_the_ledger_and_writes_nothing",
+  "crates/continuumd/tests/bundle_custody.rs::an_import_below_3_9_is_refused_before_anything_is_recorded",
+  "crates/continuumd/tests/signing_custody.rs::an_adopted_link_no_held_bundle_carries_is_refused",
+  "crates/continuumd/tests/signing_custody.rs::the_keystore_bounds_are_the_daemons",
+  "crates/continuum-security/tests/keystore.rs::a_malformed_held_bundle_section_fails_closed",
+  "crates/continuum-security/tests/keystore.rs::the_held_bundle_byte_bound_is_charged_before_the_bundle_is_read",
+  "crates/continuum-security/tests/keystore.rs::a_first_version_state_file_reads_as_one_holding_no_bundle",
+  "crates/continuum-security/tests/keystore.rs::held_bundles_persist_in_the_state_file_and_nothing_else",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-security/tests/keystore.rs::a_custody_state_survives_the_serialization_round_trip", relation = "serialization round trip" },
+  { test = "crates/continuumd/tests/bundle_custody.rs::a_reimport_after_a_restart_changes_nothing_and_writes_nothing", relation = "snapshot restore versus root replay" },
+]
+differential_tests = [
+  { test = "crates/continuumd/tests/bundle_custody.rs::the_restored_bundles_match_the_store_and_the_library", oracle = "continuum-security", subject = "continuumd" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers signing, intent bundles, key custody, or provenance verification; this change makes held bundles and import records survive a restart and keeps TEST-9-07 enforced with more bound evidence, neither of which is a docs/18 claim row"
+
+[semantic.schemas]
+updated = []
+reason = "no JSON schema document changes and no wire change: the keystore state file is a private on-disk format of continuum-security, not a machine contract under notes/plan/schemas. intent.import_bundle already declares PublicationAborted and OutcomeUnknown at 3.9, and a custody daemon already refuses it below 3.9; no other operation's error set changes, because intent.export_bundle and intent.reject write nothing to the custody"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-evidence's SigningCustodyState gains two additive parts (held_bundles, imports) with with_held_bundles; no existing encoding, signature, standing rule, or verdict changes. The keystore writes state file version 2 (CTMSTA02) and still reads version 1 (CTMSTA01) as a state holding no bundle. continuumd's SignedBundle now shares its bytes and charges its whole content against the held-bundle byte bound (twelve frame bytes more per bundle than before); a bundle handle longer than 256 bytes is refused as MalformedRequest before it is held"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-2ixfwd"
+verdict = "approved"

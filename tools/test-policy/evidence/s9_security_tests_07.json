@@ -11,7 +11,7 @@
   "module": "tools/test-policy/sections/s9_security_tests_07.py",
   "requirements": {
     "TEST-9-07": {
-      "absence": "Outside this obligation, stated so it is not read as covered. Held intent bundles and the record of which contracts an import entered are not persisted: after a restart, `intent.accept` naming a bundle held before it fails closed (`AcceptanceChainInvalid`) until the bundle is imported again. A verifier that never received a bundle carrying a revocation cannot know of it; adoption is monotone, so once any bundle carries it the revocation is never unlearned. research/35 now names an eleventh red-team class, `forged or unattested signing lineage` (bn-1uspo): its three-per-outcome floor runs inside the generic corpus at protocol 3.2, on operations the corpus already served, because a `Case` names no protocol version and the six signing-wire operations are refused below 3.8 by the codec, not the capability check the corpus measures. `daemon_signing.rs`'s `every_signing_wire_operation_refuses_or_answers_typed_for_an_unprivileged_reader` and `the_signing_wires_refusal_does_not_move_with_a_hostile_corpus_payload` drive the six signing-wire operations and `intent.import_bundle` directly, at 3.8, against the real daemon, with the corpus's own payloads; `g2_injection_corpus_evidence.rs`'s `SIGNING_WIRE_PROBES` still stands in for them there, because that file's shared runner fixes protocol 3.2 for the whole corpus in one pass and has no per-case protocol floor \u2014 closing that gap is a follow-up. `check.rs`'s `envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` still states that the certificate checker cannot recompute a relabeled digest; that is by design (INV-004), and the certificate checker does not link the signature crate.",
+      "absence": "Outside this obligation, stated so it is not read as covered. Since bn-3snfi a bundle an import verified, and the record of which contracts each import entered, persist in the signing custody and are re-validated at launch, so `intent.accept` naming a bundle held before a restart is decided as before it; two things still do not persist. A bundle this daemon exported and nobody imported is held in memory only (`intent.export_bundle` has no `OutcomeUnknown` to answer an unconfirmed write with), so after a restart an acceptance naming it fails closed until it is imported. The intent registry itself is not persisted: a restart re-enters every recorded import at `proposed`, a rejected one included, exactly as importing its bundle again would, and it is still accepted only through its bundle. A verifier that never received a bundle carrying a revocation cannot know of it; adoption is monotone, so once any bundle carries it the revocation is never unlearned. research/35 now names an eleventh red-team class, `forged or unattested signing lineage` (bn-1uspo): its three-per-outcome floor runs inside the generic corpus at protocol 3.2, on operations the corpus already served, because a `Case` names no protocol version and the six signing-wire operations are refused below 3.8 by the codec, not the capability check the corpus measures. `daemon_signing.rs`'s `every_signing_wire_operation_refuses_or_answers_typed_for_an_unprivileged_reader` and `the_signing_wires_refusal_does_not_move_with_a_hostile_corpus_payload` drive the six signing-wire operations and `intent.import_bundle` directly, at 3.8, against the real daemon, with the corpus's own payloads; `g2_injection_corpus_evidence.rs`'s `SIGNING_WIRE_PROBES` still stands in for them there, because that file's shared runner fixes protocol 3.2 for the whole corpus in one pass and has no per-case protocol floor \u2014 closing that gap is a follow-up. `check.rs`'s `envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` still states that the certificate checker cannot recompute a relabeled digest; that is by design (INV-004), and the certificate checker does not link the signature crate.",
       "boundaries": [
         "`_check_publication_attest` ports `PublishedName::names`/`Published::attest` (`publication.rs`: `fn names(&self, handle: &ArtifactHandle) -> bool { self == handle }`) as plain equality on (class, identity) \u2014 the real predicate needs no hash to state, so the port is exact, not approximate. `_check_identity_outcome` ports the store's convergence/collision/distinctness trichotomy structurally (same content implies same identity; different content sharing a claimed identity is a collision that must abort; different content with different identity stands as two artifacts) \u2014 this is the property the real `ContentIdentifier::identify` doc contract states ('a pure function \u2026 two calls with equal arguments \u2026 must return equal handles', INV-005/INV-006) and that `an_identity_collision_aborts_rather_than_conflating_two_artifacts` and `distinct_artifacts_never_share_identity` corroborate; it is independent of which hash algorithm the real `ContentIdentifier` fixture uses; this module never computes one. `_check_digest_token` ports `Digest256::from_token` (`identity.rs`) as a length-and-character-class check, drift-tied by extracting `DIGEST_BITS` at run time and confirming the `DIGEST_LEN * 2`/`DIGEST_BITS / 8` arithmetic phrases are still present, so a change to the digest width is noticed, not just a change to the accept/reject outcome. What this cannot do: compute a real `blake3-256` digest, run `Value::encode`'s canonical-encoding rules, or exercise `ReferenceStore` concurrency itself (no cargo) \u2014 only the structural properties named above, which is what the named real Rust tests exercise for real.",
         "`_check_signature_verdict` ports `SignatureVerifier::check` (`signing.rs`) as its decision order over eight observable facts \u2014 present, well-formed, kind matches, authentic under the claimed key, registry current against the authoritative head, signer standing known, signer not revoked, signer allowed for the kind \u2014 and the two policies over it: `verify` (any failure is typed unverified provenance with the first failing reason) and `verify_for_ci_acceptance` (any failure is `AcceptanceChainInvalid`). The port is exact about order and outcome, and `_check_signing_drift` confirms at run time that the real `fn check` body still tests those facts in that order and that the real verifier still calls `verify_strict`. What it cannot do: compute an Ed25519 signature or a canonical encoding (no cargo). That is what the named Rust tests do for real, including the RFC 8032 \u00a77.1 known-answer vectors and a pinned envelope signature."
@@ -27,9 +27,9 @@
         "outcome_converged": 2,
         "outcome_distinct": 2,
         "production_signing_callers": 4,
-        "production_signing_phrases_bound": 62,
-        "rust_tests_named": 161,
-        "rust_tests_present": 161,
+        "production_signing_phrases_bound": 68,
+        "rust_tests_named": 174,
+        "rust_tests_present": 174,
         "signature_cases": 512,
         "signature_ci_rejected": 255,
         "signature_unverified": 255,
@@ -948,6 +948,71 @@
           "path": "crates/continuumd/tests/signing_custody.rs",
           "present": true,
           "test": "a_compromised_own_key_without_its_revocation_link_is_refused"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "an_adopted_link_no_held_bundle_carries_is_refused"
+        },
+        {
+          "path": "crates/continuumd/tests/bundle_custody.rs",
+          "present": true,
+          "test": "an_imported_bundle_survives_a_restart_and_its_proposal_accepts"
+        },
+        {
+          "path": "crates/continuumd/tests/bundle_custody.rs",
+          "present": true,
+          "test": "a_reimport_after_a_restart_changes_nothing_and_writes_nothing"
+        },
+        {
+          "path": "crates/continuumd/tests/bundle_custody.rs",
+          "present": true,
+          "test": "every_import_answer_agrees_with_every_state_a_crash_can_leave"
+        },
+        {
+          "path": "crates/continuumd/tests/bundle_custody.rs",
+          "present": true,
+          "test": "a_tampered_held_bundle_or_import_record_is_refused_at_launch"
+        },
+        {
+          "path": "crates/continuumd/tests/bundle_custody.rs",
+          "present": true,
+          "test": "an_exported_bundle_is_recorded_only_once_it_is_imported"
+        },
+        {
+          "path": "crates/continuumd/tests/bundle_custody.rs",
+          "present": true,
+          "test": "a_rejected_import_re_enters_at_proposed_after_a_restart_and_needs_its_bundle"
+        },
+        {
+          "path": "crates/continuumd/tests/bundle_custody.rs",
+          "present": true,
+          "test": "a_replayed_import_is_answered_from_the_ledger_and_writes_nothing"
+        },
+        {
+          "path": "crates/continuumd/tests/bundle_custody.rs",
+          "present": true,
+          "test": "an_import_below_3_9_is_refused_before_anything_is_recorded"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_malformed_held_bundle_section_fails_closed"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "the_held_bundle_byte_bound_is_charged_before_the_bundle_is_read"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_first_version_state_file_reads_as_one_holding_no_bundle"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "held_bundles_persist_in_the_state_file_and_nothing_else"
         }
       ],
       "status": "enforced",

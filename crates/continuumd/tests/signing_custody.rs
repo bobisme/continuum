@@ -1028,6 +1028,66 @@ fn no_launch_error_or_debug_output_carries_key_material() {
 fn the_keystore_bounds_are_the_daemons() {
     assert_eq!(MAX_AUDIT_RECORDS as usize, DAEMON_RECORDS);
     assert_eq!(MAX_LINKS as usize, MAX_BUNDLE_LINKS);
+    // bn-3snfi: the held-bundle sections.
+    use continuum_security::keystore as store;
+    use continuumd::daemon::{bundle, signing};
+    assert_eq!(store::MAX_HELD_BUNDLES as usize, signing::MAX_HELD_BUNDLES);
+    assert_eq!(store::MAX_BUNDLE_LEN as usize, bundle::MAX_BUNDLE_LEN);
+    assert_eq!(
+        store::MAX_HELD_BUNDLE_BYTES as usize,
+        signing::MAX_HELD_BUNDLE_BYTES
+    );
+    assert_eq!(
+        store::MAX_IMPORT_RECORDS as usize,
+        signing::MAX_HELD_BUNDLES * bundle::MAX_BUNDLE_CONTRACTS
+    );
+    assert_eq!(
+        store::MAX_HANDLE_LEN as usize,
+        bundle::MAX_INTENT_HANDLE_LEN
+    );
+    assert_eq!(
+        store::MAX_HANDLE_LEN as usize,
+        bundle::MAX_BUNDLE_HANDLE_LEN
+    );
+}
+
+/// bn-3snfi: an adoption holds its bundle in the same custody write, so every adopted link
+/// is carried by a held bundle. A state whose bundle is gone while its adopted links stay
+/// is refused at launch, and nothing is swept; the untouched state launches.
+#[test]
+fn an_adopted_link_no_held_bundle_carries_is_refused() {
+    let dir = scratch("uncarried");
+    let (bundle, pins, _, _) = peer_bundle(170);
+    let mut first = launch(&dir, 30, &pins).expect("first use");
+    assert_eq!(first.import(bundle).0, SignatureOutcome::Verified);
+    let state = first.snapshot();
+    assert_eq!(state.adopted_links().len(), 2);
+    assert_eq!(
+        state.held_bundles().len(),
+        1,
+        "the bundle is held with its facts"
+    );
+    drop(first);
+    let original = files(&dir);
+    plant(
+        &dir,
+        &state
+            .clone()
+            .with_held_bundles(BTreeMap::new(), BTreeMap::new()),
+    );
+    let planted = files(&dir);
+    assert_eq!(
+        launch(&dir, 31, &pins).map(|_| ()),
+        Err(LaunchRefusal::Install(InstallRefusal::Custody(
+            CustodyRefusal::UncarriedLink
+        )))
+    );
+    assert_eq!(files(&dir), planted, "nothing was swept");
+    rewrite(&dir.join(STATE_FILE), &original[STATE_FILE]);
+    assert_eq!(
+        launch(&dir, 32, &pins).expect("relaunches").snapshot(),
+        state
+    );
 }
 
 /// Differential: the daemon's custody state after a first-use mint, a rotation, and the

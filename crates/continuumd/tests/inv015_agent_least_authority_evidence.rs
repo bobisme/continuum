@@ -1461,7 +1461,12 @@ mod no_widening {
     /// `continuum_evidence::signing::SigningCustody` capability a deployment hands to
     /// `Builder::launch_signing`; no `continuumd` source names this crate, and the effects
     /// stay the filesystem alone, inside the one store directory (leg 2 below).
-    const SECURITY_PUBLIC_SURFACE: [&str; 93] = [
+    ///
+    /// bn-3snfi re-derived it for the state file's second version, which also records the
+    /// held intent bundles and the import records: the new items are the format's magic
+    /// numbers and its bounds, constants only. No function, effect, or path was added; the
+    /// bundles travel inside the one state file through the same `persist` and `open`.
+    const SECURITY_PUBLIC_SURFACE: [&str; 99] = [
         "pub carrier: &'static str,",
         "pub const ALL: [Self; 11] = [",
         "pub const ALL: [Self; 3] = [",
@@ -1477,13 +1482,19 @@ mod no_widening {
         "pub const LOCK_FILE: &str = \"signing.lock\";",
         "pub const MAX_AUDIT_RECORDS: u32 = 4096;",
         "pub const MAX_AUDIT_RECORD_LEN: u32 = 1024;",
+        "pub const MAX_BUNDLE_LEN: u32 = 4 << 20;",
+        "pub const MAX_HANDLE_LEN: u32 = 256;",
+        "pub const MAX_HELD_BUNDLES: u32 = 1024;",
+        "pub const MAX_HELD_BUNDLE_BYTES: u64 = 64 << 20;",
+        "pub const MAX_IMPORT_RECORDS: u32 = 1024 * 64;",
         "pub const MAX_LINKS: u32 = 4096;",
         "pub const MAX_PAYLOAD_BYTES: usize = 4096;",
         "pub const MAX_STATE_FILE_LEN: u64 = {",
         "pub const OS_ENTROPY_PATH: &str = \"/dev/urandom\";",
         "pub const PENDING_FILE: &str = \"signing-pending\";",
         "pub const STATE_FILE: &str = \"signing-state\";",
-        "pub const STATE_MAGIC: [u8; 8] = *b\"CTMSTA01\";",
+        "pub const STATE_MAGIC: [u8; 8] = *b\"CTMSTA02\";",
+        "pub const STATE_MAGIC_V1: [u8; 8] = *b\"CTMSTA01\";",
         "pub const STATE_TEMP_FILE: &str = \"signing-state.tmp\";",
         "pub const fn bullet(self) -> &'static str {",
         "pub const fn bullet(self) -> &'static str {",

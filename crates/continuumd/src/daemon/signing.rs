@@ -36,6 +36,18 @@
 //! keys are recorded apart from the registry's signers, so a key the registry learned from
 //! a bundle is never taken as its own.
 //!
+//! The bundles an import verified, and its import records, are part of the same state
+//! (bn-3snfi): an import commits its adopted facts, the bundle, and the records of the
+//! contracts it entered in one custody write ([`SigningAuthority::commit_import`]), and a
+//! restart checks them ([`restore_imports`](super::intent::restore_imports)), holds them
+//! again, and re-enters every recorded contract at `proposed`. So `intent.accept` naming a
+//! bundle held before a restart is decided as it was before it. A bundle this daemon
+//! exported and nobody imported stays in memory only: `intent.export_bundle` has no
+//! `OutcomeUnknown` to answer an unconfirmed write with. A rejection is not recorded
+//! either (`intent.reject` has no custody failure to answer); the registry itself is not
+//! persisted, so a restart re-enters a rejected import exactly as importing its bundle
+//! again would.
+//!
 //! # The operations, and the rules they keep
 //!
 //! | Operation | Level | What it does |
@@ -63,7 +75,7 @@
 //! fact about its signer's own lineage, and only the facts that cannot widen trust are
 //! applied, only when the bundle verifies under them with an active signer, and only after
 //! every other check of the import passed ([`SigningAuthority::verify_bundle`],
-//! [`SigningAuthority::adopt`]). A bundle never changes the standing of another lineage's
+//! [`SigningAuthority::commit_import`]). A bundle never changes the standing of another lineage's
 //! signer, nor of any key this daemon minted. `intent.accept` reaches
 //! [`SignatureVerifier::verify_for_ci_acceptance`] through
 //! [`SigningAuthority::check_acceptance_chain`], which fails closed and also refuses a
@@ -71,6 +83,7 @@
 
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use continuum_evidence::actor::ActorId as SigningActor;
 use continuum_evidence::signing::{
@@ -435,6 +448,17 @@ pub enum CustodyRefusal {
     /// A pre-signed revocation is not the retired own key's own revocation, or that key is
     /// held, not retired, or not this daemon's.
     Presigned,
+    /// A held bundle is over a held-bundle bound, is not a well-formed bundle, is not the
+    /// identity it is recorded under, is not authenticated by its own signature, or
+    /// carries a link not signed by every key it concerns (bn-3snfi).
+    HeldBundle,
+    /// An import record names a bundle the state does not hold, a contract that bundle
+    /// does not export, or a contract that is not well formed or not its identity
+    /// (bn-3snfi).
+    ImportRecord,
+    /// An adopted link is carried by no held bundle: every adoption holds the bundle it
+    /// came from in the same custody write (bn-3snfi).
+    UncarriedLink,
 }
 
 /// The daemon's view of a [`SigningCustody`]: its error erased, its commit phase kept
@@ -486,7 +510,7 @@ impl KeyEntropy for Capture<'_> {
 /// How a change passed its custody's commit point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
-enum Recorded {
+pub(crate) enum Recorded {
     /// Durable: the operation succeeds.
     Confirmed,
     /// Past the commit point, durability unknown: the change stays in memory (for reads
@@ -495,7 +519,7 @@ enum Recorded {
 }
 
 impl Recorded {
-    fn answer(self) -> Result<(), Fault> {
+    pub(crate) fn answer(self) -> Result<(), Fault> {
         match self {
             Self::Confirmed => Ok(()),
             Self::Unconfirmed => Err(outcome_unknown()),
@@ -536,9 +560,18 @@ pub struct SigningAuthority {
     entropy: Option<Box<dyn KeyEntropy + Send + Sync>>,
     bundles: BTreeMap<IntentBundleHandle, SignedBundle>,
     held_bytes: usize,
-    /// The contracts an import entered, each with the verified bundle that entered it. Such
-    /// a proposal is accepted only through a bundle, never by a local acceptance.
+    /// The held bundles an import verified: the ones the custody records (bn-3snfi). A
+    /// bundle this daemon exported and nobody imported is held in memory only.
+    imported_bundles: BTreeSet<IntentBundleHandle>,
+    /// The contracts an import entered, each with the verified bundle that entered it, as
+    /// long as the proposal is in the registry. Such a proposal is accepted only through a
+    /// bundle, never by a local acceptance.
     imported: BTreeMap<IntentHandle, IntentBundleHandle>,
+    /// The import records the custody keeps (bn-3snfi): each contract an import entered,
+    /// with the bundle it last entered from. A rejection leaves the registry and
+    /// [`imported`](Self::imported), not this, so a restart re-enters every recorded
+    /// contract at `proposed`, exactly as importing its bundle again would.
+    import_records: BTreeMap<IntentHandle, IntentBundleHandle>,
     /// Refusals because a content-addressed handle already named byte-different content
     /// (an `in_*` or `inb_*` identity collision). Counted, never logged with the content.
     identity_collisions: u64,
@@ -617,7 +650,9 @@ impl Default for SigningAuthority {
             entropy: None,
             bundles: BTreeMap::new(),
             held_bytes: 0,
+            imported_bundles: BTreeSet::new(),
             imported: BTreeMap::new(),
+            import_records: BTreeMap::new(),
             own: BTreeMap::new(),
             presigned: BTreeMap::new(),
             own_links: Vec::new(),
@@ -646,6 +681,8 @@ impl fmt::Debug for SigningAuthority {
             .field("entropy", &self.entropy.is_some())
             .field("bundles", &self.bundles.len())
             .field("imported", &self.imported.len())
+            .field("imported_bundles", &self.imported_bundles.len())
+            .field("import_records", &self.import_records.len())
             .field("own", &self.own.len())
             .field("presigned", &self.presigned.len())
             .field("own_links", &self.own_links.len())
@@ -850,8 +887,23 @@ impl SigningAuthority {
         self.custody_failed
     }
 
-    /// The custody state this authority would persist with `held` as its held key.
+    /// The custody state this authority would persist with `held` as its held key: the
+    /// bundles an import verified, by their shared bytes, and the import records with it.
     fn custody_state(&self, held: Option<&SignerIdentity>) -> SigningCustodyState {
+        let bundles = self
+            .imported_bundles
+            .iter()
+            .filter_map(|handle| {
+                self.bundles
+                    .get(handle)
+                    .map(|bundle| (handle.as_str().to_owned(), Arc::clone(bundle.content())))
+            })
+            .collect();
+        let imports = self
+            .import_records
+            .iter()
+            .map(|(intent, bundle)| (intent.as_str().to_owned(), bundle.as_str().to_owned()))
+            .collect();
         SigningCustodyState::from_parts(
             self.registry.clone(),
             held.cloned(),
@@ -861,6 +913,7 @@ impl SigningAuthority {
             self.presigned.clone(),
         )
         .with_local_revocations(self.local_revocations.clone())
+        .with_held_bundles(bundles, imports)
     }
 
     /// The custody state as it stands: what a restart would reload.
@@ -1340,7 +1393,7 @@ impl SigningAuthority {
 
     /// Verify a bundle's signature under local policy narrowed by the set it pins, against
     /// this registry with the bundle's facts applied. Changes nothing: the caller commits
-    /// the returned [`Adoption`] with [`adopt`](Self::adopt) once every other check passed,
+    /// the returned [`Adoption`] with [`commit_import`](Self::commit_import) once every other check passed,
     /// so a refusal after this point has changed nothing either.
     ///
     /// The facts are kept only when the signer is active: a retired key's old signature
@@ -1388,29 +1441,115 @@ impl SigningAuthority {
         })
     }
 
-    /// Commit an [`Adoption`] [`verify_bundle`](Self::verify_bundle) built. Monotone: its
-    /// facts were appended to a copy of this registry, each a legal transition. Returns
-    /// how many facts it recorded.
+    fn apply(&mut self, registry: SigningRegistry, head: RegistryHead, links: Vec<SignerLink>) {
+        self.registry = registry;
+        self.head = head;
+        self.reindex();
+        for link in links {
+            self.keep_adopted_link(link);
+        }
+    }
+
+    /// Commit a verified import as one custody write (bn-3snfi): the standing facts its
+    /// [`Adoption`] applies, the bundle — held and recorded as imported — and the import
+    /// records of the contracts it `entered`. Without a custody, or when none of it is new,
+    /// nothing is written.
+    ///
+    /// Returns how many facts it recorded, whether the bundle was newly held, and how the
+    /// write passed its commit point: an [`Recorded::Unconfirmed`] change is kept, like
+    /// every unconfirmed signing change, and the caller answers `OutcomeUnknown` after
+    /// completing it in memory.
     ///
     /// # Errors
     ///
-    /// `PublicationAborted` when the custody refuses the change, or refused an earlier one;
-    /// nothing is then adopted.
-    pub(crate) fn adopt(&mut self, adoption: Adoption) -> Result<u32, Fault> {
-        if adoption.applied == 0 {
-            return Ok(0);
+    /// `PublicationAborted` when the custody refuses the write, or refused an earlier one;
+    /// nothing is then adopted, held, or recorded.
+    pub(crate) fn commit_import(
+        &mut self,
+        adoption: Adoption,
+        handle: &IntentBundleHandle,
+        bundle: SignedBundle,
+        entered: &[IntentHandle],
+    ) -> Result<(u32, bool, Recorded), Fault> {
+        let applied = adoption.applied;
+        let durable_change = applied > 0
+            || !self.imported_bundles.contains(handle)
+            || entered
+                .iter()
+                .any(|intent| self.import_records.get(intent) != Some(handle));
+        if durable_change {
+            self.writable()?;
         }
-        self.writable()?;
+        // What the change adds, so a refused write can take exactly that back without
+        // copying any held bundle.
         let checkpoint = self.checkpoint();
-        self.registry = adoption.registry;
-        self.head = adoption.head;
-        self.reindex();
-        for link in adoption.links {
-            self.keep_adopted_link(link);
+        let was_imported = self.imported_bundles.contains(handle);
+        let previous_records: Vec<(IntentHandle, Option<IntentBundleHandle>)> = entered
+            .iter()
+            .map(|intent| (intent.clone(), self.import_records.get(intent).cloned()))
+            .collect();
+        let previous_live: Vec<(IntentHandle, Option<IntentBundleHandle>)> = entered
+            .iter()
+            .map(|intent| (intent.clone(), self.imported.get(intent).cloned()))
+            .collect();
+
+        if applied > 0 {
+            self.apply(adoption.registry, adoption.head, adoption.links);
+        }
+        let newly_held = self.hold(handle.clone(), bundle);
+        self.imported_bundles.insert(handle.clone());
+        for intent in entered {
+            self.import_records.insert(intent.clone(), handle.clone());
+            self.imported
+                .entry(intent.clone())
+                .or_insert_with(|| handle.clone());
+        }
+        if !durable_change {
+            return Ok((applied, newly_held, Recorded::Confirmed));
         }
         let held = self.held().cloned();
-        self.commit(checkpoint, held.as_ref(), None)?.answer()?;
-        Ok(adoption.applied)
+        match self.commit(checkpoint, held.as_ref(), None) {
+            Ok(recorded) => Ok((applied, newly_held, recorded)),
+            Err(fault) => {
+                // `commit` restored the registry side; restore the bundle side.
+                if newly_held {
+                    if let Some(bundle) = self.bundles.remove(handle) {
+                        self.held_bytes = self.held_bytes.saturating_sub(bundle.charged_len());
+                    }
+                }
+                if !was_imported {
+                    self.imported_bundles.remove(handle);
+                }
+                for (intent, previous) in previous_records {
+                    match previous {
+                        Some(bundle) => self.import_records.insert(intent, bundle),
+                        None => self.import_records.remove(&intent),
+                    };
+                }
+                for (intent, previous) in previous_live {
+                    match previous {
+                        Some(bundle) => self.imported.insert(intent, bundle),
+                        None => self.imported.remove(&intent),
+                    };
+                }
+                Err(fault)
+            }
+        }
+    }
+
+    /// Hold the bundles and import records a restart restored from the custody, after
+    /// [`restore_imports`](super::intent::restore_imports) validated them (bn-3snfi).
+    pub(crate) fn restore_bundles(
+        &mut self,
+        bundles: Vec<(IntentBundleHandle, SignedBundle)>,
+        records: BTreeMap<IntentHandle, IntentBundleHandle>,
+    ) {
+        for (handle, bundle) in bundles {
+            self.imported_bundles.insert(handle.clone());
+            self.hold(handle, bundle);
+        }
+        self.imported.clone_from(&records);
+        self.import_records = records;
     }
 
     /// Whether the held key may sign `kind`: held, active, and allowed it by local policy.
@@ -1444,14 +1583,23 @@ impl SigningAuthority {
         true
     }
 
-    /// Record that a verified import entered `intent`.
-    pub(crate) fn record_import(&mut self, intent: IntentHandle, bundle: IntentBundleHandle) {
-        self.imported.entry(intent).or_insert(bundle);
-    }
-
-    /// Forget the import record of a proposal that left the registry.
+    /// Forget that a proposal which left the registry came from an import. The custody's
+    /// import record stays (see [`import_records`](Self::import_records)).
     pub(crate) fn forget_import(&mut self, intent: &IntentHandle) {
         self.imported.remove(intent);
+    }
+
+    /// The import records the custody keeps: each contract an import entered, with the
+    /// bundle it last entered from (bn-3snfi).
+    #[must_use]
+    pub const fn import_records(&self) -> &BTreeMap<IntentHandle, IntentBundleHandle> {
+        &self.import_records
+    }
+
+    /// Whether the custody records `handle` as a bundle an import verified (bn-3snfi).
+    #[must_use]
+    pub fn records_bundle(&self, handle: &IntentBundleHandle) -> bool {
+        self.imported_bundles.contains(handle)
     }
 
     /// The local allowed-signers entries an export pins: the active signers local policy

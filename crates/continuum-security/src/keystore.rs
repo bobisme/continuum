@@ -10,8 +10,15 @@
 //!
 //! | File | Content | Mode |
 //! |---|---|---|
-//! | [`STATE_FILE`] | [`STATE_MAGIC`], the held key's public key, then the audit log, the own keys with their kinds, the own links, the adopted links, the pre-signed revocations, and the peer keys revoked locally, each section a count and bounded length-prefixed records | `0600` |
+//! | [`STATE_FILE`] | [`STATE_MAGIC`], the held key's public key, then the audit log, the own keys with their kinds, the own links, the adopted links, the pre-signed revocations, the peer keys revoked locally, the held intent bundles (each its handle and signed bytes), and the import records (each a contract handle and its bundle's index), each section a count and bounded length-prefixed records | `0600` |
 //! | `signer-<64 hex>.key` | [`KEY_MAGIC`], the 32-byte seed, the 32-byte public key ([`KEY_FILE_LEN`] bytes), one file per held key, named by its public key | `0600` |
+//!
+//! The held intent bundles and the import records (bn-3snfi) live in the state file with
+//! everything else, so a bundle import — its adopted standing facts, the bundle, and the
+//! contracts it entered — commits at the one rename, whole or not at all, under the same
+//! crash-consistency, pending-marker, and trust rules as a key change. The cost is stated:
+//! every state write rewrites the held bundles too, at most [`MAX_HELD_BUNDLE_BYTES`].
+//! A state file of the first version ([`STATE_MAGIC_V1`]) reads as one holding no bundle.
 //!
 //! [`LocalKeystore::open_or_mint`] mints through `SigningRegistry::mint` — so the mint is an
 //! audit record — on first use, and on every later use reads the state and the held key
@@ -109,7 +116,11 @@
 //! Each file's length is checked on its descriptor before a byte is read: the key file is
 //! exactly [`KEY_FILE_LEN`], and the state file at most [`MAX_STATE_FILE_LEN`], with at
 //! most [`MAX_AUDIT_RECORDS`] audit records of at most [`MAX_AUDIT_RECORD_LEN`] bytes, and
-//! at most [`MAX_LINKS`] links of at most `MAX_LINK_RECORD_LEN` bytes per section. Every
+//! at most [`MAX_LINKS`] links of at most `MAX_LINK_RECORD_LEN` bytes per section, at most
+//! [`MAX_HELD_BUNDLES`] bundles of at most [`MAX_BUNDLE_LEN`] bytes and
+//! [`MAX_HELD_BUNDLE_BYTES`] together (charged bundle by bundle before each is copied), and
+//! at most [`MAX_IMPORT_RECORDS`] import records, every handle at most [`MAX_HANDLE_LEN`]
+//! bytes. Every
 //! count is checked against its bound before its section is read, and every record is
 //! decoded, shape-checked, and applied before the next is read, so no whole-log value is
 //! ever materialized and a hostile file cannot amplify into a large allocation
@@ -157,8 +168,13 @@ pub const LOCK_FILE: &str = "signing.lock";
 /// ([`LocalKeystore::sweep`]).
 pub const PENDING_FILE: &str = "signing-pending";
 
-/// The state file's first eight bytes: format name and version.
-pub const STATE_MAGIC: [u8; 8] = *b"CTMSTA01";
+/// The state file's first eight bytes: format name and version. Version 2 adds the held
+/// intent bundles and the import records (bn-3snfi).
+pub const STATE_MAGIC: [u8; 8] = *b"CTMSTA02";
+
+/// The first version's magic (bn-18w74), read as a state with no held bundle and no
+/// import record, and never written.
+pub const STATE_MAGIC_V1: [u8; 8] = *b"CTMSTA01";
 
 /// A key file's name is this, 64 lowercase hex digits of its public key, and
 /// [`KEY_FILE_SUFFIX`].
@@ -193,12 +209,32 @@ pub const MAX_AUDIT_RECORD_LEN: u32 = 1024;
 /// bundle bound (`continuumd`'s `bundle::MAX_BUNDLE_LINKS`, held equal the same way).
 pub const MAX_LINKS: u32 = 4096;
 
+/// The most intent bundles a store holds: the daemon's bound (`continuumd`'s
+/// `signing::MAX_HELD_BUNDLES`, held equal by `the_keystore_bounds_are_the_daemons`).
+pub const MAX_HELD_BUNDLES: u32 = 1024;
+
+/// The longest held bundle, in bytes: the daemon's `bundle::MAX_BUNDLE_LEN`.
+pub const MAX_BUNDLE_LEN: u32 = 4 << 20;
+
+/// The most bytes of held bundles a store holds, all bundles together: the daemon's
+/// `signing::MAX_HELD_BUNDLE_BYTES`. Charged, bundle by bundle, before each is read.
+pub const MAX_HELD_BUNDLE_BYTES: u64 = 64 << 20;
+
+/// The most import records a store holds: one per contract a held bundle can export
+/// (the daemon's `MAX_HELD_BUNDLES` × `bundle::MAX_BUNDLE_CONTRACTS`).
+pub const MAX_IMPORT_RECORDS: u32 = 1024 * 64;
+
+/// The longest bundle or contract handle the store records, in bytes (the daemon's
+/// `bundle::MAX_INTENT_HANDLE_LEN`).
+pub const MAX_HANDLE_LEN: u32 = 256;
+
 /// The longest state file this format can write, checked on the descriptor before a byte
 /// is read.
 pub const MAX_STATE_FILE_LEN: u64 = {
     let records = MAX_AUDIT_RECORDS as u64;
     let links = MAX_LINKS as u64;
     let link = 4 + MAX_LINK_RECORD_LEN as u64;
+    let handle = 4 + MAX_HANDLE_LEN as u64;
     (STATE_MAGIC.len() + PUBLIC_KEY_LEN) as u64
         + 4
         + records * (4 + MAX_AUDIT_RECORD_LEN as u64)
@@ -207,6 +243,11 @@ pub const MAX_STATE_FILE_LEN: u64 = {
         + 3 * (4 + links * link)
         + 4
         + records * PUBLIC_KEY_LEN as u64
+        + 4
+        + MAX_HELD_BUNDLES as u64 * (handle + 4)
+        + MAX_HELD_BUNDLE_BYTES
+        + 4
+        + MAX_IMPORT_RECORDS as u64 * (handle + 2)
 };
 
 /// Why a keystore could not be opened, minted, written, or swept.
@@ -658,7 +699,79 @@ pub fn encode_state(state: &SigningCustodyState) -> Result<Vec<u8>, KeystoreErro
     for key in state.local_revocations() {
         out.extend_from_slice(key.public_key());
     }
+    encode_bundles(&mut out, state)?;
     Ok(out)
+}
+
+/// A handle as the reader reads it back: non-empty, at most [`MAX_HANDLE_LEN`] bytes.
+fn put_handle(out: &mut Vec<u8>, handle: &str, what: &'static str) -> Result<(), KeystoreError> {
+    if handle.is_empty() {
+        return Err(KeystoreError::Corrupt(what));
+    }
+    put_framed(out, handle.as_bytes(), MAX_HANDLE_LEN, what)
+}
+
+/// The held-bundle and import-record sections (bn-3snfi): the bundles in handle order,
+/// each its handle and its signed bytes; then the import records in contract order, each
+/// the contract's handle and the index of its bundle in the first section.
+fn encode_bundles(out: &mut Vec<u8>, state: &SigningCustodyState) -> Result<(), KeystoreError> {
+    let bundles = state.held_bundles();
+    put_count(
+        out,
+        bundles.len(),
+        MAX_HELD_BUNDLES,
+        "the held bundles exceed their bound",
+    )?;
+    let mut total: u64 = 0;
+    for (handle, content) in bundles {
+        put_handle(
+            out,
+            handle,
+            "a bundle handle is empty or exceeds its size bound",
+        )?;
+        if content.is_empty() {
+            return Err(KeystoreError::Corrupt("a held bundle is empty"));
+        }
+        total = total.saturating_add(content.len() as u64);
+        if total > MAX_HELD_BUNDLE_BYTES {
+            return Err(KeystoreError::Corrupt(
+                "the held bundles exceed their byte bound",
+            ));
+        }
+        put_framed(
+            out,
+            content,
+            MAX_BUNDLE_LEN,
+            "a held bundle exceeds its size bound",
+        )?;
+    }
+    let imports = state.imports();
+    put_count(
+        out,
+        imports.len(),
+        MAX_IMPORT_RECORDS,
+        "the import records exceed their bound",
+    )?;
+    // Each bundle's position, built once (the count is bounded above), so a record's index
+    // is one map lookup rather than a search.
+    let mut position: BTreeMap<&str, u16> = BTreeMap::new();
+    for (at, handle) in bundles.keys().enumerate() {
+        let at = u16::try_from(at)
+            .map_err(|_| KeystoreError::Corrupt("the held bundles exceed their bound"))?;
+        position.insert(handle.as_str(), at);
+    }
+    for (intent, bundle) in imports {
+        put_handle(
+            out,
+            intent,
+            "a contract handle is empty or exceeds its size bound",
+        )?;
+        let at = position.get(bundle.as_str()).ok_or(KeystoreError::Corrupt(
+            "an import record names a bundle the state does not hold",
+        ))?;
+        out.extend_from_slice(&at.to_be_bytes());
+    }
+    Ok(())
 }
 
 /// A cursor over a state file's bytes. Every read checks what remains first.
@@ -717,6 +830,81 @@ impl<'a> Reader<'a> {
         let count = self.count(MAX_LINKS, "a link section exceeds its bound")?;
         (0..count).map(|_| self.link()).collect()
     }
+
+    /// A handle: non-empty UTF-8 of at most [`MAX_HANDLE_LEN`] bytes.
+    fn handle(&mut self, what: &'static str) -> Result<String, KeystoreError> {
+        let bytes = self.framed(MAX_HANDLE_LEN, what)?;
+        core::str::from_utf8(bytes)
+            .map(str::to_owned)
+            .map_err(|_| KeystoreError::Corrupt(what))
+    }
+
+    /// The held-bundle and import-record sections (bn-3snfi). Each count is checked against
+    /// its bound, and each bundle's length against its own bound and against what the
+    /// bundles before it left of [`MAX_HELD_BUNDLE_BYTES`], before any of it is copied.
+    #[allow(clippy::type_complexity)]
+    fn bundles(
+        &mut self,
+    ) -> Result<
+        (
+            BTreeMap<String, std::sync::Arc<[u8]>>,
+            BTreeMap<String, String>,
+        ),
+        KeystoreError,
+    > {
+        let count = self.count(MAX_HELD_BUNDLES, "the held bundles exceed their bound")?;
+        let mut bundles: BTreeMap<String, std::sync::Arc<[u8]>> = BTreeMap::new();
+        // The handles in order, so an import record's index resolves without a search.
+        let mut order: Vec<String> = Vec::with_capacity(count as usize);
+        let mut total: u64 = 0;
+        for _ in 0..count {
+            let handle = self.handle("a bundle handle is truncated, oversize, or not text")?;
+            if bundles
+                .last_key_value()
+                .is_some_and(|(last, _)| last >= &handle)
+            {
+                return Err(KeystoreError::Corrupt(
+                    "the held bundles are not strictly ordered",
+                ));
+            }
+            let len = self.u32("a held bundle is truncated")?;
+            if len == 0 || len > MAX_BUNDLE_LEN {
+                return Err(KeystoreError::Corrupt("a held bundle is empty or oversize"));
+            }
+            total += u64::from(len);
+            if total > MAX_HELD_BUNDLE_BYTES {
+                return Err(KeystoreError::Corrupt(
+                    "the held bundles exceed their byte bound",
+                ));
+            }
+            let content = self.take(len as usize, "a held bundle is truncated")?;
+            order.push(handle.clone());
+            bundles.insert(handle, std::sync::Arc::from(content));
+        }
+        let count = self.count(MAX_IMPORT_RECORDS, "the import records exceed their bound")?;
+        let mut imports: BTreeMap<String, String> = BTreeMap::new();
+        for _ in 0..count {
+            let intent = self.handle("a contract handle is truncated, oversize, or not text")?;
+            if imports
+                .last_key_value()
+                .is_some_and(|(last, _)| last >= &intent)
+            {
+                return Err(KeystoreError::Corrupt(
+                    "the import records are not strictly ordered",
+                ));
+            }
+            let mut index = [0u8; 2];
+            index.copy_from_slice(self.take(2, "an import record is truncated")?);
+            let bundle =
+                order
+                    .get(usize::from(u16::from_be_bytes(index)))
+                    .ok_or(KeystoreError::Corrupt(
+                        "an import record names a bundle the state does not hold",
+                    ))?;
+            imports.insert(intent, bundle.clone());
+        }
+        Ok((bundles, imports))
+    }
 }
 
 /// Read a state file's bytes back, section by section, each bounded before it is read.
@@ -736,9 +924,14 @@ pub fn decode_state(bytes: &[u8]) -> Result<SigningCustodyState, KeystoreError> 
         ));
     }
     let mut reader = Reader { bytes };
-    if reader.take(STATE_MAGIC.len(), "the state file has no header")? != STATE_MAGIC {
+    let magic = reader.take(STATE_MAGIC.len(), "the state file has no header")?;
+    let version_two = if magic == STATE_MAGIC {
+        true
+    } else if magic == STATE_MAGIC_V1 {
+        false
+    } else {
         return Err(KeystoreError::Corrupt("the state file has the wrong magic"));
-    }
+    };
     let held = reader.identity("the state file names no valid held key")?;
     let count = reader.u32("the state file has no audit record count")?;
     if count > MAX_AUDIT_RECORDS {
@@ -808,6 +1001,11 @@ pub fn decode_state(bytes: &[u8]) -> Result<SigningCustodyState, KeystoreError> 
         }
         local_revocations.insert(key);
     }
+    let (bundles, imports) = if version_two {
+        reader.bundles()?
+    } else {
+        (BTreeMap::new(), BTreeMap::new())
+    };
     if !reader.bytes.is_empty() {
         return Err(KeystoreError::Corrupt("the state file has trailing bytes"));
     }
@@ -819,7 +1017,8 @@ pub fn decode_state(bytes: &[u8]) -> Result<SigningCustodyState, KeystoreError> 
         adopted_links,
         presigned,
     )
-    .with_local_revocations(local_revocations))
+    .with_local_revocations(local_revocations)
+    .with_held_bundles(bundles, imports))
 }
 
 /// The points of a state write at which a deployment's fault seam may make it fail
@@ -1741,13 +1940,12 @@ mod unix {
         minted: Option<Zeroizing<[u8; SEED_LEN]>>,
     ) -> Result<(), CustodyWrite<KeystoreError>> {
         owned_here(store).map_err(CustodyWrite::NotRecorded)?;
-        let _guard = prepare(store, state, minted).map_err(CustodyWrite::NotRecorded)?;
+        let (_guard, bytes) = prepare(store, state, minted).map_err(CustodyWrite::NotRecorded)?;
         let held = state
             .held()
             .ok_or(CustodyWrite::NotRecorded(KeystoreError::Corrupt(
                 "the state names no held key",
             )))?;
-        let bytes = encode_state(state).map_err(CustodyWrite::NotRecorded)?;
         let owner = owner(store).map_err(CustodyWrite::NotRecorded)?;
         replace_state(store, owner, &bytes)?;
         // The state that retires a key is in place: its file goes now, or at the next
@@ -1756,20 +1954,21 @@ mod unix {
         Ok(())
     }
 
-    /// Everything a state write does before its commit point: the checks, the lock, and
-    /// the new held key's file. Returns the lock guard the write holds.
+    /// Everything a state write does before its commit point: the checks, the lock, the
+    /// state's encoding (once: with held bundles it can be large), and the new held key's
+    /// file. Returns the lock guard the write holds and the encoded state.
     fn prepare<'a>(
         store: &'a LocalKeystore,
         state: &SigningCustodyState,
         minted: Option<Zeroizing<[u8; SEED_LEN]>>,
-    ) -> Result<WriteGuard<'a>, KeystoreError> {
+    ) -> Result<(WriteGuard<'a>, Vec<u8>), KeystoreError> {
         let owner = owner(store)?;
         recheck(store, owner)?;
         let guard = guard(store)?;
         let held = state
             .held()
             .ok_or(KeystoreError::Corrupt("the state names no held key"))?;
-        encode_state(state)?;
+        let bytes = encode_state(state)?;
         match minted {
             Some(seed) => {
                 // The seed must derive the key the state holds, or neither is written.
@@ -1797,7 +1996,7 @@ mod unix {
                 )?);
             }
         }
-        Ok(guard)
+        Ok((guard, bytes))
     }
 
     pub(super) fn sweep(

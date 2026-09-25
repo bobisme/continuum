@@ -41,6 +41,8 @@
 //! adopted on those keys' word and never on the bundle signer's.
 
 use std::collections::BTreeSet;
+use std::ops::Range;
+use std::sync::Arc;
 
 use continuum_evidence::signing::{
     AllowedSigners, MAX_LINK_RECORD_LEN, MAX_SIGNATURE_RECORD_LEN, SignerLink, WireError,
@@ -79,6 +81,11 @@ pub const MAX_BUNDLE_LINKS: usize = 4096;
 
 /// The longest `in_` handle a contract entry carries, in bytes.
 pub const MAX_INTENT_HANDLE_LEN: usize = 256;
+
+/// The longest `inb_` handle the daemon holds a bundle under, in bytes: the custody
+/// records every held bundle by its handle (bn-3snfi), so a handle is bounded before a
+/// bundle is held. The deployment's content identifier derives it; a Blake3 handle is 68.
+pub const MAX_BUNDLE_HANDLE_LEN: usize = 256;
 
 /// Why bytes are not a signed bundle. Carries no byte of the input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,19 +150,30 @@ pub struct BundleBody {
 }
 
 /// A decoded signed bundle. Built only by [`decode_signed`], so its decoded `body` is always
-/// the decoding of the `body_bytes` the signature covers.
+/// the decoding of the `body_bytes` the signature covers, and its
+/// [`content`](Self::content) is exactly the bytes it was decoded from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignedBundle {
-    body_bytes: Vec<u8>,
+    /// The signed bundle's bytes, shared: the daemon's custody records these very bytes
+    /// (bn-3snfi) without copying them.
+    content: Arc<[u8]>,
+    body_bytes: Range<usize>,
     body: BundleBody,
-    signature: Vec<u8>,
+    signature: Range<usize>,
 }
 
 impl SignedBundle {
     /// The exact body bytes the signature covers.
     #[must_use]
     pub fn body_bytes(&self) -> &[u8] {
-        &self.body_bytes
+        &self.content[self.body_bytes.clone()]
+    }
+
+    /// The signed bundle's bytes, exactly as decoded: `encode_signed(body_bytes,
+    /// signature)`.
+    #[must_use]
+    pub const fn content(&self) -> &Arc<[u8]> {
+        &self.content
     }
 
     /// The body, decoded from [`body_bytes`](Self::body_bytes).
@@ -168,13 +186,14 @@ impl SignedBundle {
     /// checked by the verifier, never here.
     #[must_use]
     pub fn signature(&self) -> &[u8] {
-        &self.signature
+        &self.content[self.signature.clone()]
     }
 
-    /// The bytes this bundle charges against the held-bundle bound.
+    /// The bytes this bundle charges against the held-bundle bound: its whole content,
+    /// which is what the custody records.
     #[must_use]
     pub fn charged_len(&self) -> usize {
-        self.body_bytes.len().saturating_add(self.signature.len())
+        self.content.len()
     }
 }
 
@@ -381,6 +400,24 @@ pub fn decode_signed(bytes: &[u8]) -> Result<SignedBundle, BundleError> {
     if bytes.len() > MAX_BUNDLE_LEN {
         return Err(BundleError::TooLarge);
     }
+    decode_shared(Arc::from(bytes))
+}
+
+/// [`decode_signed`] over bytes already shared, which the bundle then keeps without a
+/// copy: the restart path, which holds the custody's bytes (bn-3snfi).
+///
+/// # Errors
+///
+/// As [`decode_signed`].
+pub fn decode_signed_shared(bytes: Arc<[u8]>) -> Result<SignedBundle, BundleError> {
+    decode_shared(bytes)
+}
+
+fn decode_shared(content: Arc<[u8]>) -> Result<SignedBundle, BundleError> {
+    let bytes: &[u8] = &content;
+    if bytes.len() > MAX_BUNDLE_LEN {
+        return Err(BundleError::TooLarge);
+    }
     let [body, signature] =
         <[&[u8]; 2]>::try_from(unframe_exact(bytes, 2, MAX_BUNDLE_LEN, "signed bundle")?)
             .map_err(|_| BundleError::Frames("signed bundle"))?;
@@ -388,10 +425,18 @@ pub fn decode_signed(bytes: &[u8]) -> Result<SignedBundle, BundleError> {
         return Err(BundleError::Entry("signature"));
     }
     let decoded = BundleBody::decode(body)?;
+    // `frames(2)` is a count, the body's length, the body, the signature's length, and the
+    // signature, with no trailing byte (`unframe_exact` checked all of it).
+    let body_range = 8..8 + body.len();
+    let signature_range = body_range.end + 4..bytes.len();
+    if bytes[body_range.clone()] != *body || bytes[signature_range.clone()] != *signature {
+        return Err(BundleError::Frames("signed bundle"));
+    }
     Ok(SignedBundle {
-        body_bytes: body.to_vec(),
+        content,
+        body_bytes: body_range,
         body: decoded,
-        signature: signature.to_vec(),
+        signature: signature_range,
     })
 }
 

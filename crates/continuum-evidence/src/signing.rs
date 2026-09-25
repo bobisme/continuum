@@ -1723,12 +1723,17 @@ impl LocalKeyring {
 ///   kept apart from the registry's signers, which also name every peer key a registry
 ///   adopted from a verified bundle;
 /// - the links the own keys attested, and the links the authority adopted and relays;
-/// - the compromise revocation each retired own key signed before it was wiped.
+/// - the compromise revocation each retired own key signed before it was wiped;
+/// - the intent bundles the authority holds because an import verified them, each by its
+///   handle with its signed bytes, and the import records — which contract, by its
+///   handle, each import entered, and from which held bundle (bn-3snfi). This crate
+///   treats both as opaque names and bytes: `continuumd` decodes them, recomputes their
+///   identities, and checks them against the registry at restart.
 ///
 /// It holds no secret, so its `Debug` output is counts and the held key's public name. It
 /// is a plain value: nothing is checked when it is built, and the authority that restores
 /// it checks every part against the registry before a key is used (`continuumd`'s
-/// `ReceiptSigner::restored`).
+/// `ReceiptSigner::restored` and `Builder::launch_signing`).
 #[derive(Clone, PartialEq, Eq)]
 pub struct SigningCustodyState {
     registry: SigningRegistry,
@@ -1738,6 +1743,8 @@ pub struct SigningCustodyState {
     adopted_links: Vec<SignerLink>,
     presigned: BTreeMap<SignerIdentity, SignerLink>,
     local_revocations: BTreeSet<SignerIdentity>,
+    held_bundles: BTreeMap<String, std::sync::Arc<[u8]>>,
+    imports: BTreeMap<String, String>,
 }
 
 impl fmt::Debug for SigningCustodyState {
@@ -1750,6 +1757,8 @@ impl fmt::Debug for SigningCustodyState {
             .field("adopted_links", &self.adopted_links.len())
             .field("presigned", &self.presigned.len())
             .field("local_revocations", &self.local_revocations.len())
+            .field("held_bundles", &self.held_bundles.len())
+            .field("imports", &self.imports.len())
             .finish()
     }
 }
@@ -1769,6 +1778,8 @@ impl SigningCustodyState {
             adopted_links: Vec::new(),
             presigned: BTreeMap::new(),
             local_revocations: BTreeSet::new(),
+            held_bundles: BTreeMap::new(),
+            imports: BTreeMap::new(),
         }
     }
 
@@ -1792,7 +1803,36 @@ impl SigningCustodyState {
             adopted_links,
             presigned,
             local_revocations: BTreeSet::new(),
+            held_bundles: BTreeMap::new(),
+            imports: BTreeMap::new(),
         }
+    }
+
+    /// This state with `bundles` as the held bundles — each handle with its signed bytes —
+    /// and `imports` as the import records: each contract handle an import entered, with
+    /// the handle of the held bundle it entered from (bn-3snfi). Unchecked; see the type.
+    #[must_use]
+    pub fn with_held_bundles(
+        mut self,
+        bundles: BTreeMap<String, std::sync::Arc<[u8]>>,
+        imports: BTreeMap<String, String>,
+    ) -> Self {
+        self.held_bundles = bundles;
+        self.imports = imports;
+        self
+    }
+
+    /// The held bundles, by handle, with their signed bytes. Opaque to this crate.
+    #[must_use]
+    pub const fn held_bundles(&self) -> &BTreeMap<String, std::sync::Arc<[u8]>> {
+        &self.held_bundles
+    }
+
+    /// The import records: each contract handle an import entered, with the handle of the
+    /// held bundle it entered from. Opaque to this crate.
+    #[must_use]
+    pub const fn imports(&self) -> &BTreeMap<String, String> {
+        &self.imports
     }
 
     /// This state with `revoked` as the peer keys the authority revoked on its own
@@ -1847,7 +1887,7 @@ impl SigningCustodyState {
     }
 
     /// Every part but the local revocations ([`local_revocations`](Self::local_revocations)),
-    /// by value.
+    /// the held bundles, and the import records, by value.
     #[must_use]
     #[allow(clippy::type_complexity)]
     pub fn into_parts(

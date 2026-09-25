@@ -1344,6 +1344,23 @@ const BARE_HANDLE_FIELDS: &[(&str, &str, &str, &str)] = &[
         "an imported proposal's intent and the held bundle that entered it: lookup keys, \
          neither a store publication",
     ),
+    // bn-3snfi: which held bundles the signing custody records, and its import records.
+    // Custody state, recorded through the deployment's keystore, never the store.
+    (
+        SIGNING_RS,
+        "SigningAuthority",
+        "imported_bundles",
+        "a held bundle the signing custody records because an import verified it; kept in \
+         daemon state and the custody, never published to the store",
+    ),
+    (
+        SIGNING_RS,
+        "SigningAuthority",
+        "import_records",
+        "the custody's import records: a contract an import entered and the held bundle it \
+         entered from, lookup keys recorded in the signing custody, neither a store \
+         publication",
+    ),
     (
         BUNDLE_RS,
         "BundleContract",
