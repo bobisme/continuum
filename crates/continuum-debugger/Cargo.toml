@@ -6,5 +6,12 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# One workspace edge: `continuum-value` holds INV-008's `InconclusiveReason`, which a
+# reduction that runs out of budget reports (PR 18, bn-3km4z). The reduction is generic
+# over its trace, so it depends on no trace producer: `continuum-asupersync` instantiates
+# it from its own tests, and CIR (PR 17) will instantiate it from its events' causes.
+[dependencies]
+continuum-value = { path = "../continuum-value" }
+
 [lints]
 workspace = true

@@ -1,0 +1,55 @@
+[change]
+bone = "bn-3km4z"
+author = "continuum-dev"
+summary = "PR 18 causal minimization, structural passes: continuum-debugger's new reduce module reduces a failing trace with a declared happens-before order and operation atoms by causal closure of the failure's witnesses and by ddmin deletion over configurations or over atoms. An oracle replays every kept set, a minimality class is claimed only when every final removal was decided, and a replay and work budget is charged before the work, with a typed ResourceExhausted inconclusive. continuum-asupersync's new causal module gives the PR-14 journal's footprint dependence, operation atoms and an ordinal-renaming restriction the lift replays"
+
+[semantic]
+covers = [
+  "crates/continuum-debugger/src/",
+]
+reference_tests = [
+  "crates/continuum-debugger/tests/pr18_reduce.rs::closure_keeps_exactly_the_witnesses_past_on_random_orders",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::deletion_over_configurations_is_one_minimal_on_random_orders",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::deletion_over_atoms_finds_the_needed_events",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::atoms_stand_or_fall_together",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::a_closure_that_does_not_replay_is_typed_and_kept_out",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::an_exhausted_budget_is_typed_and_charged_first",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::refusals_are_typed",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::identical_inputs_give_identical_reductions",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::deletion_over_multi_event_atoms_claims_only_atom_minimality",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::an_undecided_removal_withholds_minimality",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::a_witness_contract_breach_mid_pass_stops_the_reduction",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::m01_agreement_failure_reduces_to_a_causal_core_with_its_mechanism",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::m01_acked_not_durable_failure_reduces_to_a_causal_core",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::deletion_over_atoms_loses_the_mechanism_under_a_substrate_replay",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::identical_inputs_give_byte_identical_cores",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::an_unreplayable_candidate_is_refused_not_kept",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::a_run_that_does_not_fail_is_refused",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::an_exhausted_budget_is_inconclusive_with_the_best_core",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::independent_adjacent_swaps_of_every_corpus_journal_still_lift",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::the_evidence_matches_its_golden",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-debugger/tests/pr18_reduce.rs::independent_event_swap_leaves_the_core_unchanged", relation = "independent-event swap" },
+  { test = "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::symmetry_renaming_of_values_leaves_the_core_unchanged", relation = "symmetry renaming" },
+]
+differential_tests = [
+  { test = "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::closure_keeps_exactly_the_happens_before_past_over_the_corpus", oracle = "continuum-asupersync", subject = "continuum-debugger" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers causal minimization or causal cores; the causal-minimization frontier row (plan 24.5, research/26, quote-id causal-minimization-core-ratio) is a register threshold on the research/26 corpus, which this change neither measures in full nor claims"
+
+[semantic.schemas]
+updated = []
+reason = "no JSON schema document and no wire shape changes: the reduction is an in-process library with no production caller yet; failure.minimize stays unserved, and crashpack.minimization and context-pack guarantees are untouched (RFC 0028 F6 and F8 remain open)"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-debugger gains the reduce module and a dependency on continuum-value for InconclusiveReason; nothing existing changes. continuum-asupersync gains the causal module; its journal encoding (version 3), lift and binding are unchanged, so every existing journal, digest and verdict is preserved"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-2l7sk6"
+verdict = "approved"

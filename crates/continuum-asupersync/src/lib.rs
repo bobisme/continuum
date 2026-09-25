@@ -89,6 +89,13 @@
 //! - [`binding`] observes it with woken tasks in canonical order. Every family is now
 //!   bound.
 //!
+//! # What has landed (PR 18, bn-3km4z)
+//!
+//! - [`causal`] — the journal's declared happens-before relation (Mazurkiewicz
+//!   dependence over declared read/write footprints) and its restriction to a subset of
+//!   events, renamed so the lift can replay it: what `continuum-debugger`'s causal
+//!   minimization reads from a journal until CIR (PR 17) gives events their own causes.
+//!
 //! # What is not here
 //!
 //! A family a later PR adds starts unbound: [`binding::substrate_binding`] answers it
@@ -96,6 +103,7 @@
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 
 pub mod binding;
+pub mod causal;
 pub mod choice;
 pub mod encoding;
 pub mod family;

@@ -20,6 +20,10 @@ continuum-task = { path = "../continuum-task" }
 continuum-value = { path = "../continuum-value" }
 
 [dev-dependencies]
+# PR 18 (bn-3km4z): the causal minimization passes, instantiated on the register's
+# journals in `tests/pr18_impl01_reduction.rs`. A test edge only: the adapter's library
+# does not depend on the debugger.
+continuum-debugger = { path = "../continuum-debugger" }
 continuum-task = { path = "../continuum-task" }
 continuum-value = { path = "../continuum-value" }
 

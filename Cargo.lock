@@ -298,6 +298,7 @@ name = "continuum-asupersync"
 version = "0.0.0"
 dependencies = [
  "asupersync",
+ "continuum-debugger",
  "continuum-task",
  "continuum-value",
 ]
@@ -376,6 +377,9 @@ version = "0.0.0"
 [[package]]
 name = "continuum-debugger"
 version = "0.0.0"
+dependencies = [
+ "continuum-value",
+]
 
 [[package]]
 name = "continuum-effects-network"
