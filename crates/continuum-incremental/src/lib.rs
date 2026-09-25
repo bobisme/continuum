@@ -61,12 +61,13 @@
 //! - The differential test's oracle, `continuum-engine-reference`'s own checker
 //!   (`tests/differential.rs`), checks definedness since bn-24a5c, and its typed
 //!   `Undefined` outcome is compared with this engine's `Undefined` and
-//!   `UndefinedAction` on partial-map models. That comparison is scoped to depth-1
-//!   definedness chains with no action-name collision, which is every model the CML
-//!   front end lowers. The reference engine also follows nested chains
-//!   (`I#defined#defined`) and fails closed on name collisions, which only a
-//!   hand-built model carries; this engine reads depth-1 guards only, and adopting
-//!   the chain rule is bn-1eoco.
+//!   `UndefinedAction` on partial-map models, including nested chains
+//!   (`I#defined#defined`), gaps, and action-name collisions (bn-1eoco). Both sides
+//!   classify a model's definedness predicates with the same rule,
+//!   `continuum_model_core::definedness::Definedness::of` — the engine
+//!   ([`engine`]) and the independent audit ([`audit`]) each call it directly,
+//!   rather than re-deriving the chain rule, so a nested chain, a gap, or a
+//!   collision reads the same way on every path that classifies one.
 //!
 //! What is not here: persistence and crash ordering, the index verifier, epoch
 //! `Revalidate` demotion, witness-loss downgrade, quarantine clearing, continuations,

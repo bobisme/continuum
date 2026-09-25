@@ -15,6 +15,12 @@ publish = false
 #   producer of the finite-closure certificate a `Validated` reuse is witnessed by.
 # - `continuum-certificate`: the independent checker of that witness, from wire form
 #   (INV-004). The engine never checks its own witness.
+# - `continuum-model-core`: the whole-chain definedness classifier
+#   (`continuum_model_core::definedness::Definedness`, bn-24a5c/bn-1eoco) that both
+#   the engine (`src/engine.rs`) and the independent audit (`src/audit.rs`) read,
+#   so a nested chain, a gap, or a name collision classifies the same way on both
+#   sides. Already a transitive dependency through `continuum-engine-reference` and
+#   `continuum-cml-elab`; named directly because both sides import it.
 # - `continuum-value`: the BLAKE3 content commitments of keys and outputs.
 #
 # Forbidden and absent: `continuum-forge` and every adapter (lib.rs, "Dependency-
@@ -24,6 +30,7 @@ continuum-cml-syntax = { path = "../continuum-cml-syntax" }
 continuum-cml-elab = { path = "../continuum-cml-elab" }
 continuum-engine-reference = { path = "../continuum-engine-reference" }
 continuum-certificate = { path = "../continuum-certificate" }
+continuum-model-core = { path = "../continuum-model-core" }
 continuum-value = { path = "../continuum-value" }
 
 [lints]

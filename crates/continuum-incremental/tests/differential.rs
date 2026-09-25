@@ -14,13 +14,25 @@
 //! built from the oracle's values, so the two sides meet on bytes.
 //!
 //! Definedness (bn-24a5c): the oracle's `CheckOutcome::Undefined` is compared with the
-//! engine's typed `InvariantVerdict::UndefinedAction` (an action's `A#defined` is
-//! false) or `InvariantVerdict::Undefined` (the invariant's `I#defined` is false).
-//! Scope: every model here is lowered by the CML front end, so each definedness chain
-//! has depth 1 and no name collides with an action (CML declarations share one
-//! namespace). The reference engine's rule for nested chains and name collisions,
-//! which only a hand-built model can carry, is not yet the incremental engine's
-//! (bn-1eoco), so no such model is generated here.
+//! engine's typed `InvariantVerdict::UndefinedAction` (an action's whole definedness
+//! chain has a false member) or `InvariantVerdict::Undefined` (the invariant's own
+//! chain does). Both sides classify a model's `#defined` predicates the same way,
+//! `continuum_model_core::definedness::Definedness::of` (bn-24a5c's whole-chain, fail-
+//! closed, collision-checked rule): the engine and the independent audit each call it
+//! directly, and this differential's comparison is real for whatever chain shape the
+//! oracle reports (`undefined.read()`, `undefined.subject()`).
+//!
+//! Every model here is lowered by the CML front end, so every generated case is a
+//! depth-1 chain with no name collision: `#` is not a CML identifier character, so no
+//! declared name can itself end in `#defined`, and lowering only ever writes one
+//! `X#defined` per subject `X`, never a nested `X#defined#defined` — a structural fact
+//! about the front end, not a limitation of this engine (bn-1eoco). Nested chains, a
+//! gap, and a name collision — every shape only a hand-built model can carry — are
+//! covered where they can actually be built: `continuum-incremental::engine`'s and
+//! `::audit`'s own `#[cfg(test)]` modules (`chain_rule`/`tests` there), each checked
+//! against this same reference-engine oracle over a hand-built
+//! `continuum_engine_reference::ModelBuilder` model, mirroring
+//! `continuum-engine-reference/tests/definedness_nested.rs` (cr-pt5h3a).
 
 mod support;
 
@@ -56,7 +68,14 @@ fn undefined_reads_agree_with_the_reference_engine_run_directly() {
     const INVARIANT: &str = "module M\nstate {\n  m: Map[Bool, Bool]\n}\ninit { m == {} }\naction Stay { unchanged m }\ninvariant Z { m[true] == false }\n";
     const ACTION: &str = "module M\nstate {\n  m: Map[Bool, Bool]\n  b: Nat where b <= 1\n}\ninit { m == {} && b == 0 }\naction Flip {\n  require m[true] == false\n  next b = 1\n  unchanged m\n}\ninvariant NeverB { b == 0 }\n";
     const BOTH: &str = "module M\nstate {\n  m: Map[Bool, Bool]\n  b: Nat where b <= 1\n}\ninit { m == {true -> false} && b == 0 }\naction Drop {\n  require b == 0\n  next m = {}\n  next b = 1\n}\naction Read {\n  require m[true] == false\n  unchanged m, b\n}\ninvariant Other { m[false] == false }\n";
-    let cases: [(&str, &str, &str); 6] = [
+    // bn-1eoco: two actions, each with its own `#defined` predicate, both false at
+    // the initial state. The engine now scans every action's whole definedness
+    // chain via `Definedness::action_chains()` (ordered by shallowest member)
+    // rather than a hand-built `Vec` in predicate order; this pins that the two
+    // orders still agree with the reference checker's own first-in-order pick, not
+    // just that a lone action does.
+    const TWO_ACTIONS: &str = "module M\nstate {\n  m: Map[Bool, Bool]\n  n: Map[Bool, Bool]\n}\ninit { m == {} && n == {} }\naction A {\n  require m[true] == false\n  unchanged m, n\n}\naction B {\n  require n[true] == false\n  unchanged m, n\n}\ninvariant Z { true }\n";
+    let cases: [(&str, &str, &str); 7] = [
         ("invariant", INVARIANT, INVARIANT),
         (
             "invariant-defined",
@@ -71,6 +90,7 @@ fn undefined_reads_agree_with_the_reference_engine_run_directly() {
         ),
         ("both", BOTH, BOTH),
         ("both-from-action", ACTION, BOTH),
+        ("two-actions", TWO_ACTIONS, TWO_ACTIONS),
     ];
     let mut kinds = [0_usize; 3];
     for (id, base, source) in cases {
@@ -83,6 +103,22 @@ fn undefined_reads_agree_with_the_reference_engine_run_directly() {
     assert!(undefined_action >= 2, "{kinds:?}");
     assert!(undefined_invariant >= 1, "{kinds:?}");
     assert!(decided >= 2, "{kinds:?}");
+}
+
+/// bn-1eoco: alpha-renaming preserves the whole-chain classifier's outcome. The
+/// two-actions case (both `A#defined` and `B#defined` false at the initial state)
+/// renamed throughout (`m`→`p`, `n`→`q`, `A`→`First`, `B`→`Second`, `Z`→`Inv`)
+/// still agrees with the reference engine, and still reports the same kind of
+/// outcome, an undefined action read: `Definedness::of` reads chain shape, not
+/// spelling, so renaming every declared name changes no verdict's category.
+#[test]
+fn alpha_renaming_the_two_actions_case_preserves_its_undefined_outcome() {
+    const TWO_ACTIONS: &str = "module M\nstate {\n  m: Map[Bool, Bool]\n  n: Map[Bool, Bool]\n}\ninit { m == {} && n == {} }\naction A {\n  require m[true] == false\n  unchanged m, n\n}\naction B {\n  require n[true] == false\n  unchanged m, n\n}\ninvariant Z { true }\n";
+    const RENAMED: &str = "module M\nstate {\n  p: Map[Bool, Bool]\n  q: Map[Bool, Bool]\n}\ninit { p == {} && q == {} }\naction First {\n  require p[true] == false\n  unchanged p, q\n}\naction Second {\n  require q[true] == false\n  unchanged p, q\n}\ninvariant Inv { true }\n";
+    let (_, before) = compare(TWO_ACTIONS, TWO_ACTIONS, "two-actions");
+    let (_, after) = compare(RENAMED, RENAMED, "two-actions-renamed");
+    assert_eq!(before, after, "alpha-renaming changed the outcome kind");
+    assert_eq!(before[0], 1, "{before:?}");
 }
 
 /// Revise an engine to `base` then `source`, and compare its exploration and every

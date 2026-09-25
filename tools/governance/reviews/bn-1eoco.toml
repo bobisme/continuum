@@ -1,0 +1,50 @@
+[change]
+bone = "bn-1eoco"
+author = "continuum-dev"
+summary = "continuum-incremental's engine and its independent audit read the whole definedness chain via continuum-model-core's Definedness (bn-24a5c's fail-closed, collision-checked rule), not a re-implemented depth-1 scan: check_invariant, domain_safety, and the Validated witness's engine-side scan (assumption V1) call Definedness::of directly (engine.rs), and the audit calls the same function independently of the engine's decision logic (audit.rs, tests/independence.rs still pins its imports), so a nested chain, a gap, or an action-name collision classifies the same way on every path that reads one. tests/differential.rs's comparison with engine-reference's CheckOutcome::Undefined is real for whatever chain shape the oracle reports, gains a two-actions case and an alpha-renaming metamorphic test, and the depth-1 scope note is removed from the test and from lib.rs. Nested chains, gaps, and collisions — shapes only a hand-built model can carry, since CML lowering never writes one — are covered where they can be built: new differential unit tests in engine.rs's and audit.rs's own test modules, each checked against continuum-engine-reference's own checking::check"
+
+[semantic]
+covers = [
+  "crates/continuum-incremental/src/",
+]
+reference_tests = [
+  "crates/continuum-incremental/src/engine.rs::a_false_guard_of_a_guard_is_undefined_in_the_engine_too",
+  "crates/continuum-incremental/src/engine.rs::a_false_guard_of_an_action_guard_is_undefined_action_in_the_engine_too",
+  "crates/continuum-incremental/src/engine.rs::a_chain_with_a_gap_fails_closed_in_the_engine_too",
+  "crates/continuum-incremental/src/engine.rs::a_chain_through_an_action_name_fails_closed_in_the_engine_too",
+  "crates/continuum-incremental/src/engine.rs::a_nested_evaluation_error_is_reported_in_the_engine_too",
+  "crates/continuum-incremental/src/audit.rs::a_false_guard_of_a_guard_is_undefined_in_the_audit_too",
+  "crates/continuum-incremental/src/audit.rs::a_false_guard_of_an_action_guard_is_undefined_action_in_the_audit_too",
+  "crates/continuum-incremental/src/audit.rs::a_chain_with_a_gap_fails_closed_in_the_audit_too",
+  "crates/continuum-incremental/src/audit.rs::a_chain_through_an_action_name_fails_closed_in_the_audit_too",
+  "crates/continuum-incremental/src/audit.rs::a_nested_evaluation_error_is_reported_in_the_audit_too",
+  "crates/continuum-incremental/src/audit.rs::undefined_action_reports_the_chains_base_name",
+  "crates/continuum-incremental/tests/differential.rs::undefined_reads_agree_with_the_reference_engine_run_directly",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-incremental/tests/differential.rs::alpha_renaming_the_two_actions_case_preserves_its_undefined_outcome", relation = "alpha-renaming" },
+]
+differential_tests = [
+  { test = "crates/continuum-incremental/tests/differential.rs::undefined_reads_agree_with_the_reference_engine_run_directly", oracle = "continuum-engine-reference", subject = "continuum-incremental" },
+  { test = "crates/continuum-incremental/tests/differential.rs::every_reused_exploration_and_verdict_equals_the_reference_engine_run_directly", oracle = "continuum-engine-reference", subject = "continuum-incremental" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers incremental reuse or its parity audit (bn-31vf's own record states the same); this closes the depth-1 gap bn-24a5c's follow-up (bn-1eoco) named against the incremental engine, and moves no claim's evidence state"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: InvariantVerdict, DomainSafety and the canonical encoders in output.rs are unchanged in shape (UndefinedAction still carries one action name, a depth and a state) — only which predicates the scan that fills them reads changes, from a depth-1 lookup to the whole chain"
+
+[semantic.migration]
+verdict = "Revalidate"
+note = "continuum-incremental: every model the CML front end lowers still has depth-1, collision-free definedness chains (no declared name can contain '#', and lowering never nests a chain), so check_invariant, domain_safety and the Validated witness's engine-side scan report the identical InvariantVerdict/DomainSafety outcome for every source this crate has ever accepted; the differential and reuse-spike goldens are unchanged. Work accounting is not byte-identical: the 'action definedness guards'/'classify guards' charge that prices Definedness::of, and the per-invariant 'check invariant' charge (now sized by that invariant's own chain depth rather than a fixed two evaluations), both move — a source already near Limits::work could see a different (never smaller, per the charge-before-work rule) accounting, though not at the 2^36 default. Behaviour changes only for a hand-built continuum_model_core::model::Model with a nested chain, a gap, or a name collision, which neither Engine::revise nor audit::clean can receive today (both take CML source text only) — the new engine.rs/audit.rs unit tests are the first exercise of that path, and it now reports the same typed outcome continuum-engine-reference does instead of continuing to treat the chain as depth-1. Cargo.toml gains a direct continuum-model-core path dependency (already reachable transitively through continuum-engine-reference and continuum-cml-elab); Cargo.lock is regenerated, no external crate is added; tools/governance/dependency-rationale.toml's continuum-model-core entry gains continuum-incremental in used_by"
+
+# GOV-4-06 (security-review-present) is lead-owned: the dedicated security review
+# runs after this report and adds this table. Left out on purpose.
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-3vfim0"
+verdict = "approved"

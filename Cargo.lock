@@ -445,6 +445,7 @@ dependencies = [
  "continuum-cml-elab",
  "continuum-cml-syntax",
  "continuum-engine-reference",
+ "continuum-model-core",
  "continuum-value",
 ]
 

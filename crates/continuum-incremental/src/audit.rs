@@ -17,6 +17,19 @@
 //! comparison is over the canonical encoding). A defect in an encoder would make
 //! both sides agree on a weaker artifact; each encoder states what it keeps.
 //!
+//! It also shares `continuum_model_core::definedness::Definedness` (bn-1eoco): the
+//! model's own whole-chain classification of its `#defined` predicates (RFC 0003,
+//! "Definedness"; bn-24a5c). That is model semantics, not engine decision logic —
+//! it names no cache, key, class, lane, or quarantine, and it is the same
+//! classifier `continuum-engine-reference`'s checker reads (`tests/independence.rs`
+//! admits it: the forbidden-identifier pin below names engine internals, not model
+//! types). Calling it here, instead of re-deriving the chain rule, is what makes
+//! "the audit agrees with the reference engine on chains" true by construction
+//! rather than by two independent derivations staying in sync; the verdict loops
+//! that *use* its classification — the per-state precedence over actions, an
+//! invariant's own chain, then the invariant — are still written here, not shared
+//! with [`crate::engine`].
+//!
 //! # What is compared
 //!
 //! The stages [`Stage::compared`] marks: the parse tree, the normalized model, the
@@ -33,6 +46,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use continuum_cml_elab::NormModel;
 use continuum_engine_reference::bfs::{self, Exploration, ExplorationError};
 use continuum_engine_reference::model::{Model, State};
+use continuum_model_core::definedness::{Definedness, definedness_base};
 
 use crate::engine::{Limits, Memo, Outcome, Record, Revision};
 use crate::output::{self, DomainSafety, ExplorationStatus, InvariantVerdict};
@@ -343,52 +357,52 @@ fn clean_into(
         Label::of(Stage::Explore),
         output::exploration(&explored, &model),
     );
-    // Definedness predicates by their subject, read from the lowered model's own
-    // predicate names (`continuum_cml_elab::lower::definedness_subject`): an
-    // invariant's guard by the invariant, and every other one an action's. One
-    // ordered-set lookup per predicate, charged first.
-    // A set of the invariant names (a sort), then one lookup per predicate: each
-    // a descent of log2(invariants) levels comparing names of at most 128 bytes.
-    let levels = u64::from(units(norm.invariants.len().max(2)).ilog2() + 1);
+    // The model's definedness predicates, classified by the whole-chain rule
+    // (bn-24a5c, `continuum_model_core::definedness::Definedness`): every
+    // `#defined` predicate, grouped by the base of its chain, deepest member
+    // first, fail closed on a gap or a name shared with an action. Its own doc
+    // bounds the cost at `O((p + a) log (p + a))` times the chain-depth bound (at
+    // most `MAX_IDENT_BYTES / 8`, 16): charged first, plus building
+    // `action_names` — up to two entries per action (its own name and, for an
+    // instance, its schema), each an ordered-set insertion of `levels`
+    // comparisons (Codex: a flat `action_count * 128` undercounts this once
+    // `action_count` alone exceeds the predicate count).
+    let predicate_count = model.predicates().len();
+    let action_count = model.actions().len();
+    let levels = u64::from(units(predicate_count.saturating_add(action_count).max(2)).ilog2() + 1);
+    const CHAIN_DEPTH_BOUND: u64 = 128 / 8; // MAX_IDENT_BYTES / 8
+    const BYTE_COMPARISON_UNIT: u64 = 128 / 8;
     budget.take(
-        units(model.predicates().len())
-            .saturating_add(units(norm.invariants.len()))
+        units(predicate_count)
+            .saturating_mul(CHAIN_DEPTH_BOUND)
             .saturating_mul(levels)
-            .saturating_mul(128 / 8)
-            .saturating_add(units(model.predicates().len()).saturating_mul(128)),
+            .saturating_mul(BYTE_COMPARISON_UNIT)
+            .saturating_add(
+                units(action_count)
+                    .saturating_mul(2)
+                    .saturating_mul(levels)
+                    .saturating_mul(BYTE_COMPARISON_UNIT),
+            ),
         "classify guards",
     )?;
-    let invariant_names: BTreeSet<&str> = norm.invariants.iter().map(|i| i.name.as_str()).collect();
-    let mut guards: BTreeMap<&str, usize> = BTreeMap::new();
-    let mut action_guards: Vec<(usize, &str)> = Vec::new();
-    for (index, predicate) in model.predicates().iter().enumerate() {
-        let Some(subject) =
-            continuum_cml_elab::lower::definedness_subject(predicate.name().as_str())
-        else {
-            continue;
-        };
-        if invariant_names.contains(subject) {
-            guards.insert(subject, index);
-        } else {
-            action_guards.push((index, subject));
-        }
-    }
+    let definedness = Definedness::of(&model);
+    let action_guard_count: usize = definedness.action_chains().map(<[usize]>::len).sum();
     let states = explored.as_ref().map_or(0, |e| e.reachable().len());
     budget.take(
         units(states)
-            .saturating_mul(units(action_guards.len()))
+            .saturating_mul(units(action_guard_count))
             .saturating_mul(weight),
         "action definedness",
     )?;
     let action_fault = explored
         .as_ref()
         .ok()
-        .and_then(|exploration| undefined_action(&model, &action_guards, exploration));
+        .and_then(|exploration| undefined_action(&model, &definedness, exploration));
     let safety = match (&explored, &action_fault) {
         (Err(error), _) => DomainSafety::ExplorationFailed(error.to_string()),
         (Ok(_), Some(Err(message))) => DomainSafety::Evaluation(message.clone()),
         (Ok(_), Some(Ok((action, depth, state)))) => DomainSafety::UndefinedAction {
-            action: (*action).to_owned(),
+            action: action.clone(),
             depth: *depth,
             state: state.clone(),
         },
@@ -402,16 +416,22 @@ fn clean_into(
         output::domain_safety(&safety),
     );
     for invariant in &norm.invariants {
-        // Per state: the action guards, the invariant's guard, the invariant.
+        // Per state: the action guards, the invariant's own chain, the invariant.
+        let own_depth = model
+            .predicate_index(invariant.name.as_str())
+            .map_or(0, |index| definedness.guards_of(index).len());
         budget.take(
             units(states)
-                .saturating_mul(units(action_guards.len()).saturating_add(2))
+                .saturating_mul(
+                    units(action_guard_count)
+                        .saturating_add(units(own_depth))
+                        .saturating_add(1),
+                )
                 .saturating_mul(weight),
             "check invariant",
         )?;
-        let guard = guards.get(invariant.name.as_str()).copied();
         let verdict = match &explored {
-            Ok(exploration) => verdict(&model, &invariant.name, guard, &action_guards, exploration),
+            Ok(exploration) => verdict(&model, &invariant.name, &definedness, exploration),
             Err(error) => InvariantVerdict::ExplorationFailed(error.to_string()),
         };
         run.outputs.insert(
@@ -430,92 +450,115 @@ fn clean_into(
     Ok(())
 }
 
-/// The first explored state (least depth, then canonical order) where an action's
-/// definedness guard is false, with the first such action there in predicate order;
-/// or the first guard that cannot be evaluated, in canonical order. `None` when
-/// every guard holds everywhere.
-fn undefined_action<'m>(
+/// The declared action or predicate a false definedness-chain member names: the
+/// base of its own chain (`continuum_model_core::definedness::definedness_base`),
+/// the same for every member of the chain whatever depth is false.
+fn definedness_name(model: &Model, guard: usize) -> String {
+    model
+        .predicates()
+        .get(guard)
+        .map(|predicate| predicate.name().as_str())
+        .and_then(definedness_base)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// The first explored state (least depth, then canonical order) where some
+/// action's whole definedness chain (deepest member first, in the order of its
+/// shallowest member) has a false member, and the declared action or predicate
+/// that chain names; or the first guard that cannot be evaluated, in canonical
+/// order. `None` when every guard holds everywhere.
+fn undefined_action(
     model: &Model,
-    action_guards: &[(usize, &'m str)],
+    definedness: &Definedness,
     exploration: &Exploration,
-) -> Option<Result<(&'m str, usize, State), String>> {
+) -> Option<Result<(String, usize, State), String>> {
     let reachable = exploration.reachable();
-    let mut best: Option<(&'m str, usize, State)> = None;
+    let mut best: Option<(usize, usize, State)> = None; // (depth, guard, state)
     for (position, state) in reachable.states().iter().enumerate() {
         let depth = reachable.depths()[position];
         let mut failed = None;
-        for &(guard, action) in action_guards {
-            match model.evaluate_predicate(guard, state) {
-                Err(error) => return Some(Err(error.to_string())),
-                Ok(false) => {
-                    failed = Some(action);
-                    break;
+        'chains: for chain in definedness.action_chains() {
+            for &guard in chain {
+                match model.evaluate_predicate(guard, state) {
+                    Err(error) => return Some(Err(error.to_string())),
+                    Ok(false) => {
+                        failed = Some(guard);
+                        break 'chains;
+                    }
+                    Ok(true) => {}
                 }
-                Ok(true) => {}
             }
         }
-        if let Some(action) = failed
-            && best.as_ref().is_none_or(|(_, d, _)| depth < *d)
+        if let Some(guard) = failed
+            && best.as_ref().is_none_or(|(d, _, _)| depth < *d)
         {
-            best = Some((action, depth, state.clone()));
+            best = Some((depth, guard, state.clone()));
         }
     }
-    best.map(Ok)
+    best.map(|(depth, guard, state)| Ok((definedness_name(model, guard), depth, state)))
 }
 
 /// One invariant over the full model's exploration, written independently of the
-/// engine's check. Per state in canonical order: the actions' definedness guards
-/// (a false one marks the state and nothing else is read there), then the
-/// invariant's own guard (a false one marks the state), then the invariant; the
-/// first evaluation error of any of them wins. After the scan: an undefined action
-/// read, then an undefined invariant read, then the least failing depth, then
-/// `Holds` for a closed run. Each "first" is least depth, then canonical order.
+/// engine's check. Per state in canonical order: the actions' whole definedness
+/// chains (a false member marks the state and nothing else is read there), then
+/// the invariant's own whole chain, deepest first (a false member marks the
+/// state), then the invariant; the first evaluation error of any of them wins.
+/// After the scan: an undefined action read, then an undefined invariant read,
+/// then the least failing depth, then `Holds` for a closed run. Each "first" is
+/// least depth, then canonical order.
 fn verdict(
     model: &Model,
     name: &str,
-    guard: Option<usize>,
-    action_guards: &[(usize, &str)],
+    definedness: &Definedness,
     exploration: &Exploration,
 ) -> InvariantVerdict {
     let Some(index) = model.predicate_index(name) else {
         return InvariantVerdict::NoPredicate;
     };
+    // `#` is not a CML identifier character, so a declared invariant's name never
+    // itself ends in `#defined`: `index` is always a chain's base, never a
+    // member — this function does not implement the reference scanner's separate
+    // case for a *subject* that is itself a guard
+    // (`continuum_engine_reference::definedness::scan`'s `is_guard` branch),
+    // because `name` is always a declared CML invariant here, never a `#defined`
+    // predicate's own name.
+    let own_chain = definedness.guards_of(index);
     let reachable = exploration.reachable();
     let mut first_action: Option<(String, usize, State)> = None;
     let mut first_undefined: Option<(usize, State)> = None;
     let mut least: Option<(usize, State)> = None;
-    for (position, state) in reachable.states().iter().enumerate() {
+    'states: for (position, state) in reachable.states().iter().enumerate() {
         let depth = reachable.depths()[position];
-        let mut action_undefined = None;
-        for &(g, action) in action_guards {
-            match model.evaluate_predicate(g, state) {
+        for chain in definedness.action_chains() {
+            for &guard in chain {
+                match model.evaluate_predicate(guard, state) {
+                    Err(error) => return InvariantVerdict::Evaluation(error.to_string()),
+                    Ok(false) => {
+                        if first_action.as_ref().is_none_or(|(_, d, _)| depth < *d) {
+                            first_action =
+                                Some((definedness_name(model, guard), depth, state.clone()));
+                        }
+                        continue 'states;
+                    }
+                    Ok(true) => {}
+                }
+            }
+        }
+        for &guard in own_chain {
+            match model.evaluate_predicate(guard, state) {
                 Err(error) => return InvariantVerdict::Evaluation(error.to_string()),
                 Ok(false) => {
-                    action_undefined = Some(action);
-                    break;
+                    if first_undefined
+                        .as_ref()
+                        .is_none_or(|(best, _)| depth < *best)
+                    {
+                        first_undefined = Some((depth, state.clone()));
+                    }
+                    continue 'states;
                 }
                 Ok(true) => {}
             }
-        }
-        if let Some(action) = action_undefined {
-            if first_action.as_ref().is_none_or(|(_, d, _)| depth < *d) {
-                first_action = Some((action.to_owned(), depth, state.clone()));
-            }
-            continue;
-        }
-        let is_defined = match guard.map(|g| model.evaluate_predicate(g, state)) {
-            None | Some(Ok(true)) => true,
-            Some(Ok(false)) => false,
-            Some(Err(error)) => return InvariantVerdict::Evaluation(error.to_string()),
-        };
-        if !is_defined {
-            if first_undefined
-                .as_ref()
-                .is_none_or(|(best, _)| depth < *best)
-            {
-                first_undefined = Some((depth, state.clone()));
-            }
-            continue;
         }
         match model.evaluate_predicate(index, state) {
             Err(error) => return InvariantVerdict::Evaluation(error.to_string()),
@@ -891,4 +934,189 @@ pub fn cone(
         }
     }
     soundness
+}
+
+#[cfg(test)]
+mod tests {
+    use continuum_engine_reference::bfs::Bounds;
+    use continuum_engine_reference::checking::{self, CheckOutcome, DeadlockPolicy, Obligations};
+    use continuum_engine_reference::{ActionDecl, BoolExpr, CmpOp, Guarded, IntExpr, ModelBuilder};
+
+    use super::*;
+
+    // bn-1eoco: the whole-chain rule, differentially, against hand-built models —
+    // the only way to give `clean`'s own scan a chain deeper than depth 1, a gap,
+    // or a collision, since `clean` only ever lowers CML source, and `#` is not a
+    // CML identifier character (so lowering never writes one). Each case mirrors
+    // `continuum-engine-reference`'s own `tests/definedness_nested.rs` (cr-pt5h3a)
+    // and is checked against its `checking::check`, the same oracle
+    // `tests/differential.rs` compares this crate's engine against — not a
+    // re-derivation.
+
+    fn x_is(value: i64) -> BoolExpr {
+        BoolExpr::compare(CmpOp::Eq, IntExpr::var("x"), IntExpr::constant(value))
+    }
+
+    /// `x` steps 0 → 1 and stops. Extra predicates are added by `with`.
+    fn model(with: &[(&str, BoolExpr)]) -> Model {
+        let mut builder = ModelBuilder::new()
+            .variable("x", 0, 1)
+            .action(ActionDecl::deterministic(
+                "Step",
+                x_is(0),
+                vec![("x", IntExpr::constant(1))],
+            ))
+            .initial_state(&[("x", 0)]);
+        for (name, body) in with {
+            builder = builder.predicate(name, body.clone());
+        }
+        builder.build().expect("builds")
+    }
+
+    /// The reference engine's own verdict for `name`, converted the way
+    /// `tests/differential.rs`'s oracle is.
+    fn oracle_verdict(model: &Model, exploration: &Exploration, name: &str) -> InvariantVerdict {
+        let index = model.predicate_index(name).expect("declared");
+        let report = checking::check(
+            model,
+            exploration,
+            &Obligations::new(DeadlockPolicy::Allowed).invariant(index),
+        )
+        .expect("declared");
+        match report.invariant(index).expect("checked").outcome() {
+            CheckOutcome::Holds { states } => InvariantVerdict::Holds { states: *states },
+            CheckOutcome::Violated { state, depth, .. } => InvariantVerdict::Violated {
+                depth: *depth,
+                state: state.clone(),
+            },
+            CheckOutcome::Inconclusive(why) => panic!("{name}: {why:?}"),
+            CheckOutcome::Undefined(undefined) => match undefined.read() {
+                Guarded::Action => InvariantVerdict::UndefinedAction {
+                    action: undefined.subject().to_owned(),
+                    depth: undefined.depth(),
+                    state: undefined.state().clone(),
+                },
+                Guarded::Predicate(_) => InvariantVerdict::Undefined {
+                    depth: undefined.depth(),
+                    state: undefined.state().clone(),
+                },
+            },
+        }
+    }
+
+    /// Assert the audit's own `verdict` — the production code path, not a copy of
+    /// it — and the reference checker agree over `model`'s whole exploration, for
+    /// every name in `names`.
+    fn assert_agrees(model: &Model, names: &[&str]) {
+        let exploration = bfs::explore(model, Bounds::CERTIFIABLE).expect("explores");
+        let definedness = Definedness::of(model);
+        for &name in names {
+            let expected = oracle_verdict(model, &exploration, name);
+            let got = verdict(model, name, &definedness, &exploration);
+            assert_eq!(got, expected, "{name}");
+        }
+    }
+
+    /// Codex's case: `I = true`, `I#defined = true`, `I#defined#defined` false at
+    /// `x = 1`: the audit follows the whole chain, not just depth 1.
+    ///
+    /// Only `I` is checked here, not `I#defined` itself: the oracle's own `scan`
+    /// treats a *subject* that is itself a guard specially (a false value there
+    /// is `Undefined`, never `Violated`, its `is_guard` branch), which `verdict`
+    /// does not implement — `name` is always a declared CML invariant, and `#` is
+    /// not a CML identifier character, so `verdict` never receives a name that is
+    /// itself a definedness predicate in production.
+    #[test]
+    fn a_false_guard_of_a_guard_is_undefined_in_the_audit_too() {
+        let model = model(&[
+            ("I", BoolExpr::constant(true)),
+            ("I#defined", BoolExpr::constant(true)),
+            ("I#defined#defined", x_is(0)),
+        ]);
+        assert_agrees(&model, &["I"]);
+    }
+
+    /// `Step#defined` holds, `Step#defined#defined` is false at `x = 1`: an
+    /// undefined action read that dominates.
+    #[test]
+    fn a_false_guard_of_an_action_guard_is_undefined_action_in_the_audit_too() {
+        let model = model(&[
+            ("Ok", BoolExpr::constant(true)),
+            ("Step#defined", BoolExpr::constant(true)),
+            ("Step#defined#defined", x_is(0)),
+        ]);
+        assert_agrees(&model, &["Ok"]);
+    }
+
+    /// A gap (`I#defined#defined` with no `I#defined`) is not a well-formed guard
+    /// of `I`: fail closed as an action read, in the audit too.
+    #[test]
+    fn a_chain_with_a_gap_fails_closed_in_the_audit_too() {
+        let model = model(&[
+            ("I", BoolExpr::constant(true)),
+            ("J", BoolExpr::constant(true)),
+            ("I#defined#defined", x_is(0)),
+        ]);
+        assert_agrees(&model, &["I", "J"]);
+    }
+
+    /// An action sharing a chain member's full name (`I#defined`) reads the whole
+    /// chain as the action's, in the audit too.
+    #[test]
+    fn a_chain_through_an_action_name_fails_closed_in_the_audit_too() {
+        let model = ModelBuilder::new()
+            .variable("x", 0, 1)
+            .action(ActionDecl::deterministic(
+                "I#defined",
+                x_is(0),
+                vec![("x", IntExpr::constant(1))],
+            ))
+            .predicate("I", BoolExpr::constant(true))
+            .predicate("J", BoolExpr::constant(true))
+            .predicate("I#defined#defined", x_is(0))
+            .initial_state(&[("x", 0)])
+            .build()
+            .expect("builds");
+        // Both `I` (the chain's own base) and `J` (unrelated): the malformed
+        // chain invalidates every invariant's checking, not just `I`'s.
+        assert_agrees(&model, &["I", "J"]);
+    }
+
+    /// A nested guard that cannot be evaluated is an evaluation error, in the
+    /// audit too — reported before the shallower guard is read.
+    #[test]
+    fn a_nested_evaluation_error_is_reported_in_the_audit_too() {
+        let overflow = BoolExpr::compare(
+            CmpOp::Eq,
+            IntExpr::times(IntExpr::constant(i64::MAX), IntExpr::constant(2)),
+            IntExpr::constant(0),
+        );
+        let model = model(&[
+            ("I", BoolExpr::constant(true)),
+            ("I#defined", BoolExpr::constant(true)),
+            ("I#defined#defined", overflow),
+        ]);
+        let exploration = bfs::explore(&model, Bounds::CERTIFIABLE).expect("explores");
+        let definedness = Definedness::of(&model);
+        let got = verdict(&model, "I", &definedness, &exploration);
+        assert!(matches!(got, InvariantVerdict::Evaluation(_)), "{got:?}");
+    }
+
+    /// `undefined_action` alone (the `domain_safety` path's own scan): reports the
+    /// chain's base name, agreeing with the reference checker's classification.
+    #[test]
+    fn undefined_action_reports_the_chains_base_name() {
+        let model = model(&[
+            ("Ok", BoolExpr::constant(true)),
+            ("Step#defined", BoolExpr::constant(true)),
+            ("Step#defined#defined", x_is(0)),
+        ]);
+        let exploration = bfs::explore(&model, Bounds::CERTIFIABLE).expect("explores");
+        let definedness = Definedness::of(&model);
+        let (action, depth, _) = undefined_action(&model, &definedness, &exploration)
+            .expect("found")
+            .expect("evaluates");
+        assert_eq!(action, "Step");
+        assert_eq!(depth, 1);
+    }
 }
