@@ -110,7 +110,8 @@ EXTERNAL_SCHEMA_PAIRS = {
 }
 
 # Receipt fragments `continuum-repair`'s PR-22 suites emit (bn-1ebx, bn-cps6, bn-1cec;
-# bn-9r5e and bn-yzu1 in `tests/pr22_impl05_impl06_evidence.rs`). A skeleton is not a
+# bn-9r5e and bn-yzu1 in `tests/pr22_impl05_impl06_evidence.rs`; bn-1plr in
+# `tests/pr22_impl09_policy_decision.rs`). A skeleton is not a
 # whole receipt: the schema requires fields that other PR-22 bones own, so no fragment
 # is checked against a derived schema. Each is checked against the schema's own
 # subschemas, with the schema's `$defs` in scope:
@@ -133,6 +134,10 @@ EXTERNAL_SCHEMA_FRAGMENTS = {
         # PR-22 / IMPL-03 (bn-19gw): `semantic_diff`, `intent_diff` and the diff's
         # `unknowns` entry, from `tests/pr22_impl03_semantic_diff_evidence.rs`.
         ("crates/continuum-repair/tests/fixtures/pr22-impl03-ack-after-sync-semantic-diff.json", "properties"),
+        # PR-22 / IMPL-09 (bn-1plr): `policy_decision`, from
+        # `tests/pr22_impl09_policy_decision.rs`.
+        ("crates/continuum-repair/tests/fixtures/pr22-impl09-ack-after-sync-policy-decision.json", "properties"),
+        ("crates/continuum-repair/tests/fixtures/pr22-impl09-gate-1-failure-policy-decision.json", "properties"),
     ),
 }
 
@@ -269,8 +274,8 @@ def check_schema_fragments() -> int:
                     raise AssertionError(formatted)
             count += 1
     registered = sum(len(fragments) for fragments in EXTERNAL_SCHEMA_FRAGMENTS.values())
-    assert registered == 7 and count == registered, (
-        f"{count} of {registered} schema fragments checked; the PR-22 suites register seven"
+    assert registered == 9 and count == registered, (
+        f"{count} of {registered} schema fragments checked; the PR-22 suites register nine"
     )
     return count
 

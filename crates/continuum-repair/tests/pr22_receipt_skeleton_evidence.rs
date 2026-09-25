@@ -31,11 +31,13 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use continuum_intent::canonical_json::Json;
+use continuum_intent::change_policy::PolicyDecision;
 use continuum_intent::contract::{IntentContract, IntentId};
 use continuum_repair::diff::{DiffScope, ImpactScope, ScopeAnswer};
 use continuum_repair::handle::{CrashpackId, RepairId, SnapshotId};
 use continuum_repair::hypothesis::{ChangeKind, Hypothesis, Proposal};
 use continuum_repair::patch::{DeclaredChange, FileEdit};
+use continuum_repair::policy::{NoReasons, Standing, Verdict};
 use continuum_repair::receipt::{
     CandidateEvidence, CertificateRecord, ClaimRefusal, ClaimedGateStatus, ClaimedReceipt,
     ComposeRefusal, IntentRegistry, IntentStanding, MAX_CLAIMED_RECEIPT_BYTES, NotYetEnforced,
@@ -43,6 +45,7 @@ use continuum_repair::receipt::{
     RegisteredIntent, SealedSnapshots, SnapshotRole, Store, TransactionStore, UnenforcedGate,
     VerifyRefusal, verify_for_promotion, verify_skeleton,
 };
+use continuum_repair::receipt::{DecisionRefusal, DiffGap, ReceiptClassification};
 use continuum_repair::transaction::{
     FailureBinding, GateName, GateProfile, RepairTransaction, Resolution,
 };
@@ -320,7 +323,44 @@ fn claim_for(tx: &Tx) -> BTreeMap<String, Json> {
         ("semantic_diff".to_owned(), s(&diff_for(tx))),
         ("intent_diff".to_owned(), s(&diff_for(tx))),
         ("unknowns".to_owned(), unknowns_for(tx)),
+        ("policy_decision".to_owned(), s("allow")),
     ])
+}
+
+/// IMPL-09 (bn-1plr): the claim's `allow` is refused by the verdict recomputed from the
+/// transaction's record, which is inconclusive with every gate 1–11 of the profile
+/// `pending`, each named, and consults no classification because the recomputed diff's
+/// program-side layer is unclassified. Before IMPL-09 the same claim was refused one
+/// step later, at the first `pending` gate on the record (`GateNotOnRecord(BaseReplay)`).
+fn refused_by_the_pending_verdict<T: std::fmt::Debug>(result: Result<T, VerifyRefusal>, tx: &Tx) {
+    let Err(VerifyRefusal::PolicyDecision(DecisionRefusal::Disagrees {
+        claimed: PolicyDecision::Allow,
+        recomputed,
+    })) = result
+    else {
+        panic!("the pending record must refuse the claimed allow: {result:?}");
+    };
+    assert_eq!(recomputed.verdict().repair_id(), tx.repair_id());
+    assert_eq!(
+        recomputed.classification(),
+        ReceiptClassification::Absent(DiffGap::ProgramLayerUnclassified)
+    );
+    let pending: Vec<GateName> = GateName::ALL
+        .into_iter()
+        .filter(|gate| tx.gate_profile().enforces(*gate) && *gate != GateName::ReceiptGeneration)
+        .collect();
+    let Verdict::Inconclusive { undecided } = recomputed.verdict().verdict() else {
+        panic!("a pending record is inconclusive");
+    };
+    assert_eq!(
+        undecided.iter().map(|entry| entry.gate).collect::<Vec<_>>(),
+        pending
+    );
+    assert!(
+        undecided
+            .iter()
+            .all(|entry| entry.standing == Standing::Pending)
+    );
 }
 
 /// The recomputed diff handle of `tx` under the skeleton suite's stores.
@@ -359,7 +399,7 @@ fn set_gate(claim: &mut BTreeMap<String, Json>, gate: GateName, status: &str) {
 fn verify_claim(claim: BTreeMap<String, Json>, world: &World) -> Result<(), VerifyRefusal> {
     let bytes = Json::Object(claim).to_canonical_bytes();
     let parsed = ClaimedReceipt::parse(&bytes)?;
-    verify_skeleton(&parsed, world, world, world, world, world).map(|_| ())
+    verify_skeleton(&parsed, world, world, world, world, world, &NoReasons).map(|_| ())
 }
 
 // --- positive ----------------------------------------------------------------------
@@ -451,11 +491,9 @@ fn pr22_positive_the_skeleton_cites_the_retained_pr20_transaction_version() {
 fn pr22_positive_a_claim_matching_every_owned_field_is_refuted_by_the_pending_record() {
     let tx = applied();
     let world = World::register(&[&tx]);
-    assert_eq!(
-        verify_claim(claim_for(&tx), &world),
-        Err(VerifyRefusal::GateNotOnRecord(GateName::BaseReplay))
-    );
-    assert_eq!(ReceiptSeam::ALL.len(), 6);
+    refused_by_the_pending_verdict(verify_claim(claim_for(&tx), &world), &tx);
+    // IMPL-09 moved `policy_decision` from a seam to an owned field (bn-1plr).
+    assert_eq!(ReceiptSeam::ALL.len(), 5);
     assert!(ReceiptSeam::ALL.contains(&ReceiptSeam::PromotionRecord));
 }
 
@@ -475,9 +513,9 @@ fn pr22_impl07_negative_promotion_verification_reaches_the_record_with_gate_12_p
     let world = World::register(&[&tx]);
     let bytes = Json::Object(claim_for(&tx)).to_canonical_bytes();
     let claim = ClaimedReceipt::parse(&bytes).unwrap();
-    assert_eq!(
-        verify_for_promotion(&claim, &world, &world, &world, &world, &world),
-        Err(VerifyRefusal::GateNotOnRecord(GateName::BaseReplay))
+    refused_by_the_pending_verdict(
+        verify_for_promotion(&claim, &world, &world, &world, &world, &world, &NoReasons),
+        &tx,
     );
 }
 
@@ -488,10 +526,7 @@ fn pr22_impl07_negative_promotion_verification_reaches_the_record_with_gate_12_p
 fn pr22_impl01_positive_a_published_receipt_survives_a_later_intent_revision() {
     let tx = applied();
     let world = World::register(&[&tx]).with_standing(IntentStanding::Superseded);
-    assert_eq!(
-        verify_claim(claim_for(&tx), &world),
-        Err(VerifyRefusal::GateNotOnRecord(GateName::BaseReplay))
-    );
+    refused_by_the_pending_verdict(verify_claim(claim_for(&tx), &world), &tx);
     assert_eq!(
         ReceiptSkeleton::compose(&tx, &world, &world, &world, &world),
         Err(ComposeRefusal::IntentSuperseded)
@@ -532,7 +567,7 @@ fn pr22_negative_a_client_supplied_receipt_for_an_unrecorded_transaction_verifie
     let example = ClaimedReceipt::parse(rounded.as_bytes()).expect("the example is well formed");
     assert_eq!(example.repair_transaction().as_str(), "rt_demo1");
     assert_eq!(
-        verify_skeleton(&example, &world, &world, &world, &world, &world),
+        verify_skeleton(&example, &world, &world, &world, &world, &world, &NoReasons),
         Err(VerifyRefusal::TransactionUnknown)
     );
 }

@@ -24,10 +24,13 @@ mod common;
 use std::collections::BTreeMap;
 
 use continuum_intent::canonical_json::Json;
+use continuum_intent::change_policy::PolicyDecision;
 use continuum_intent::contract::{IntentContract, IntentId};
 use continuum_repair::diff::{DiffScope, ImpactScope, ScopeAnswer};
 use continuum_repair::handle::{CrashpackId, RepairId, SnapshotId};
 use continuum_repair::hypothesis::{Hypothesis, Proposal};
+use continuum_repair::policy::{NoReasons, Verdict};
+use continuum_repair::receipt::DecisionRefusal;
 use continuum_repair::receipt::status::{
     CertificateStatus, InsufficientReason, MAX_CANDIDATE_CERTIFICATES, RefinementAbsence,
     RefinementStatus, UnverifiedReason,
@@ -494,14 +497,28 @@ fn pr22_impl06_negative_a_claim_is_checked_against_the_record_first() {
         })
         .collect();
     fields.insert("gates".to_owned(), Json::Array(gates));
+    fields.insert(
+        "policy_decision".to_owned(),
+        Json::String("allow".to_owned()),
+    );
     for unknowns in [skeleton.unknowns().entries_json(), Json::Array(Vec::new())] {
         let mut claim = fields.clone();
         claim.insert("unknowns".to_owned(), unknowns);
         let parsed = ClaimedReceipt::parse(&Json::Object(claim).to_canonical_bytes()).unwrap();
-        assert_eq!(
-            verify_skeleton(&parsed, &world, &world, &world, &world, &world).map(|_| ()),
-            Err(VerifyRefusal::GateNotOnRecord(GateName::BaseReplay))
-        );
+        // IMPL-09 (bn-1plr): the verdict recomputed from the pending record refuses the
+        // claimed `allow` first, naming gate 1 among the pending gates; before IMPL-09
+        // the refusal was the record comparison's `GateNotOnRecord(BaseReplay)`.
+        let Err(VerifyRefusal::PolicyDecision(DecisionRefusal::Disagrees {
+            claimed: PolicyDecision::Allow,
+            recomputed,
+        })) = verify_skeleton(&parsed, &world, &world, &world, &world, &world, &NoReasons)
+        else {
+            panic!("the pending record refuses the claim");
+        };
+        assert!(matches!(
+            recomputed.verdict().verdict(),
+            Verdict::Inconclusive { undecided } if undecided[0].gate == GateName::BaseReplay
+        ));
     }
 }
 

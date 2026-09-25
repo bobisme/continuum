@@ -19,9 +19,10 @@
 //! | a gate inside the profile is never `not_yet_enforced` | RFC 0032 "Gate profiles"; the receipt schema has no profile conditional (only `repair-transaction.schema.json` does) | [`verify_skeleton`] refuses [`VerifyRefusal::EnforcedGateListedUnenforced`] |
 //! | a client-supplied receipt is checked by reference and accepts no declared status | RFC 0032 "Gate 12 is verified, not asserted"; PR 22 exit | [`verify_skeleton`] resolves the named transaction, re-composes the skeleton from the stores, and compares; no claimed value is copied into the result |
 //! | handle possession confers nothing | ADR-0037 | `receipt_id` is not read; a well-formed claim is only a claim |
-//! | a receipt's gate status is the transaction's recorded status | RFC 0032 "Status machine"; "Gate 12 is verified, not asserted" | every gate but gate 12 must match the record, else [`VerifyRefusal::GateNotOnRecord`]; no transaction records an in-profile gate `passed` today, so no claim verifies today |
+//! | a receipt's gate status is the transaction's recorded status | RFC 0032 "Status machine"; "Gate 12 is verified, not asserted" | every gate but gate 12 must match the record, else [`VerifyRefusal::GateNotOnRecord`]; no transaction records an in-profile gate `passed` today, so no claim verifies today. Since IMPL-09 the recomputed policy decision refuses first any record with a gate 1–11 not `passed`, and any diff that does not pass gate 3 ([`VerifyRefusal::PolicyDecision`]); this comparison and the gate-3 check stay as independent backstops |
 //! | refinement and certificate status come from the evidence the daemon holds for the candidate, never from the claim | RFC 0032 receipt table; RFC 0005 correction 1; INV-008 | [`status`] (PR-22 / IMPL-05): [`RefinementCertificateStatus`] is derived from [`CandidateEvidence`]; a certificate counts only when model-bound to the candidate; a gate 8 or 9 listed `passed` without derived evidence is [`VerifyRefusal::GateWithoutEvidence`], and a claimed `coverage.refinement_coverage` or `coverage.certificate_rebuild` group is [`VerifyRefusal::CoverageNotDerived`] |
 //! | `unknowns` lists every unresolved unknown; an absent array is not an empty one | RFC 0032 receipt table, correction 11; INV-007 | [`unknowns`] (PR-22 / IMPL-06): [`Unknowns`] is derived from the record, the status and the daemon's pack cases; a claim must list exactly the derived entries in canonical order |
+//! | `policy_decision` is the server-recomputed `allow`; neither a claimed decision nor a held verdict is trusted | RFC 0032 receipt table, "Promotion" step 2, correction 11 | [`policy`] (PR-22 / IMPL-09): [`ReceiptDecision`] is the [`crate::policy::PolicyVerdict`] computed inside verification from the named version's recorded gates and the classification of the diff this module recomputes for it ([`ReceiptSkeleton::semantic_diff`]); the caller supplies only gate reasons. A claim that is not the recomputed field, or any verdict but a classified `PromoteEligible`, is [`VerifyRefusal::PolicyDecision`] with the recomputation |
 //! | gate 12 is `pending` on a `ready` transaction; promotion verifies the receipt, then moves gate 12 | RFC 0032 "Gate 12 is the promotion step"; "Promotion" steps 4–7 | [`verify_for_promotion`] requires gate 12 `pending` on the record and returns a [`ReceiptGenerationLicense`], the typed seam PR-20 promote consumes to record the transition; a record already showing gate 12 `passed` is [`VerifyRefusal::ReceiptGenerationAlreadyPassed`]. [`verify_skeleton`] checks a published receipt, whose record shows gate 12 `passed` |
 //!
 //! # What is not here (typed seams)
@@ -66,19 +67,23 @@
 use core::fmt;
 use std::collections::BTreeMap;
 
+pub mod policy;
 pub mod semantic_diff;
 pub mod status;
 pub mod unknowns;
 
 use continuum_intent::canonical_json::{Json, JsonError};
+use continuum_intent::change_policy::PolicyDecision;
 use continuum_intent::contract::{IntentContract, IntentId, IntentIdentity};
 use continuum_value::identity::ContentHasher;
 
 pub use crate::diff::ImpactScope;
 use crate::diff::{self as diff_mod, BaseStanding, DiffBasis, DiffClaimRefusal, TransactionDiff};
 use crate::handle::{RepairId, SnapshotId};
+use crate::policy::GateReasons;
 use crate::transaction::{GateName, GateProfile, GateStatus, RepairTransaction, Resolution};
 
+pub use policy::{DecisionRefusal, DecisionStanding, ReceiptClassification, ReceiptDecision};
 pub use semantic_diff::{DiffGap, ReceiptDiff, UndiffableCause};
 use status::EvidenceDefect;
 pub use status::{
@@ -148,11 +153,13 @@ pub enum ReceiptField {
     /// `refinement_coverage` and `certificate_rebuild`, are checked too, but `coverage`
     /// is not listed here: its other groups are [`ReceiptSeam::ReplayNeighborhoodMutation`].
     Unknowns,
+    /// `policy_decision` (PR-22 / IMPL-09).
+    PolicyDecision,
 }
 
 impl ReceiptField {
     /// Every owned field.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::RepairTransaction,
         Self::Intent,
         Self::BaseSnapshot,
@@ -162,6 +169,7 @@ impl ReceiptField {
         Self::GateProfile,
         Self::Gates,
         Self::Unknowns,
+        Self::PolicyDecision,
     ];
 
     /// The schema property.
@@ -177,6 +185,7 @@ impl ReceiptField {
             Self::GateProfile => "gate_profile",
             Self::Gates => "gates",
             Self::Unknowns => "unknowns",
+            Self::PolicyDecision => "policy_decision",
         }
     }
 }
@@ -190,8 +199,6 @@ pub enum ReceiptSeam {
     EnforcedGateOutcomes,
     /// `coverage`: replay, neighborhood, mutation and parity results (PR-22 / IMPL-04).
     ReplayNeighborhoodMutation,
-    /// `policy_decision` (PR-22 / IMPL-09).
-    PolicyDecision,
     /// `cost_ledger`, `checker`, `semantic_epoch`, `epochs`, `redacted_references`
     /// (PR 22 exit, at `repair.promote`).
     LedgerCheckerEpochs,
@@ -211,10 +218,9 @@ pub enum ReceiptSeam {
 
 impl ReceiptSeam {
     /// Every seam.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 5] = [
         Self::EnforcedGateOutcomes,
         Self::ReplayNeighborhoodMutation,
-        Self::PolicyDecision,
         Self::LedgerCheckerEpochs,
         Self::EnvelopeAndSignature,
         Self::PromotionRecord,
@@ -226,7 +232,6 @@ impl ReceiptSeam {
         match self {
             Self::EnforcedGateOutcomes => "PR-20 evaluate; PR-22-IMPL-04",
             Self::ReplayNeighborhoodMutation => "PR-22-IMPL-04",
-            Self::PolicyDecision => "PR-22-IMPL-09",
             Self::LedgerCheckerEpochs | Self::EnvelopeAndSignature | Self::PromotionRecord => {
                 "PR-22-EXIT"
             }
@@ -241,7 +246,6 @@ impl ReceiptSeam {
         match self {
             Self::EnforcedGateOutcomes => &["gates"],
             Self::ReplayNeighborhoodMutation => &["coverage"],
-            Self::PolicyDecision => &["policy_decision"],
             Self::LedgerCheckerEpochs => &[
                 "checker",
                 "cost_ledger",
@@ -1045,6 +1049,7 @@ pub struct ClaimedReceipt {
     gates: [ClaimedGateStatus; 12],
     unknowns: Vec<String>,
     coverage_groups: Vec<CoverageGroup>,
+    policy_decision: PolicyDecision,
 }
 
 /// Every group the schema's closed `coverage` object declares, sorted by code point.
@@ -1270,6 +1275,12 @@ impl ClaimedReceipt {
                 .ok_or(ClaimRefusal::Missing(ReceiptField::Unknowns))?,
         )?;
         let coverage_groups = claimed_coverage(fields.get("coverage"))?;
+        // RFC 0032 correction 11: a receipt carries its policy decision (IMPL-09).
+        let policy_decision = policy::claimed(
+            fields
+                .get(ReceiptField::PolicyDecision.property())
+                .ok_or(ClaimRefusal::Missing(ReceiptField::PolicyDecision))?,
+        )?;
         Ok(Self {
             repair_transaction,
             intent,
@@ -1280,6 +1291,7 @@ impl ClaimedReceipt {
             gates,
             unknowns,
             coverage_groups,
+            policy_decision,
         })
     }
 
@@ -1370,6 +1382,10 @@ pub enum VerifyRefusal {
     /// rests on is absent (gate 8: no refinement coverage; gate 9: no rebuild coverage).
     /// An uncomputable result is never a passed gate (RFC 0032 correction 7).
     GateWithoutEvidence(GateName),
+    /// The claimed `policy_decision` is not the recomputed one, or the recomputed
+    /// decision is not promotable (PR-22 / IMPL-09). Carries the recomputation whenever
+    /// one was made.
+    PolicyDecision(DecisionRefusal),
 }
 
 impl fmt::Display for VerifyRefusal {
@@ -1437,6 +1453,7 @@ impl fmt::Display for VerifyRefusal {
                 "`{}` is listed passed, and the evidence it rests on is absent",
                 gate.token()
             ),
+            Self::PolicyDecision(refusal) => write!(f, "{refusal}"),
         }
     }
 }
@@ -1452,6 +1469,12 @@ impl From<ClaimRefusal> for VerifyRefusal {
 impl From<ComposeRefusal> for VerifyRefusal {
     fn from(refusal: ComposeRefusal) -> Self {
         Self::Compose(refusal)
+    }
+}
+
+impl From<DecisionRefusal> for VerifyRefusal {
+    fn from(refusal: DecisionRefusal) -> Self {
+        Self::PolicyDecision(refusal)
     }
 }
 
@@ -1482,6 +1505,7 @@ pub enum ReceiptVerdict {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkeletonVerification {
     derived: ReceiptSkeleton,
+    decision: ReceiptDecision,
 }
 
 impl SkeletonVerification {
@@ -1489,6 +1513,13 @@ impl SkeletonVerification {
     #[must_use]
     pub const fn derived(&self) -> &ReceiptSkeleton {
         &self.derived
+    }
+
+    /// The policy decision recomputed for the version (PR-22 / IMPL-09): always a
+    /// classified promote-eligible `allow` on a verified receipt.
+    #[must_use]
+    pub const fn decision(&self) -> &ReceiptDecision {
+        &self.decision
     }
 
     /// The in-profile gates, which the claim and the transaction's record both list
@@ -1587,6 +1618,9 @@ fn check_claimed_diff<H: ContentHasher>(
     }
 }
 
+// One argument per daemon store the check reads, plus the claim, the stage and the
+// version; bundling them would hide which store each check consults.
+#[allow(clippy::too_many_arguments)]
 fn verify_at<H: ContentHasher>(
     claim: &ClaimedReceipt,
     stage: VerificationStage,
@@ -1595,7 +1629,8 @@ fn verify_at<H: ContentHasher>(
     snapshots: &impl SealedSnapshots,
     evidence: &impl CandidateEvidence,
     impact: &impl ImpactScope,
-) -> Result<ReceiptSkeleton, VerifyRefusal> {
+    reasons: &impl GateReasons,
+) -> Result<(ReceiptSkeleton, ReceiptDecision), VerifyRefusal> {
     let (derived, basis) = derive(
         transaction,
         registry,
@@ -1631,6 +1666,23 @@ fn verify_at<H: ContentHasher>(
             (true, ClaimedGateStatus::NotYetEnforced) | (false, ClaimedGateStatus::Passed) => {}
         }
     }
+    // At promotion a record that already shows gate 12 `passed` is refused as such,
+    // before the verdict, which admits gate 12 `passed` (cr-tz8fwi).
+    if stage == VerificationStage::Promotion
+        && transaction.gates().iter().any(|gate| {
+            gate.name() == GateName::ReceiptGeneration && gate.status() == GateStatus::Passed
+        })
+    {
+        return Err(VerifyRefusal::ReceiptGenerationAlreadyPassed);
+    }
+    // IMPL-09: the verdict is computed here, for this exact version, from its recorded
+    // gates and the classification of the diff just recomputed from the stores; the
+    // caller supplies only the reasons of inconclusive gates. It speaks before the
+    // per-gate record comparison, so a refusal names every failed and undecided gate
+    // and the classification. On a classified promote-eligible verdict the comparison
+    // below and the gate-3 check find nothing; they stay as independent backstops.
+    let decision = ReceiptDecision::derive(transaction, &derived.semantic_diff, reasons)?;
+    decision.check_claim(claim.policy_decision)?;
     // The record, not the claim, says what each gate's status is. `gates()` is in
     // gate-number order, the order of `GateName::ALL`. Gate 12 is always enforced, so
     // the claim lists it `passed` — the only receipt token for an enforced gate — and
@@ -1688,7 +1740,7 @@ fn verify_at<H: ContentHasher>(
             }
         }
     }
-    Ok(derived)
+    Ok((derived, decision))
 }
 
 /// Verify a **published** receipt's owned fields by reference ([`VerificationStage::Published`]).
@@ -1704,11 +1756,14 @@ fn verify_at<H: ContentHasher>(
 ///
 /// [`VerifyRefusal`], for the first check that fails, in this order: the transaction,
 /// the re-derivation, `gate_profile`, `intent`, `base_snapshot`, `result_snapshot`,
-/// `semantic_diff` against the recomputed diff, `gates` against the profile, then
-/// `gates` against the record, each in gate-number order; then the IMPL-05 `coverage`
-/// groups, `unknowns`, and the evidence behind gates 3, 8 and 9. No transaction records an in-profile gate `passed` until PR-20 `evaluate`
-/// lands, and no refinement checker computes gate 8's evidence, so every claim is
-/// refused today, at the latest [`VerifyRefusal::GateWithoutEvidence`].
+/// `semantic_diff` against the recomputed diff, `gates` against the profile, the
+/// IMPL-09 policy decision computed from the record and the recomputed diff's
+/// classification, with `reasons` read only for inconclusive gates
+/// ([`VerifyRefusal::PolicyDecision`]), then `gates` against the record, each in
+/// gate-number order; then the IMPL-05 `coverage` groups, `unknowns`, and the evidence
+/// behind gates 3, 8 and 9. No evaluation records gates 2, 3 and 5–11, no program-side
+/// classifier exists for a candidate that changes the workspace, and no refinement
+/// checker computes gate 8's evidence, so every claim is refused today.
 pub fn verify_skeleton<H: ContentHasher>(
     claim: &ClaimedReceipt,
     transactions: &impl TransactionStore<H>,
@@ -1716,9 +1771,10 @@ pub fn verify_skeleton<H: ContentHasher>(
     snapshots: &impl SealedSnapshots,
     evidence: &impl CandidateEvidence,
     impact: &impl ImpactScope,
+    reasons: &impl GateReasons,
 ) -> Result<SkeletonVerification, VerifyRefusal> {
     let transaction = resolve_transaction(claim, transactions)?;
-    let derived = verify_at(
+    let (derived, decision) = verify_at(
         claim,
         VerificationStage::Published,
         &transaction,
@@ -1726,8 +1782,9 @@ pub fn verify_skeleton<H: ContentHasher>(
         snapshots,
         evidence,
         impact,
+        reasons,
     )?;
-    Ok(SkeletonVerification { derived })
+    Ok(SkeletonVerification { derived, decision })
 }
 
 /// The licence to move gate 12 (`receipt_generation`) from `pending` to `passed` on one
@@ -1744,6 +1801,7 @@ pub fn verify_skeleton<H: ContentHasher>(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceiptGenerationLicense {
     derived: ReceiptSkeleton,
+    decision: ReceiptDecision,
 }
 
 impl ReceiptGenerationLicense {
@@ -1757,6 +1815,13 @@ impl ReceiptGenerationLicense {
     #[must_use]
     pub const fn derived(&self) -> &ReceiptSkeleton {
         &self.derived
+    }
+
+    /// The policy decision recomputed for the version (PR-22 / IMPL-09). A licence exists
+    /// only when it is a classified promote-eligible `allow`.
+    #[must_use]
+    pub const fn decision(&self) -> &ReceiptDecision {
+        &self.decision
     }
 
     /// The gate this licence moves: always `receipt_generation`.
@@ -1777,7 +1842,11 @@ impl ReceiptGenerationLicense {
 ///
 /// As [`verify_skeleton`], except that the record must show every in-profile gate but
 /// gate 12 `passed` and gate 12 `pending`, and the base intent must stand `accepted`. The
-/// result licenses the gate-12 transition; it does not perform it.
+/// policy verdict is computed inside this call from the record and the classification
+/// of the diff it recomputes from the stores; no verdict and no classification is
+/// accepted from the caller, so a licence is issued only on a classified
+/// promote-eligible verdict for the current version and the current stores. The result
+/// licenses the gate-12 transition; it does not perform it.
 ///
 /// # Errors
 ///
@@ -1791,9 +1860,10 @@ pub fn verify_for_promotion<H: ContentHasher>(
     snapshots: &impl SealedSnapshots,
     evidence: &impl CandidateEvidence,
     impact: &impl ImpactScope,
+    reasons: &impl GateReasons,
 ) -> Result<ReceiptGenerationLicense, VerifyRefusal> {
     let transaction = resolve_transaction(claim, transactions)?;
-    let derived = verify_at(
+    let (derived, decision) = verify_at(
         claim,
         VerificationStage::Promotion,
         &transaction,
@@ -1801,8 +1871,9 @@ pub fn verify_for_promotion<H: ContentHasher>(
         snapshots,
         evidence,
         impact,
+        reasons,
     )?;
-    Ok(ReceiptGenerationLicense { derived })
+    Ok(ReceiptGenerationLicense { derived, decision })
 }
 
 /// Verify the diff artifact bytes presented for a claimed receipt's `semantic_diff`
@@ -2070,7 +2141,8 @@ mod tests {
         .unwrap()
         .into_parts()
         .0;
-        applied.with_recorded_gates(GateName::ALL.map(|gate| {
+        // Evidenced: the policy verdict (IMPL-09) refuses a gate passed on no evidence.
+        applied.with_recorded_gates_evidenced(GateName::ALL.map(|gate| {
             if profile.enforces(gate) {
                 GateStatus::Passed
             } else {
@@ -2108,6 +2180,11 @@ mod tests {
             })
             .collect();
         fields.insert("gates".to_owned(), Json::Array(gates));
+        // IMPL-09: the honest claim carries the only promotable decision.
+        fields.insert(
+            ReceiptField::PolicyDecision.property().to_owned(),
+            Json::String(PolicyDecision::Allow.wire().to_owned()),
+        );
         fields
     }
 
@@ -2129,7 +2206,15 @@ mod tests {
     ) -> Result<ReceiptGenerationLicense, VerifyRefusal> {
         let world = World::of(vec![tx.clone()]);
         let claim = ClaimedReceipt::parse(&claim_bytes(tx, &world)).unwrap();
-        verify_for_promotion(&claim, &world, &world, &world, &world, &world)
+        verify_for_promotion(
+            &claim,
+            &world,
+            &world,
+            &world,
+            &world,
+            &world,
+            &crate::policy::NoReasons,
+        )
     }
 
     fn check_published(
@@ -2137,7 +2222,15 @@ mod tests {
     ) -> Result<SkeletonVerification, VerifyRefusal> {
         let world = World::of(vec![tx.clone()]);
         let claim = ClaimedReceipt::parse(&claim_bytes(tx, &world)).unwrap();
-        verify_skeleton(&claim, &world, &world, &world, &world, &world)
+        verify_skeleton(
+            &claim,
+            &world,
+            &world,
+            &world,
+            &world,
+            &world,
+            &crate::policy::NoReasons,
+        )
     }
 
     /// Verify `fields` at promotion against `world`, which must hold `tx`.
@@ -2146,7 +2239,15 @@ mod tests {
         world: &World,
     ) -> Result<ReceiptGenerationLicense, VerifyRefusal> {
         let claim = ClaimedReceipt::parse(&Json::Object(fields).to_canonical_bytes())?;
-        verify_for_promotion(&claim, world, world, world, world, world)
+        verify_for_promotion(
+            &claim,
+            world,
+            world,
+            world,
+            world,
+            world,
+            &crate::policy::NoReasons,
+        )
     }
 
     /// cr-tz8fwi: at promotion the record shows gate 12 `pending`, and every check of the
@@ -2455,7 +2556,9 @@ mod tests {
         }
     }
 
-    /// Any of gates 1–11 of the profile still `pending` refuses at both stages.
+    /// Any of gates 1–11 of the profile still `pending` refuses. Since IMPL-09 (bn-1plr)
+    /// the recomputed verdict refuses first: the claim's `allow` is not the inconclusive
+    /// verdict's (absent) decision, and the refusal names exactly the pending gate.
     #[test]
     fn a_single_gate_off_the_record_refuses() {
         let base = ready(GateProfile::PhaseB);
@@ -2471,18 +2574,34 @@ mod tests {
                 }
             });
             let tx = base.with_recorded_gates(statuses);
+            let Err(VerifyRefusal::PolicyDecision(DecisionRefusal::Disagrees {
+                claimed: PolicyDecision::Allow,
+                recomputed,
+            })) = check_promotion(&tx)
+            else {
+                panic!("a pending {gate:?} must refuse the claimed allow");
+            };
+            assert_eq!(recomputed.verdict().repair_id(), tx.repair_id());
             assert_eq!(
-                check_promotion(&tx),
-                Err(VerifyRefusal::GateNotOnRecord(gate))
+                recomputed.verdict().verdict(),
+                &crate::policy::Verdict::Inconclusive {
+                    undecided: vec![crate::policy::Undecided {
+                        gate,
+                        standing: crate::policy::Standing::Pending,
+                    }],
+                }
             );
         }
     }
 
     /// pr22-impl03 negative: a record that lists every in-profile gate `passed` on a
     /// candidate that changes the workspace. The recomputed diff's program-side layer
-    /// is not classified, so no semantic preservation may be claimed: the honest claim
-    /// is refused at gate 3 at both stages, and a claim that drops the unclassified
-    /// unknown is refused for that omission first.
+    /// is not classified, so no semantic preservation may be claimed. Since IMPL-09
+    /// (bn-1plr) the policy step refuses the honest claim's `allow` at both stages, before
+    /// the gate-3 check and the unknowns comparison (previously
+    /// `IntentIntegrityNotDerived`, and `UnknownOmitted` for a claim that drops the
+    /// unclassified unknown): the classification is absent, so the field is absent even
+    /// though the record alone reads eligible.
     #[test]
     fn pr22_impl03_negative_gate_3_passed_without_a_passing_diff_is_refused() {
         let promoted = recorded_with(GateProfile::PhaseB, extra_file_change());
@@ -2501,18 +2620,25 @@ mod tests {
             skeleton.semantic_diff().gate_status(),
             GateStatus::Inconclusive
         );
-        assert_eq!(
-            check_promotion(&ready),
-            Err(VerifyRefusal::IntentIntegrityNotDerived {
-                derived: GateStatus::Inconclusive
-            })
-        );
-        assert_eq!(
-            check_published(&promoted),
-            Err(VerifyRefusal::IntentIntegrityNotDerived {
-                derived: GateStatus::Inconclusive
-            })
-        );
+        let unclassified = |result: Result<(), VerifyRefusal>| {
+            let Err(VerifyRefusal::PolicyDecision(DecisionRefusal::Disagrees {
+                claimed: PolicyDecision::Allow,
+                recomputed,
+            })) = result
+            else {
+                panic!("the unclassified diff refuses the claimed allow: {result:?}");
+            };
+            assert_eq!(
+                recomputed.classification(),
+                ReceiptClassification::Absent(DiffGap::ProgramLayerUnclassified)
+            );
+            assert_eq!(
+                recomputed.verdict().verdict(),
+                &crate::policy::Verdict::PromoteEligible
+            );
+        };
+        unclassified(check_promotion(&ready).map(|_| ()));
+        unclassified(check_published(&promoted).map(|_| ()));
         let mut fields = claim_fields(&ready, &world);
         set_unknowns(
             &mut fields,
@@ -2522,12 +2648,7 @@ mod tests {
                 .cloned()
                 .collect(),
         );
-        assert_eq!(
-            promote_fields(fields, &world),
-            Err(VerifyRefusal::UnknownOmitted(
-                UnknownKind::SemanticDiffUnclassified
-            ))
-        );
+        unclassified(promote_fields(fields, &world).map(|_| ()));
     }
 
     /// pr22-impl03 positive: a candidate identical to its base is classified on the

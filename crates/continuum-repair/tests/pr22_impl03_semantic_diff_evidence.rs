@@ -48,6 +48,8 @@ use continuum_repair::diff::{
 use continuum_repair::handle::{CrashpackId, RepairId, SnapshotId};
 use continuum_repair::hypothesis::{ChangeKind, Hypothesis, Proposal};
 use continuum_repair::patch::{DeclaredChange, FileEdit};
+use continuum_repair::policy::{NoReasons, Verdict};
+use continuum_repair::receipt::DecisionRefusal;
 use continuum_repair::receipt::{
     CandidateEvidence, CertificateRecord, ClaimRefusal, ClaimedReceipt, ComposeRefusal,
     IntentRegistry, IntentStanding, PackCase, ReceiptDiff, ReceiptField, ReceiptSkeleton,
@@ -308,6 +310,7 @@ fn claim_with(tx: &Tx, world: &World, diff: &str) -> BTreeMap<String, Json> {
     fields.insert("gates".to_owned(), Json::Array(gates));
     fields.insert("semantic_diff".to_owned(), s(diff));
     fields.insert("intent_diff".to_owned(), s(diff));
+    fields.insert("policy_decision".to_owned(), s("allow"));
     fields
 }
 
@@ -318,14 +321,27 @@ fn parse(fields: BTreeMap<String, Json>) -> Result<ClaimedReceipt, ClaimRefusal>
 /// Verify at both stages; the two must agree on everything this suite checks.
 fn verify(fields: BTreeMap<String, Json>, world: &World) -> Result<(), VerifyRefusal> {
     let claim = parse(fields)?;
-    let published = verify_skeleton(&claim, world, world, world, world, world).map(|_| ());
-    let promotion = verify_for_promotion(&claim, world, world, world, world, world).map(|_| ());
+    let published =
+        verify_skeleton(&claim, world, world, world, world, world, &NoReasons).map(|_| ());
+    let promotion =
+        verify_for_promotion(&claim, world, world, world, world, world, &NoReasons).map(|_| ());
     assert_eq!(published, promotion, "both stages decide the diff alike");
     published
 }
 
-/// The refusal a claim gets once its diff check passes, on a pending record.
-const PAST_THE_DIFF: VerifyRefusal = VerifyRefusal::GateNotOnRecord(GateName::BaseReplay);
+/// The refusal a claim gets once its diff check passes, on a pending record: since
+/// IMPL-09 (bn-1plr) the policy step's, whose recomputed verdict is inconclusive (before
+/// IMPL-09, `GateNotOnRecord(BaseReplay)` at the record comparison that follows it).
+fn assert_past_the_diff(result: Result<(), VerifyRefusal>) {
+    assert!(
+        matches!(
+            &result,
+            Err(VerifyRefusal::PolicyDecision(DecisionRefusal::Disagrees { recomputed, .. }))
+                if matches!(recomputed.verdict().verdict(), Verdict::Inconclusive { .. })
+        ),
+        "the claim passes the diff check and stops at the policy step: {result:?}"
+    );
+}
 
 fn handle_of(skeleton: &ReceiptSkeleton) -> String {
     skeleton
@@ -381,10 +397,7 @@ fn pr22_impl03_pos_01_the_derived_diff_reference_matches_the_recompute() {
     assert_eq!(fields.get("semantic_diff"), Some(&s(&handle)));
     assert_eq!(fields.get("intent_diff"), Some(&s(&handle)));
 
-    assert_eq!(
-        verify(claim_with(&tx, &world, &handle), &world),
-        Err(PAST_THE_DIFF)
-    );
+    assert_past_the_diff(verify(claim_with(&tx, &world, &handle), &world));
     let claim = parse(claim_with(&tx, &world, &handle)).unwrap();
     assert_eq!(claim.semantic_diff(), handle);
     let verified = verify_referenced_diff(
@@ -512,14 +525,8 @@ fn pr22_impl03_neg_02_another_versions_diff_is_refused() {
     );
     assert_ne!(second_diff, other_diff);
 
-    assert_eq!(
-        verify(claim_with(&first, &world, &first_diff), &world),
-        Err(PAST_THE_DIFF)
-    );
-    assert_eq!(
-        verify(claim_with(&second, &world, &second_diff), &world),
-        Err(PAST_THE_DIFF)
-    );
+    assert_past_the_diff(verify(claim_with(&first, &world, &first_diff), &world));
+    assert_past_the_diff(verify(claim_with(&second, &world, &second_diff), &world));
     for (tx, foreign) in [
         (&second, &first_diff),
         (&first, &second_diff),
@@ -811,17 +818,17 @@ fn pr22_impl03_bnd_03_a_published_receipts_diff_survives_a_later_intent_revision
 
     let mut superseded = World::of(&[&tx]);
     superseded.standing = IntentStanding::Superseded;
-    assert_eq!(
+    assert_past_the_diff(
         verify_skeleton(
             &claim,
             &superseded,
             &superseded,
             &superseded,
             &superseded,
-            &superseded
+            &superseded,
+            &NoReasons,
         )
         .map(|_| ()),
-        Err(PAST_THE_DIFF)
     );
     assert_eq!(
         verify_referenced_diff(
@@ -912,10 +919,10 @@ fn pr22_impl03_met_01_store_answer_order_moves_no_byte() {
     assert_eq!(impact.reused().count(), 0);
     assert_eq!(impact.unknown().count() + impact.invalidated().count(), 3);
     // And a claim built on one ordering verifies against the other.
-    assert_eq!(
-        verify(claim_with(&tx, &forward, &handle_of(&one)), &backward),
-        Err(PAST_THE_DIFF)
-    );
+    assert_past_the_diff(verify(
+        claim_with(&tx, &forward, &handle_of(&one)),
+        &backward,
+    ));
 }
 
 // --- differential ----------------------------------------------------------------

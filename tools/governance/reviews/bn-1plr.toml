@@ -1,0 +1,52 @@
+[change]
+bone = "bn-1plr"
+author = "continuum-dev"
+summary = "PR-22 / IMPL-09, policy decision: continuum-repair's receipt::policy module computes the receipt's policy_decision inside verify_for_promotion and verify_skeleton from the named rt_ version's recorded gates, through the PR-20 IMPL-06 PolicyVerdict, and the classification of the diff the receipt recomputes from the stores for that version (IMPL-03), per RFC 0032 Promotion step 2. The caller supplies only gate reasons (GateReasons), never a verdict, decision or classification: ReceiptDecision::derive is crate-private, of_skeleton recomputes from a composed skeleton, and compile-fail doctests show a held PolicyVerdict cannot be offered. ReceiptClassification is Bound(allow) for a classified repair, Bound(review or block) for a privileged intent revision, Absent for an undiffable or unclassified diff, which never supports allow. The field is allow only for a classified PromoteEligible, block for Blocked, the RFC 0031 join for PrivilegedIntentRevisionRequired, absent otherwise. A claim must carry policy_decision (Missing/Malformed); a claim that is not the recomputed field is Disagrees and an agreeing non-promotable one NotPromotable, each carrying the recomputation with failed gates, each undecided gate's typed INV-008 reason and the classification. The check runs before the per-gate record comparison, after a gate-12-already-passed refusal at promotion, so no licence exists unless the version is a classified PromoteEligible under the current stores; ReceiptSeam::PolicyDecision becomes ReceiptField::PolicyDecision"
+
+[semantic]
+covers = [
+  "crates/continuum-repair/src/",
+]
+reference_tests = [
+  "crates/continuum-repair/tests/pr22_impl09_policy_decision.rs::pr22_impl09_positive_the_decision_is_the_named_versions_recomputation",
+  "crates/continuum-repair/tests/pr22_impl09_policy_decision.rs::pr22_impl09_negative_m01_is_not_promotable_and_says_why",
+  "crates/continuum-repair/tests/pr22_impl09_policy_decision.rs::pr22_impl09_negative_blocked_but_claimed_allow_is_refused",
+  "crates/continuum-repair/tests/pr22_impl09_policy_decision.rs::pr22_impl09_negative_a_changed_store_is_read_at_verification",
+  "crates/continuum-repair/tests/pr22_impl09_policy_decision.rs::pr22_impl09_negative_a_privileged_intent_revision_classifies_review_or_block",
+  "crates/continuum-repair/tests/pr22_impl09_policy_decision.rs::pr22_impl09_negative_a_missing_or_off_enum_decision_is_refused_by_the_reader",
+  "crates/continuum-repair/tests/pr22_impl09_policy_decision.rs::pr22_impl09_boundary_every_reachable_verdict_kind_against_every_claim",
+  "crates/continuum-repair/tests/pr22_impl09_policy_decision.rs::pr22_impl09_differential_the_receipt_check_agrees_with_the_verdict_recheck",
+  "crates/continuum-repair/src/receipt/policy.rs::pr22_impl09_positive_an_eligible_classified_record_is_allow_and_passes_the_policy_step",
+  "crates/continuum-repair/src/receipt/policy.rs::pr22_impl09_boundary_every_verdict_kind_maps_to_its_field_and_only_allow_promotes",
+  "crates/continuum-repair/src/receipt/policy.rs::pr22_impl09_negative_a_changed_store_classification_refuses_an_earlier_eligible_version",
+  "crates/continuum-repair/src/receipt/policy.rs::pr22_impl09_negative_no_verdict_no_decision",
+  "crates/continuum-repair/src/receipt/policy.rs::pr22_impl09_negative_m01_with_gate_3_recorded_is_not_promotable_and_says_why",
+  "crates/continuum-repair/src/receipt.rs::a_single_gate_off_the_record_refuses",
+  "crates/continuum-repair/src/receipt.rs::promotion_passes_the_record_with_gate_12_pending_and_stops_at_gate_8_evidence",
+  "crates/continuum-repair/src/receipt.rs::pr22_impl03_negative_gate_3_passed_without_a_passing_diff_is_refused",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-repair/tests/pr22_impl09_policy_decision.rs::pr22_impl09_metamorphic_reasons_scope_order_and_encoding_do_not_move_the_decision", relation = "serialization round trip" },
+  { test = "crates/continuum-repair/tests/pr22_impl09_policy_decision.rs::pr22_impl09_metamorphic_reasons_scope_order_and_encoding_do_not_move_the_decision", relation = "set/map insertion order" },
+]
+differential_tests = [
+  { test = "crates/continuum-repair/tests/pr22_impl09_policy_decision.rs::pr22_impl09_differential_the_field_is_the_rfc_0031_join", oracle = "continuum-intent", subject = "continuum-repair" },
+]
+
+[semantic.claim_impact]
+claims = ["C033"]
+reason = "The row's state and wording do not change. C033 stays TARGET: the receipt's decision is now recomputed from the record and the recomputed diff's classification and checked, but no receipt verifies, because no evaluation records gates 2, 3 and 5-11, no program-side classifier exists, gate 8 has no refinement evidence under any profile, and repair.promote is not served (bn-23pwm)"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the crate fills the epoch-1 receipt's existing optional policy_decision enum (allow, review, block) with the recomputed verdict's decision, omits it for an inconclusive verdict, and requires it on a claim as RFC 0032 correction 11 does; validate_dossier.py checks the two new retained fragments against the schema's own property subschemas"
+unaffected = { promotion-receipt = "policy_decision is rendered only as one of the schema's three tokens, or omitted; no other field changes", repair-transaction = "read only: gate statuses are read from the transaction record, whose shape does not change; policy_verdict stays unwritten", semantic-diff = "the RFC 0031 decision is read as a value through the existing IntentClassification seam, never produced here" }
+
+[semantic.migration]
+verdict = "Revalidate"
+note = "continuum-repair: verify_skeleton and verify_for_promotion take one more argument after IMPL-03's ImpactScope, a GateReasons store (reasons of inconclusive gates only); ClaimedReceipt now requires policy_decision; SkeletonVerification and ReceiptGenerationLicense carry the ReceiptDecision; ReceiptSeam loses PolicyDecision and ReceiptField gains it; VerifyRefusal gains PolicyDecision. A claim on a version that is not a classified PromoteEligible is now refused by the policy step, with the recomputation, before the per-gate record comparison, IMPL-03's gate-3 check and the unknowns comparison (previously GateNotOnRecord at the first pending gate, or IntentIntegrityNotDerived). No daemon path calls this module, and no wire shape, IDL operation or rt_ identity changes"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-vozpm6"
+verdict = "approved"
