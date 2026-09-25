@@ -299,6 +299,10 @@ version = "0.0.0"
 dependencies = [
  "asupersync",
  "continuum-debugger",
+ "continuum-effects-network",
+ "continuum-effects-process",
+ "continuum-effects-storage",
+ "continuum-effects-time",
  "continuum-task",
  "continuum-value",
 ]

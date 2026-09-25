@@ -1,0 +1,349 @@
+# PR-15 exit evidence (bn-jw7q): crash windows and cancellation points replay exactly.
+# crates/continuum-asupersync/tests/pr15_exit_evidence.rs; machine-readable twin tests/evidence/pr15-exit.json.
+# Regenerate: PR15_EXIT_BLESS=1 cargo test -p continuum-asupersync --test pr15_exit_evidence
+# corpus: seeds [1, 2, 7, 42, 99, 11400714819323198485, 18446744073709551615], 3 logs of 18 steps per seed per pack; lab seeds [0, 1, 7, 42, 99, 11400714819323198485, 18446744073709551615]; register interleavings 6 per crash fate and mode from seed 0x1515
+
+[pr15-exit-hon-01]
+claim: the windows each pack's own contract declares, for -v0 and -v1, and the time pack's none
+test: hon_01_each_pack_declares_its_windows_in_its_own_contract
+fact network declares = crash windows false, cancellation points true (profiles network/adversarial-v0, network/adversarial-v1)
+fact process declares = crash windows true, cancellation points false (profiles process/crash-restart-v0, process/crash-restart-v1)
+fact storage declares = crash windows true, cancellation points true (profiles storage/append-log-v0, storage/append-log-v1)
+fact time declares = time/unmodelled-v0 operations None: no window; 7 unsupported cases, each NoOperation
+
+[pr15-exit-pos-01]
+claim: network cancellation points replay exactly
+test: pos_01_network_cancellation_points_replay_exactly
+count absent: cancellation moved one step later, the last boundary = 42
+count absent: cancellation moved past the next program step, none remains = 128
+count boundaries = 798
+count cancellation dropped: event-differs = 415
+count cancellation dropped: length-differs = 255
+count cancellation moved one step later: event-differs = 185
+count cancellation moved one step later: length-differs = 91
+count cancellation moved past the next program step: event-differs = 415
+count cancellation moved past the next program step: length-differs = 255
+count cancellation points = 798
+count continuation steps not enabled = 2717
+count equivalent, verified: cancellation dropped = 128
+count equivalent, verified: cancellation moved one step later = 480
+count events after a cancellation point (late completions) = 2149
+count log steps = 756
+count logs = 42
+count replays, each byte-identical with an identical outcome = 3192
+count windows ending in a program fault, the fault replayed = 0
+fact journal corpus digest = 953a01ed7c154f682a880e0599d37009be6920c3de711e9be0ed4c1f42085431
+fact verdict = met
+
+[pr15-exit-pos-02]
+claim: process crash windows replay exactly; its cancellation points are routed to the runtime
+test: pos_02_process_crash_windows_replay_exactly
+count absent: crash moved one step earlier, no step on that side = 189
+count absent: crash moved one step later, no step on that side = 75
+count boundaries = 798
+count continuation steps not enabled = 3625
+count crash dropped: event-differs = 1147
+count crash dropped: length-differs = 75
+count crash dropped: refused = 1178
+count crash moved one step earlier: event-differs = 1858
+count crash moved one step earlier: refused = 353
+count crash moved one step earlier: same length, detected by content = 1858
+count crash moved one step later: event-differs = 1175
+count crash moved one step later: refused = 1150
+count crash moved one step later: same length, detected by content = 1175
+count crash not enabled: CrashBudgetSpent = 1083
+count crash not enabled: NodeDown = 54
+count crash windows = 1257
+count crash with recovery windows = 1143
+count fenced completions after the crash = 800
+count log steps = 756
+count logs = 42
+count replays, each byte-identical with an identical outcome = 9600
+count windows ending in a program fault, the fault replayed = 0
+fact journal corpus digest = bcb04cfb70423582702329d36c2e6297b050451da493459de6c16fb13459d62b
+fact verdict = met
+
+[pr15-exit-pos-03]
+claim: storage crash windows and cancellation points replay exactly
+test: pos_03_storage_crash_windows_and_cancellation_points_replay_exactly
+count absent: cancellation moved one step later, the last boundary = 42
+count absent: cancellation moved past the next program step, none remains = 86
+count absent: crash moved one step earlier, no step on that side = 126
+count absent: crash moved one step later, no step on that side = 442
+count boundaries = 798
+count cancellation dropped: event-differs = 408
+count cancellation dropped: length-differs = 304
+count cancellation moved one step later: event-differs = 202
+count cancellation moved one step later: length-differs = 194
+count cancellation moved past the next program step: event-differs = 408
+count cancellation moved past the next program step: length-differs = 304
+count cancellation points = 798
+count continuation steps not enabled = 10816
+count crash dropped: event-differs = 1900
+count crash dropped: length-differs = 442
+count crash dropped: refused = 3040
+count crash moved one step earlier: event-differs = 2945
+count crash moved one step earlier: refused = 2311
+count crash moved one step earlier: same length, detected by content = 2945
+count crash moved one step later: event-differs = 2250
+count crash moved one step later: refused = 2690
+count crash moved one step later: same length, detected by content = 2250
+count crash not enabled: CrashBudgetSpent = 632
+count crash not enabled: NodeDown = 62
+count crash windows = 2774
+count crash with recovery windows = 2608
+count equivalent, verified: cancellation dropped = 86
+count equivalent, verified: cancellation moved one step later = 360
+count events after a cancellation point (late completions) = 1710
+count fenced completions after the crash = 1464
+count log steps = 756
+count logs = 42
+count replays, each byte-identical with an identical outcome = 24746
+count windows ending in a program fault, the fault replayed = 13
+fact journal corpus digest = 65116536976a87b5c3c035778311367130e1c36de0ed6d84229ae910d603ae34
+fact verdict = met
+
+[pr15-exit-pos-04]
+claim: composed crash windows replay exactly and leave the network journal unchanged
+test: pos_04_composed_crash_windows_replay_exactly_and_leave_the_network_untouched
+count absent: crash moved one step earlier, no process or storage step on that side = 84
+count absent: crash moved one step later, no process or storage step on that side = 153
+count boundaries = 350
+count boundaries where the two packs agree on every node = 350
+count continuation steps not enabled = 3415
+count crash dropped: event-differs = 745
+count crash dropped: length-differs = 369
+count crash dropped: refused = 1272
+count crash moved across network steps: commutes, verified = 1072
+count crash moved one step earlier: event-differs = 1572
+count crash moved one step earlier: refused = 730
+count crash moved one step earlier: same length, detected by content = 1572
+count crash moved one step later: event-differs = 1025
+count crash moved one step later: refused = 1208
+count crash moved one step later: same length, detected by content = 1025
+count crash windows = 1193
+count crash with recovery windows = 1193
+count fenced completions after the crash = 382
+count logs = 14
+count network journal unchanged by the crash = 2386
+count replays, each byte-identical with an identical outcome = 7158
+count the same window across network steps, bytes verified equal = 1598
+count windows ending in a program fault, the fault replayed = 4
+fact journal corpus digest = aeb62580b5c627971ef05142aabd2561339c8671fe252d68ab3e832435117e31
+fact verdict = met
+
+[pr15-exit-pos-05]
+claim: the register's graceful crash windows (binding Cancel) replay exactly across lab seeds
+test: pos_05_register_graceful_crash_windows_replay_exactly
+count absent: crash moved one step later, the last operation of the script = 12
+count crash dropped, the log kept aligned: a valid run, detected by content = 72
+count crash dropped, the log kept aligned: event-differs = 72
+count crash dropped: refused ChoiceLogOverrun = 48
+count crash dropped: refused ReservationDropped = 1
+count crash dropped: refused TaskBlocked = 11
+count crash dropped: refused TaskEnded = 12
+count crash fates = 12
+count crash moved one step earlier: refused ReservationResolved = 12
+count crash moved one step earlier: refused TaskBlocked = 5
+count crash moved one step earlier: refused TaskEnded = 55
+count crash moved one step later: a valid run, detected by content = 60
+count crash moved one step later: event-differs = 60
+count crash semantics swapped: a valid run, detected by content = 72
+count crash semantics swapped: event-differs = 72
+count outcomes replayed identical = 72
+count replays, each byte-identical = 204
+count windows = 72
+fact journal corpus digest = c44419a0424f1bafc672e0528d410a09bb29f594bf43beb78cb8e51846aed424
+fact verdict = met
+
+[pr15-exit-pos-06]
+claim: the register's fail-stop crash windows (binding Crash) replay exactly across lab seeds
+test: pos_06_register_fail_stop_crash_windows_replay_exactly
+count absent: crash moved one step later, the last operation of the script = 12
+count crash dropped, the log kept aligned: a valid run, detected by content = 72
+count crash dropped, the log kept aligned: event-differs = 72
+count crash dropped: refused ChoiceLogOverrun = 48
+count crash dropped: refused ReservationDropped = 1
+count crash dropped: refused TaskBlocked = 11
+count crash dropped: refused TaskEnded = 12
+count crash fates = 12
+count crash moved one step earlier: refused TaskBlocked = 5
+count crash moved one step earlier: refused TaskCrashed = 67
+count crash moved one step later: a valid run, detected by content = 60
+count crash moved one step later: event-differs = 60
+count crash semantics swapped: a valid run, detected by content = 72
+count crash semantics swapped: event-differs = 72
+count outcomes replayed identical = 72
+count replays, each byte-identical = 204
+count windows = 72
+fact journal corpus digest = 390b31576229b2073247bbb683688ec0a99ff862ac01d314d636f50ca3de369e
+fact verdict = met
+
+[pr15-exit-pos-07]
+claim: the retained register campaigns replay to their recorded identities
+test: pos_07_the_retained_register_campaigns_replay_to_their_recorded_identities
+count pr16-correct-baseline plans with a crash = 336
+count pr16-correct-baseline runs = 2925
+count pr16-correct-baseline-carried-message plans with a crash = 336
+count pr16-correct-baseline-carried-message runs = 2925
+count pr16-correct-baseline-carried-message-fail-stop plans with a crash = 336
+count pr16-correct-baseline-carried-message-fail-stop runs = 2925
+count pr16-correct-baseline-carried-recovery plans with a crash = 336
+count pr16-correct-baseline-carried-recovery runs = 2925
+count pr16-correct-baseline-carried-recovery-fail-stop plans with a crash = 336
+count pr16-correct-baseline-carried-recovery-fail-stop runs = 2925
+count pr16-correct-baseline-carried-timer plans with a crash = 336
+count pr16-correct-baseline-carried-timer runs = 2925
+count pr16-correct-baseline-carried-timer-fail-stop plans with a crash = 336
+count pr16-correct-baseline-carried-timer-fail-stop runs = 2925
+count pr16-correct-baseline-fail-stop plans with a crash = 336
+count pr16-correct-baseline-fail-stop runs = 2925
+fact pr16-correct-baseline = replayed identity 2354ce7bf1c083023c2db8e3ab4df4098f027150a46dbed3731c521f0db716eb; retained identity 2354ce7bf1c083023c2db8e3ab4df4098f027150a46dbed3731c521f0db716eb; findings 0; 
+fact pr16-correct-baseline-carried-message = replayed identity 9b9aee23d1713570fa262db0a35c00b668db0d5dab86fbbce61a43481421b5b1; retained identity 9b9aee23d1713570fa262db0a35c00b668db0d5dab86fbbce61a43481421b5b1; findings 0; payloads confirmed 0 (retained 0), payloads received 1504 (retained 1504), timers cancelled 0 (retained 0), timers fenced 0 (retained 0), timers fired 0 (retained 0), timers scheduled 0 (retained 0)
+fact pr16-correct-baseline-carried-message-fail-stop = replayed identity 60806f52adbede0decd25cc51eb1ded9c601a962c28b61538038d73bdcb1381b; retained identity 60806f52adbede0decd25cc51eb1ded9c601a962c28b61538038d73bdcb1381b; findings 0; payloads confirmed 0 (retained 0), payloads received 1504 (retained 1504), timers cancelled 0 (retained 0), timers fenced 0 (retained 0), timers fired 0 (retained 0), timers scheduled 0 (retained 0)
+fact pr16-correct-baseline-carried-recovery = replayed identity 1318028d8304cc4d8c390bd44e823e2d9fdccc8f60f75426b9a4a2f2d61fd99b; retained identity 1318028d8304cc4d8c390bd44e823e2d9fdccc8f60f75426b9a4a2f2d61fd99b; findings 0; payloads confirmed 546 (retained 546), payloads received 546 (retained 546), timers cancelled 0 (retained 0), timers fenced 0 (retained 0), timers fired 0 (retained 0), timers scheduled 0 (retained 0)
+fact pr16-correct-baseline-carried-recovery-fail-stop = replayed identity 2c55ae7e88bb24956f47c02c84726c651a1a72a2cd9457643566510d6f8b9ab9; retained identity 2c55ae7e88bb24956f47c02c84726c651a1a72a2cd9457643566510d6f8b9ab9; findings 0; payloads confirmed 546 (retained 546), payloads received 546 (retained 546), timers cancelled 0 (retained 0), timers fenced 0 (retained 0), timers fired 0 (retained 0), timers scheduled 0 (retained 0)
+fact pr16-correct-baseline-carried-timer = replayed identity dad360f9203616afc918f6fbfc2cc41b933a19ee6e0a879ccf27c239f4d26ced; retained identity dad360f9203616afc918f6fbfc2cc41b933a19ee6e0a879ccf27c239f4d26ced; findings 0; payloads confirmed 0 (retained 0), payloads received 1504 (retained 1504), timers cancelled 0 (retained 0), timers fenced 0 (retained 0), timers fired 1504 (retained 1504), timers scheduled 1504 (retained 1504)
+fact pr16-correct-baseline-carried-timer-fail-stop = replayed identity 2357438fc6ebe19567b619feaae33b818612858d4334be3853168a883ad1a452; retained identity 2357438fc6ebe19567b619feaae33b818612858d4334be3853168a883ad1a452; findings 0; payloads confirmed 0 (retained 0), payloads received 1504 (retained 1504), timers cancelled 0 (retained 0), timers fenced 0 (retained 0), timers fired 1504 (retained 1504), timers scheduled 1504 (retained 1504)
+fact pr16-correct-baseline-fail-stop = replayed identity 31b4d2a3aae2e1fd788d0a92efbbd181523740fa53001d90acbf3fd765a2473f; retained identity 31b4d2a3aae2e1fd788d0a92efbbd181523740fa53001d90acbf3fd765a2473f; findings 0; fenced obligations 4712 (retained 4712), fenced reservations 3202 (retained 3202), fenced tasks 4652 (retained 4652), fenced timers 0 (retained 0)
+
+[pr15-exit-bnd-01]
+claim: every requestable declared unsupported case is a typed refusal, never replayed
+test: bnd_01_every_requestable_unsupported_case_is_a_typed_refusal_never_replayed
+count network requestable asymmetric-partition = 133
+count network requestable connection-reset = 133
+count network requestable corruption = 133
+count network requestable endpoint-crash = 133
+count network requestable forgery = 133
+count network requestable overlapping-partitions = 19
+count network requestable recall-in-flight = 133
+count network the pack's own run refuses at the splice = 817
+count process requestable graceful-cancellation = 133
+count process requestable panic = 133
+count process requestable power-loss = 133
+count process the pack's own run refuses at the splice = 399
+count storage requestable flush-dishonesty = 133
+count storage requestable sector-corruption = 133
+count storage requestable write-reordering = 133
+count storage the pack's own run refuses at the splice = 399
+fact binding = a crash of a region whose live task runs under a deadline is CrashUnsupported, INV-008 Unsupported
+fact network no-operation cases = bounded-delay, connection-epochs, half-open, backpressure, service-discovery, framing
+fact process no-operation cases = partial-cleanup, supervisor-decisions
+fact storage no-operation cases = directory-durability, device-profile, undetected-tear
+
+[predicates]
+verdict: met: every required predicate is present once and passes
+pass pr15-exit-hon-01 network declares cancellation points and no crash window: Declared { crash_windows: false, cancellation_points: true, cancellation_routed_to_runtime: false }
+pass pr15-exit-hon-01 process declares crash windows and routes cancellation to the runtime: Declared { crash_windows: true, cancellation_points: false, cancellation_routed_to_runtime: true }
+pass pr15-exit-hon-01 storage declares crash windows and cancellation points: Declared { crash_windows: true, cancellation_points: true, cancellation_routed_to_runtime: false }
+pass pr15-exit-hon-01 network endpoint crash is owned by the process profile: 
+pass pr15-exit-hon-01 -v0 and -v1 of each pack carry the replay-choice and early-return rows: 
+pass pr15-exit-hon-01 -v0 declares no unsupported case and -v1 declares them, in each pack: 
+pass pr15-exit-pos-01 every window realized and replayed exactly, and there is one: 798 windows
+pass pr15-exit-pos-01 no perturbation was accepted as the record: None
+pass pr15-exit-pos-02 every window realized and replayed exactly, and there is one: 2400 windows
+pass pr15-exit-pos-02 no perturbation was accepted as the record: None
+pass pr15-exit-pos-03 every window realized and replayed exactly, and there is one: 6180 windows
+pass pr15-exit-pos-03 no perturbation was accepted as the record: None
+pass pr15-exit-pos-04 every window realized and replayed exactly, and there is one: 2386 windows
+pass pr15-exit-pos-04 no perturbation was accepted as the record: None
+pass pr15-exit-pos-05 every window realized and replayed exactly, and there is one: 72 windows
+pass pr15-exit-pos-05 no perturbation was accepted as the record: None
+pass pr15-exit-pos-06 every window realized and replayed exactly, and there is one: 72 windows
+pass pr15-exit-pos-06 no perturbation was accepted as the record: None
+pass pr15-exit-pos-01 no crash window: the pack has no crash: 
+pass pr15-exit-pos-01 more than 100 cancellation points: 798
+pass pr15-exit-pos-01 late completions after a cancellation point: 
+pass pr15-exit-pos-02 more than 100 crash windows alone and with recovery: 2400
+pass pr15-exit-pos-02 late completions of a crashed incarnation fenced: 800
+pass pr15-exit-pos-03 more than 100 crash windows alone and with recovery: 5382
+pass pr15-exit-pos-03 late completions of a crashed incarnation fenced: 1464
+pass pr15-exit-pos-02 no pack cancellation point: routed to the runtime: 
+pass pr15-exit-pos-03 more than 100 cancellation points: 798
+pass pr15-exit-pos-04 more than 100 composed crash windows: 2386
+pass pr15-exit-pos-04 the network journal is unchanged by every crash: 
+pass pr15-exit-pos-04 the two packs agree on every node at every boundary: 
+pass pr15-exit-pos-04 every move across network steps verified to commute: 
+pass pr15-exit-pos-05 every crash fate, every value and retry: 12: 12
+pass pr15-exit-pos-05 every window's run report replayed identical: 
+pass pr15-exit-pos-06 every crash fate, every value and retry: 12: 12
+pass pr15-exit-pos-06 every window's run report replayed identical: 
+pass pr15-exit-pos-07 every retained correct-baseline campaign is run: 8: 8
+pass pr15-exit-pos-07 pr16-correct-baseline: replays to its retained identity, runs and counts with no finding: identity 2354ce7bf1c083023c2db8e3ab4df4098f027150a46dbed3731c521f0db716eb (retained 2354ce7bf1c083023c2db8e3ab4df4098f027150a46dbed3731c521f0db716eb); runs 2925; findings 0; compared []; crash plans 336; None
+pass pr15-exit-pos-07 pr16-correct-baseline-fail-stop: replays to its retained identity, runs and counts with no finding: identity 31b4d2a3aae2e1fd788d0a92efbbd181523740fa53001d90acbf3fd765a2473f (retained 31b4d2a3aae2e1fd788d0a92efbbd181523740fa53001d90acbf3fd765a2473f); runs 2925; findings 0; compared [("fenced obligations", 4712, 4712), ("fenced reservations", 3202, 3202), ("fenced tasks", 4652, 4652), ("fenced timers", 0, 0)]; crash plans 336; None
+pass pr15-exit-pos-07 pr16-correct-baseline-carried-message: replays to its retained identity, runs and counts with no finding: identity 9b9aee23d1713570fa262db0a35c00b668db0d5dab86fbbce61a43481421b5b1 (retained 9b9aee23d1713570fa262db0a35c00b668db0d5dab86fbbce61a43481421b5b1); runs 2925; findings 0; compared [("payloads confirmed", 0, 0), ("payloads received", 1504, 1504), ("timers cancelled", 0, 0), ("timers fenced", 0, 0), ("timers fired", 0, 0), ("timers scheduled", 0, 0)]; crash plans 336; None
+pass pr15-exit-pos-07 pr16-correct-baseline-carried-message-fail-stop: replays to its retained identity, runs and counts with no finding: identity 60806f52adbede0decd25cc51eb1ded9c601a962c28b61538038d73bdcb1381b (retained 60806f52adbede0decd25cc51eb1ded9c601a962c28b61538038d73bdcb1381b); runs 2925; findings 0; compared [("payloads confirmed", 0, 0), ("payloads received", 1504, 1504), ("timers cancelled", 0, 0), ("timers fenced", 0, 0), ("timers fired", 0, 0), ("timers scheduled", 0, 0)]; crash plans 336; None
+pass pr15-exit-pos-07 pr16-correct-baseline-carried-timer: replays to its retained identity, runs and counts with no finding: identity dad360f9203616afc918f6fbfc2cc41b933a19ee6e0a879ccf27c239f4d26ced (retained dad360f9203616afc918f6fbfc2cc41b933a19ee6e0a879ccf27c239f4d26ced); runs 2925; findings 0; compared [("payloads confirmed", 0, 0), ("payloads received", 1504, 1504), ("timers cancelled", 0, 0), ("timers fenced", 0, 0), ("timers fired", 1504, 1504), ("timers scheduled", 1504, 1504)]; crash plans 336; None
+pass pr15-exit-pos-07 pr16-correct-baseline-carried-timer-fail-stop: replays to its retained identity, runs and counts with no finding: identity 2357438fc6ebe19567b619feaae33b818612858d4334be3853168a883ad1a452 (retained 2357438fc6ebe19567b619feaae33b818612858d4334be3853168a883ad1a452); runs 2925; findings 0; compared [("payloads confirmed", 0, 0), ("payloads received", 1504, 1504), ("timers cancelled", 0, 0), ("timers fenced", 0, 0), ("timers fired", 1504, 1504), ("timers scheduled", 1504, 1504)]; crash plans 336; None
+pass pr15-exit-pos-07 pr16-correct-baseline-carried-recovery: replays to its retained identity, runs and counts with no finding: identity 1318028d8304cc4d8c390bd44e823e2d9fdccc8f60f75426b9a4a2f2d61fd99b (retained 1318028d8304cc4d8c390bd44e823e2d9fdccc8f60f75426b9a4a2f2d61fd99b); runs 2925; findings 0; compared [("payloads confirmed", 546, 546), ("payloads received", 546, 546), ("timers cancelled", 0, 0), ("timers fenced", 0, 0), ("timers fired", 0, 0), ("timers scheduled", 0, 0)]; crash plans 336; None
+pass pr15-exit-pos-07 pr16-correct-baseline-carried-recovery-fail-stop: replays to its retained identity, runs and counts with no finding: identity 2c55ae7e88bb24956f47c02c84726c651a1a72a2cd9457643566510d6f8b9ab9 (retained 2c55ae7e88bb24956f47c02c84726c651a1a72a2cd9457643566510d6f8b9ab9); runs 2925; findings 0; compared [("payloads confirmed", 546, 546), ("payloads received", 546, 546), ("timers cancelled", 0, 0), ("timers fenced", 0, 0), ("timers fired", 0, 0), ("timers scheduled", 0, 0)]; crash plans 336; None
+pass pr15-exit-neg-01 process: crash moved one step later: detected + verified-equivalent + absent = windows, some detected: 2325 + 0 + 75 of 2400
+pass pr15-exit-neg-01 process: crash moved one step earlier: detected + verified-equivalent + absent = windows, some detected: 2211 + 0 + 189 of 2400
+pass pr15-exit-neg-01 process: crash dropped: detected + verified-equivalent + absent = windows, some detected: 2400 + 0 + 0 of 2400
+pass pr15-exit-neg-01 process: some detections are by content at equal length: 3033
+pass pr15-exit-neg-01 storage: crash moved one step later: detected + verified-equivalent + absent = windows, some detected: 4940 + 0 + 442 of 5382
+pass pr15-exit-neg-01 storage: crash moved one step earlier: detected + verified-equivalent + absent = windows, some detected: 5256 + 0 + 126 of 5382
+pass pr15-exit-neg-01 storage: crash dropped: detected + verified-equivalent + absent = windows, some detected: 5382 + 0 + 0 of 5382
+pass pr15-exit-neg-01 storage: some detections are by content at equal length: 5195
+pass pr15-exit-neg-01 composed: crash moved one step later: detected + verified-equivalent + absent = windows, some detected: 2233 + 0 + 153 of 2386
+pass pr15-exit-neg-01 composed: crash moved one step earlier: detected + verified-equivalent + absent = windows, some detected: 2302 + 0 + 84 of 2386
+pass pr15-exit-neg-01 composed: crash dropped: detected + verified-equivalent + absent = windows, some detected: 2386 + 0 + 0 of 2386
+pass pr15-exit-neg-01 composed: some detections are by content at equal length: 2597
+pass pr15-exit-neg-01 graceful: crash moved one step later: detected + verified-equivalent + absent = windows, some detected: 60 + 0 + 12 of 72
+pass pr15-exit-neg-01 graceful: crash moved one step earlier: detected + verified-equivalent + absent = windows, some detected: 72 + 0 + 0 of 72
+pass pr15-exit-neg-01 graceful: crash dropped: detected + verified-equivalent + absent = windows, some detected: 72 + 0 + 0 of 72
+pass pr15-exit-neg-01 graceful: some detections are by content at equal length: 204
+pass pr15-exit-neg-01 fail-stop: crash moved one step later: detected + verified-equivalent + absent = windows, some detected: 60 + 0 + 12 of 72
+pass pr15-exit-neg-01 fail-stop: crash moved one step earlier: detected + verified-equivalent + absent = windows, some detected: 72 + 0 + 0 of 72
+pass pr15-exit-neg-01 fail-stop: crash dropped: detected + verified-equivalent + absent = windows, some detected: 72 + 0 + 0 of 72
+pass pr15-exit-neg-01 fail-stop: some detections are by content at equal length: 204
+pass pr15-exit-neg-01 graceful: crash dropped, the log kept aligned: detected in every window: 72
+pass pr15-exit-neg-01 graceful: crash semantics swapped: detected in every window: 72
+pass pr15-exit-neg-01 fail-stop: crash dropped, the log kept aligned: detected in every window: 72
+pass pr15-exit-neg-01 fail-stop: crash semantics swapped: detected in every window: 72
+pass pr15-exit-neg-02 network: cancellation dropped: detected + verified-equivalent + absent = points, some detected: 670 + 128 + 0 of 798
+pass pr15-exit-neg-02 network: cancellation moved past the next program step: detected + verified-equivalent + absent = points, some detected: 670 + 0 + 128 of 798
+pass pr15-exit-neg-02 network: cancellation moved one step later: detected + verified-equivalent + absent = points, some detected: 276 + 480 + 42 of 798
+pass pr15-exit-neg-02 storage: cancellation dropped: detected + verified-equivalent + absent = points, some detected: 712 + 86 + 0 of 798
+pass pr15-exit-neg-02 storage: cancellation moved past the next program step: detected + verified-equivalent + absent = points, some detected: 712 + 0 + 86 of 798
+pass pr15-exit-neg-02 storage: cancellation moved one step later: detected + verified-equivalent + absent = points, some detected: 396 + 360 + 42 of 798
+pass pr15-exit-neg-03 network: the undoctored record replays exactly: 
+pass pr15-exit-neg-03 network: the same log under another retained-bytes budget differs in bytes alone: Some(BytesDiffer)
+pass pr15-exit-neg-03 network: a doctored outcome differs in outcome alone: Some(OutcomeDiffers)
+pass pr15-exit-neg-03 network: every single-bit flip of the recorded journal is a typed divergence: 220 bytes; kinds {"bytes-differ": 28, "header-differs": 13, "log-differs": 72, "undecodable": 107}; accepted []
+pass pr15-exit-neg-03 process: the undoctored record replays exactly: 
+pass pr15-exit-neg-03 process: the same log under another retained-bytes budget differs in bytes alone: Some(BytesDiffer)
+pass pr15-exit-neg-03 process: a doctored outcome differs in outcome alone: Some(OutcomeDiffers)
+pass pr15-exit-neg-03 process: every single-bit flip of the recorded journal is a typed divergence: 254 bytes; kinds {"bytes-differ": 113, "header-differs": 9, "log-differs": 47, "undecodable": 85}; accepted []
+pass pr15-exit-neg-03 storage: the undoctored record replays exactly: 
+pass pr15-exit-neg-03 storage: the same log under another retained-bytes budget differs in bytes alone: Some(BytesDiffer)
+pass pr15-exit-neg-03 storage: a doctored outcome differs in outcome alone: Some(OutcomeDiffers)
+pass pr15-exit-neg-03 storage: every single-bit flip of the recorded journal is a typed divergence: 330 bytes; kinds {"bytes-differ": 147, "header-differs": 10, "log-differs": 82, "undecodable": 91}; accepted []
+pass pr15-exit-neg-03 binding: no flipped byte decodes to the record: 281 rejected, 0 decoded as the record
+pass pr15-exit-bnd-01 network: every requestable case is refused Unsupported in every window where it applies, never recorded: [("requestable asymmetric-partition", 133), ("requestable connection-reset", 133), ("requestable corruption", 133), ("requestable endpoint-crash", 133), ("requestable forgery", 133), ("requestable overlapping-partitions", 19), ("requestable recall-in-flight", 133)]; None
+pass pr15-exit-bnd-01 network: requestable and no-operation cases partition the declared table: 7 + 6 of 13
+pass pr15-exit-bnd-01 network: the pack's own run refuses the spliced log at the splice: 
+pass pr15-exit-bnd-01 process: every requestable case is refused Unsupported in every window where it applies, never recorded: [("requestable graceful-cancellation", 133), ("requestable panic", 133), ("requestable power-loss", 133)]; None
+pass pr15-exit-bnd-01 process: requestable and no-operation cases partition the declared table: 3 + 2 of 5
+pass pr15-exit-bnd-01 process: the pack's own run refuses the spliced log at the splice: 
+pass pr15-exit-bnd-01 storage: every requestable case is refused Unsupported in every window where it applies, never recorded: [("requestable flush-dishonesty", 133), ("requestable sector-corruption", 133), ("requestable write-reordering", 133)]; None
+pass pr15-exit-bnd-01 storage: requestable and no-operation cases partition the declared table: 3 + 3 of 6
+pass pr15-exit-bnd-01 storage: the pack's own run refuses the spliced log at the splice: 
+pass pr15-exit-bnd-01 no step kind asks for a no-operation case: 
+pass pr15-exit-bnd-01 the request constructors build each step kind as itself: 
+pass pr15-exit-bnd-01 binding: a crash without fail-stop semantics is CrashUnsupported, INV-008 Unsupported: Some(CrashUnsupported { task: 0, why: "runs under a budget deadline" })
+pass pr15-exit-bnd-02 process: a crash is refused NodeDown: 54
+pass pr15-exit-bnd-02 process: a crash is refused CrashBudgetSpent: 1083
+pass pr15-exit-bnd-02 process: no crash candidate is inconclusive or unsupported: 
+pass pr15-exit-bnd-02 storage: a crash is refused NodeDown: 62
+pass pr15-exit-bnd-02 storage: a crash is refused CrashBudgetSpent: 632
+pass pr15-exit-bnd-02 storage: no crash candidate is inconclusive or unsupported: 
+pass pr15-exit-bnd-03 a clean artifact with windows is met: 
+pass pr15-exit-bnd-03 an artifact with no window is not met: 
+pass pr15-exit-bnd-03 an unsupported window is a typed gap and not met: Some(Gap { artifact: "bnd", window: "cancel", why: Unsupported("Unsupported(GracefulCancellation)") })
+pass pr15-exit-bnd-03 a window a step bound cuts is a ResourceExhausted gap and not met: 
+pass pr15-exit-bnd-03 a record doctored after recording does not replay: 
+pass pr15-exit-bnd-03 the corpus has no gap of any kind: 0
+pass pr15-exit-bnd-04 time/unmodelled-v0 declares no operation: 
+pass pr15-exit-bnd-04 every time case is NoOperation and OutsidePack, one per row: 
+pass pr15-exit-bnd-04 zero windows are never met: 

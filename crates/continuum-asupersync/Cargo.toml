@@ -24,6 +24,15 @@ continuum-value = { path = "../continuum-value" }
 # journals in `tests/pr18_impl01_reduction.rs`. A test edge only: the adapter's library
 # does not depend on the debugger.
 continuum-debugger = { path = "../continuum-debugger" }
+# PR 15's exit evidence (bn-jw7q): `tests/pr15_exit_evidence.rs` drives the network,
+# process and storage packs' Lab handlers, reads the time pack's declared profile, and
+# holds them beside the binding's crash and cancellation. Test edges only: the adapter's
+# library does not depend on any effect pack, and the packs themselves stay free of
+# dependencies (their `no_std` lane and INV-015 audit judge the packs' own manifests).
+continuum-effects-network = { path = "../continuum-effects-network" }
+continuum-effects-process = { path = "../continuum-effects-process" }
+continuum-effects-storage = { path = "../continuum-effects-storage" }
+continuum-effects-time = { path = "../continuum-effects-time" }
 continuum-task = { path = "../continuum-task" }
 continuum-value = { path = "../continuum-value" }
 

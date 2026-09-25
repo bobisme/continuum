@@ -318,3 +318,35 @@ tcb_class = "dev-only"
 kinds = ["dev"]
 used_by = ["continuum-asupersync"]
 rationale = "PR 18 (bn-3km4z): continuum-asupersync's integration test tests/pr18_impl01_reduction.rs instantiates continuum-debugger's generic causal-minimization passes on the replicated register's failing journals, with the journal's own happens-before relation from continuum-asupersync::causal and a replay oracle built from the lift, the A7 model and the projection. A dev edge only: the adapter's library does not depend on the debugger, and the debugger depends on no trace producer. Classed dev-only: no production path links it here, and a reduced core is evidence only through its own replay, which the oracle re-checks."
+
+[[dependency]]
+name = "continuum-effects-network"
+origin = "workspace"
+tcb_class = "dev-only"
+kinds = ["dev"]
+used_by = ["continuum-asupersync"]
+rationale = "PR-15 exit evidence (bn-jw7q): continuum-asupersync's integration test tests/pr15_exit_evidence.rs drives the effect packs' Lab handlers and reads their declared profiles, beside the binding's crash and cancellation, to show that crash windows and cancellation points replay exactly. The packs may have no dependency or dev-dependency of their own (their no_std lane and the INV-015 audit judge their manifests), so the cross-pack exit layer lives in this crate's tests. A dev edge only: the adapter's library does not depend on any effect pack. Classed dev-only: no production path links it here, and the evidence re-checks every replay against its recorded bytes."
+
+[[dependency]]
+name = "continuum-effects-process"
+origin = "workspace"
+tcb_class = "dev-only"
+kinds = ["dev"]
+used_by = ["continuum-asupersync"]
+rationale = "PR-15 exit evidence (bn-jw7q): continuum-asupersync's integration test tests/pr15_exit_evidence.rs drives the effect packs' Lab handlers and reads their declared profiles, beside the binding's crash and cancellation, to show that crash windows and cancellation points replay exactly. The packs may have no dependency or dev-dependency of their own (their no_std lane and the INV-015 audit judge their manifests), so the cross-pack exit layer lives in this crate's tests. A dev edge only: the adapter's library does not depend on any effect pack. Classed dev-only: no production path links it here, and the evidence re-checks every replay against its recorded bytes."
+
+[[dependency]]
+name = "continuum-effects-storage"
+origin = "workspace"
+tcb_class = "dev-only"
+kinds = ["dev"]
+used_by = ["continuum-asupersync"]
+rationale = "PR-15 exit evidence (bn-jw7q): continuum-asupersync's integration test tests/pr15_exit_evidence.rs drives the effect packs' Lab handlers and reads their declared profiles, beside the binding's crash and cancellation, to show that crash windows and cancellation points replay exactly. The packs may have no dependency or dev-dependency of their own (their no_std lane and the INV-015 audit judge their manifests), so the cross-pack exit layer lives in this crate's tests. A dev edge only: the adapter's library does not depend on any effect pack. Classed dev-only: no production path links it here, and the evidence re-checks every replay against its recorded bytes."
+
+[[dependency]]
+name = "continuum-effects-time"
+origin = "workspace"
+tcb_class = "dev-only"
+kinds = ["dev"]
+used_by = ["continuum-asupersync"]
+rationale = "PR-15 exit evidence (bn-jw7q): continuum-asupersync's integration test tests/pr15_exit_evidence.rs drives the effect packs' Lab handlers and reads their declared profiles, beside the binding's crash and cancellation, to show that crash windows and cancellation points replay exactly. The packs may have no dependency or dev-dependency of their own (their no_std lane and the INV-015 audit judge their manifests), so the cross-pack exit layer lives in this crate's tests. A dev edge only: the adapter's library does not depend on any effect pack. Classed dev-only: no production path links it here, and the evidence re-checks every replay against its recorded bytes."
