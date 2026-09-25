@@ -14,6 +14,7 @@
 //! | `gate_profile` is declared at `begin` and frozen | RFC 0032 correction 4 | as above |
 //! | twelve gates by identity at every status; out-of-profile gates `not_yet_enforced`, in-profile gates never | schema `gates` and profile conditionals | [`GateProfile::enforces`]; every gate starts `pending` or `not_yet_enforced` |
 //! | `candidate_snapshot` null exactly at `draft` | RFC 0032 | [`RepairTransaction::status`] derives `draft` from its absence |
+//! | `apply` seals a candidate snapshot from base + changes | RFC 0032 operations table, gate 2 | [`RepairTransaction::apply`] takes the base content and declared edits; [`SealedCandidate::seal`] is the only way to a candidate |
 //! | `version` is 1 iff `supersedes` is absent, else predecessor + 1 | RFC 0032, "Version arithmetic" | only `begin` and `apply` build a version |
 //! | `repair_id` is the content identity of the version, excluded from its own preimage | RFC 0032 | [`RepairTransaction::preimage_json`] omits it; [`RepairIdentity`] is those bytes |
 //! | an `intent` change through ordinary repair authority fails `IntentMutationDenied` at `apply` | RFC 0032, "Intent integrity and reclassification"; INV-011 | [`ApplyRefusal::IntentMutationDenied`] |
@@ -39,6 +40,8 @@ use continuum_value::identity::ContentHasher;
 
 use crate::handle::{CrashpackId, RepairId, SnapshotId};
 use crate::hypothesis::{Change, ChangeKind, Hypothesis, Proposal};
+use crate::patch::{PatchRefusal, SealedCandidate};
+use continuum_workspace::snapshot::WorkspaceContent;
 
 /// The artifact-class identity of the governing schema (`schema_id`).
 pub const SCHEMA_ID: &str = "https://continuum.dev/schema/repair-transaction.json";
@@ -427,6 +430,9 @@ pub enum ApplyRefusal {
     },
     /// The lineage has reached the largest representable version.
     VersionExhausted,
+    /// No candidate could be sealed from the base and the declared changes (patch
+    /// identity, PR-20 / IMPL-02).
+    Patch(PatchRefusal),
 }
 
 impl fmt::Display for ApplyRefusal {
@@ -437,27 +443,49 @@ impl fmt::Display for ApplyRefusal {
                 "IntentMutationDenied: changes[{index}] edits intent; that is an intent revision, not a repair"
             ),
             Self::VersionExhausted => f.write_str("the transaction lineage has no next version"),
+            Self::Patch(refusal) => write!(f, "{refusal}"),
         }
     }
 }
 
 impl std::error::Error for ApplyRefusal {}
 
-/// The candidate snapshot `apply` records.
+/// What `apply` produced: the next version, and the candidate it records, whose records
+/// the daemon publishes beside it.
 ///
-/// Sealing it from base + changes, and the digest comparison gate 2 makes, are patch
-/// identity (PR-20 / IMPL-02). Until then the caller names the snapshot, unchecked:
-/// nothing here verifies that it is sealed, that it differs from the base, or that it
-/// holds exactly the proposed changes. Gate 2 is where that is decided.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SealedCandidate(SnapshotId);
+/// Only [`RepairTransaction::apply`] builds one, so the candidate is always the one the
+/// version records.
+pub struct Applied<H: ContentHasher> {
+    transaction: RepairTransaction<H>,
+    candidate: SealedCandidate<H>,
+}
 
-impl SealedCandidate {
-    /// A candidate the caller asserts was sealed elsewhere. The name marks the trust
-    /// boundary at the call site; IMPL-02 replaces it with a checked seal.
+impl<H: ContentHasher> Applied<H> {
+    /// The new version, at `applied`.
     #[must_use]
-    pub const fn unchecked_from(snapshot: SnapshotId) -> Self {
-        Self(snapshot)
+    pub const fn transaction(&self) -> &RepairTransaction<H> {
+        &self.transaction
+    }
+
+    /// The candidate sealed from the base and the proposal's changes.
+    #[must_use]
+    pub const fn candidate(&self) -> &SealedCandidate<H> {
+        &self.candidate
+    }
+
+    /// Both halves.
+    #[must_use]
+    pub fn into_parts(self) -> (RepairTransaction<H>, SealedCandidate<H>) {
+        (self.transaction, self.candidate)
+    }
+}
+
+impl<H: ContentHasher> fmt::Debug for Applied<H> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Applied")
+            .field("transaction", &self.transaction)
+            .field("candidate", &self.candidate)
+            .finish()
     }
 }
 
@@ -614,22 +642,29 @@ impl<H: ContentHasher> RepairTransaction<H> {
         }))
     }
 
-    /// `repair.apply`: record `proposal`'s hypothesis and changes against `candidate` as
-    /// the next version, at `applied`, with every gate reset.
+    /// `repair.apply`: seal a candidate from `base` and `proposal`'s changes, and record
+    /// it with the hypothesis as the next version, at `applied`, with every gate reset.
     ///
-    /// The base triple, the profile, and the cost ledger carry over unchanged. The
-    /// hypothesis is recorded verbatim and read by nothing.
+    /// `base` is the content of this transaction's frozen `base_snapshot`, which the
+    /// caller resolves from its snapshot store; it is re-derived and compared, never
+    /// trusted. The candidate is never named by the caller: it is what the changes make
+    /// of the base ([`SealedCandidate::seal`]). The base triple, the profile, and the
+    /// cost ledger carry over unchanged. The hypothesis is recorded verbatim and read by
+    /// nothing.
     ///
     /// # Errors
     ///
-    /// [`ApplyRefusal::IntentMutationDenied`] when any change is of kind `intent`: no
-    /// transaction in this crate is reclassified, so none admits one.
+    /// [`ApplyRefusal::IntentMutationDenied`] when any change is of kind `intent`, at its
+    /// position in the proposed order: no transaction in this crate is reclassified, so
+    /// none admits one. It is checked before any sealing work.
     /// [`ApplyRefusal::VersionExhausted`] when the version cannot advance.
+    /// [`ApplyRefusal::Patch`] when `base` is not the base snapshot or the changes do
+    /// not apply to it.
     pub fn apply(
         &self,
         proposal: &Proposal,
-        candidate: SealedCandidate,
-    ) -> Result<Self, ApplyRefusal> {
+        base: &WorkspaceContent,
+    ) -> Result<Applied<H>, ApplyRefusal> {
         if let Some(index) = proposal
             .changes()
             .iter()
@@ -641,19 +676,25 @@ impl<H: ContentHasher> RepairTransaction<H> {
             .version
             .checked_add(1)
             .ok_or(ApplyRefusal::VersionExhausted)?;
-        Ok(Self::seal(Unsealed {
+        let candidate = SealedCandidate::<H>::seal(&self.base_snapshot, base, proposal.changes())
+            .map_err(ApplyRefusal::Patch)?;
+        let transaction = Self::seal(Unsealed {
             version,
             supersedes: Some(self.repair_id.clone()),
             base_snapshot: self.base_snapshot.clone(),
             base_intent: self.base_intent.clone(),
             failure: self.failure.clone(),
             hypothesis: proposal.hypothesis().clone(),
-            changes: proposal.changes().to_vec(),
-            candidate_snapshot: Some(candidate.0),
+            changes: candidate.changes().to_vec(),
+            candidate_snapshot: Some(candidate.identity().clone()),
             gate_profile: self.gate_profile,
             gates: initial_gates(self.gate_profile),
             cost_ledger: self.cost_ledger,
-        }))
+        });
+        Ok(Applied {
+            transaction,
+            candidate,
+        })
     }
 
     fn seal(parts: Unsealed) -> Self {
@@ -738,7 +779,8 @@ impl<H: ContentHasher> RepairTransaction<H> {
         &self.hypothesis
     }
 
-    /// `changes`.
+    /// `changes`, as recorded: kind and derived digest, in the canonical order of
+    /// [`crate::patch`].
     #[must_use]
     pub fn changes(&self) -> &[Change] {
         &self.changes

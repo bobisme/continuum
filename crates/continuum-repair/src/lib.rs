@@ -43,13 +43,16 @@
 //! | [`handle`] | the `crash_`, `ws_` and `rt_` handle patterns of the schema |
 //! | [`hypothesis`] | the untrusted hypothesis, the closed change kinds, the proposal |
 //! | [`transaction`] | the transaction skeleton: `begin` (draft v1) and `apply` (applied v2+), canonical bytes, content identity |
+//! | [`patch`] | patch identity (PR-20 / IMPL-02, bn-195b): declared changes, the candidate sealed from base + changes, gate 2's comparison |
 //!
 //! # Seams left for the later PR-20 bones
 //!
-//! - **IMPL-02, patch identity.** A change's `digest` is carried opaque, and the
-//!   candidate snapshot is supplied by the caller through
-//!   [`transaction::SealedCandidate`]. Normalizing the change set and sealing the
-//!   candidate from base + changes (what gate 2 compares) is IMPL-02's.
+//! - **IMPL-02, patch identity, is here** ([`patch`]). `apply` takes the base content
+//!   and the declared file edits, seals the candidate from them through
+//!   `continuum-workspace`'s snapshot, and derives every `changes[].digest`. No caller
+//!   names a candidate. What is left for later bones: gate 2 as a recorded gate status
+//!   (IMPL-03), and a durable store for the declared change payloads the digests name,
+//!   so that gate 2 can re-seal a published version (the daemon's).
 //! - **IMPL-03, exact replay; IMPL-05, evidence accumulation.** Every gate is `pending`
 //!   or `not_yet_enforced` with empty evidence. No operation here writes a gate
 //!   outcome or spends from the cost ledger.
@@ -72,6 +75,15 @@
 //!
 //! # Open questions raised, not resolved here
 //!
+//! - **A patch that does not apply is refused at `apply`, with no named wire code.**
+//!   RFC 0032's `apply` "seals a candidate snapshot from base + changes", and a change
+//!   that does not apply seals nothing, so [`patch::PatchRefusal`] is an `apply`
+//!   refusal. Gate 2 keeps its comparison role ([`patch::SealedCandidate::check`]) for
+//!   a candidate built elsewhere. But the IDL's `repair.apply` union is only
+//!   `IntentMutationDenied` and `UnsupportedSemanticFeature` plus `rule errors.common`,
+//!   the RFC does not state the path-disjointness rule, and `BaseMismatch` is a store
+//!   defect rather than a caller error. The RFC needs a correction naming the codes; the
+//!   mapping is the daemon's (bn-23pwm).
 //! - **Two `begin` calls on one crashpack mint one `rt_`.** RFC 0032 says both that
 //!   `repair_id` is the content identity of the version and that "two distinct `begin`
 //!   calls against one crashpack are two transactions". A v1 preimage is fully
@@ -87,4 +99,5 @@
 
 pub mod handle;
 pub mod hypothesis;
+pub mod patch;
 pub mod transaction;

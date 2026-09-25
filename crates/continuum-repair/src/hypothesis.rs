@@ -27,6 +27,8 @@
 
 use core::fmt;
 
+use crate::patch::DeclaredChange;
+
 /// The agent's hypothesis: untrusted prose, recorded beside the transaction and parsed
 /// by nothing.
 ///
@@ -116,10 +118,11 @@ impl ChangeKind {
     }
 }
 
-/// One entry of `changes`: a kind and a digest.
+/// One entry of `changes` as the artifact records it: a kind and a digest.
 ///
-/// The digest is carried opaque. Its derivation and normalization are patch identity,
-/// PR-20 / IMPL-02; the schema types it as a bare string, so nothing here narrows it.
+/// Only [`crate::patch::DeclaredChange::recorded`] builds one, so the digest is always
+/// the content identity of a declared change's canonical record (PR-20 / IMPL-02), never
+/// a string a caller chose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Change {
     kind: ChangeKind,
@@ -129,7 +132,7 @@ pub struct Change {
 impl Change {
     /// A change of `kind` whose content has `digest`.
     #[must_use]
-    pub fn new(kind: ChangeKind, digest: impl Into<String>) -> Self {
+    pub(crate) fn new(kind: ChangeKind, digest: impl Into<String>) -> Self {
         Self {
             kind,
             digest: digest.into(),
@@ -142,7 +145,7 @@ impl Change {
         self.kind
     }
 
-    /// The opaque content digest.
+    /// The content digest, `<algorithm>:<hex>`.
     #[must_use]
     pub fn digest(&self) -> &str {
         &self.digest
@@ -151,10 +154,13 @@ impl Change {
 
 /// What `repair.apply` carries besides the transaction handle: the typed changes and
 /// the hypothesis (IDL `repair.apply` request `{repair, changes, hypothesis}`).
+///
+/// The changes are the declared file edits themselves, not digests: the candidate and
+/// every recorded digest are derived from them ([`crate::patch`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Proposal {
     hypothesis: Hypothesis,
-    changes: Vec<Change>,
+    changes: Vec<DeclaredChange>,
 }
 
 impl Proposal {
@@ -162,7 +168,7 @@ impl Proposal {
     /// this constructor's: whether an `intent` change is admissible depends on the
     /// transaction it is applied to.
     #[must_use]
-    pub const fn new(hypothesis: Hypothesis, changes: Vec<Change>) -> Self {
+    pub const fn new(hypothesis: Hypothesis, changes: Vec<DeclaredChange>) -> Self {
         Self {
             hypothesis,
             changes,
@@ -177,7 +183,7 @@ impl Proposal {
 
     /// The changes, in the order proposed.
     #[must_use]
-    pub fn changes(&self) -> &[Change] {
+    pub fn changes(&self) -> &[DeclaredChange] {
         &self.changes
     }
 }

@@ -14,6 +14,10 @@
 //!
 //! Set `CONTINUUM_REPAIR_BLESS=1` to rewrite both fixtures from the library.
 //!
+//! Since PR-20 / IMPL-02 (bn-195b) every snapshot handle here is a content identity:
+//! the base is the register workspace of `tests/common`, and the candidate and the
+//! change digest are derived from it and the declared edit, never named by hand.
+//!
 //! # Tests
 //!
 //! - positive: `positive_*` — the ack-after-sync repair opens and applies.
@@ -23,17 +27,25 @@
 //! - boundary: `boundary_*` — canonical bytes are stable and round-trip; the identity
 //!   moves with every field; the schema's closed sets are the crate's.
 
+mod common;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use continuum_intent::canonical_json::Json;
 use continuum_intent::contract::{IntentContract, IntentId};
 use continuum_repair::handle::{CrashpackId, SnapshotId};
-use continuum_repair::hypothesis::{Change, ChangeKind, Hypothesis, Proposal};
+use continuum_repair::hypothesis::{ChangeKind, Hypothesis, Proposal};
+use continuum_repair::patch::{DeclaredChange, FileEdit};
 use continuum_repair::transaction::{
     ApplyRefusal, BeginRefusal, FailureBinding, GateName, GateProfile, GateStatus,
-    RepairTransaction, Resolution, SCHEMA_EPOCH, SCHEMA_ID, SealedCandidate, TransactionStatus,
+    RepairTransaction, Resolution, SCHEMA_EPOCH, SCHEMA_ID, TransactionStatus,
 };
 use continuum_value::identity::{Blake3Hasher, ContentHasher};
+use continuum_workspace::snapshot::WorkspaceContent;
+
+use common::{
+    ack_after_sync_change, base_content, base_id, content, path, repaired_content, snapshot_id,
+};
 
 /// Every transaction in this suite is named under BLAKE3.
 type Tx = RepairTransaction<Blake3Hasher>;
@@ -45,14 +57,8 @@ const DRAFT_FIXTURE: &str = "tests/fixtures/pr20-impl01-ack-after-sync-draft.jso
 const APPLIED_FIXTURE: &str = "tests/fixtures/pr20-impl01-ack-after-sync-applied.json";
 
 const CRASH: &str = "crash_pr20_impl01_ack_before_sync";
-const BASE: &str = "ws_pr20_impl01_register_base";
-const CANDIDATE: &str = "ws_pr20_impl01_ack_after_sync";
 const ACK_AFTER_SYNC: &str = "move the ack after the storage sync: the replica publishes its \
     reply only once the write is durable, so an acknowledged write survives a crash";
-/// The patch text the `rust` change's digest names. Deriving change digests is IMPL-02's;
-/// this one is a stable stand-in.
-const ACK_AFTER_SYNC_PATCH: &str =
-    "-    reply.send(Ack);\n-    storage.sync()?;\n+    storage.sync()?;\n+    reply.send(Ack);\n";
 
 // --- fixtures ----------------------------------------------------------------------
 
@@ -74,13 +80,13 @@ struct Binding {
 impl Binding {
     fn register() -> Self {
         let mut binding = Self::default();
-        binding.failures.insert(
-            CRASH.to_owned(),
-            Resolution::Found(SnapshotId::new(BASE).unwrap()),
-        );
         binding
-            .intents
-            .insert(BASE.to_owned(), Resolution::Found(register_intent()));
+            .failures
+            .insert(CRASH.to_owned(), Resolution::Found(base_id()));
+        binding.intents.insert(
+            base_id().as_str().to_owned(),
+            Resolution::Found(register_intent()),
+        );
         binding
     }
 }
@@ -105,15 +111,34 @@ fn crash(handle: &str) -> CrashpackId {
     CrashpackId::new(handle).unwrap()
 }
 
-fn candidate(handle: &str) -> SealedCandidate {
-    SealedCandidate::unchecked_from(SnapshotId::new(handle).unwrap())
+/// `transaction.apply` on the register base, keeping the new version.
+fn apply(transaction: &Tx, proposal: &Proposal) -> Result<Tx, ApplyRefusal> {
+    apply_to(transaction, proposal, &base_content())
 }
 
-fn digest_of(text: &str) -> String {
-    format!(
-        "blake3-256:{}",
-        Blake3Hasher::hash(text.as_bytes()).to_token()
+fn apply_to(
+    transaction: &Tx,
+    proposal: &Proposal,
+    base: &WorkspaceContent,
+) -> Result<Tx, ApplyRefusal> {
+    transaction
+        .apply(proposal, base)
+        .map(|applied| applied.into_parts().0)
+}
+
+/// A change of `kind` creating `name` with `text`: admissible on the register base
+/// wherever `name` is new.
+fn create(kind: ChangeKind, name: &str, text: &str) -> DeclaredChange {
+    DeclaredChange::new(
+        kind,
+        [(
+            path(name),
+            FileEdit::Create {
+                content: text.as_bytes().to_vec(),
+            },
+        )],
     )
+    .unwrap()
 }
 
 fn draft() -> Tx {
@@ -124,17 +149,12 @@ fn draft() -> Tx {
 fn ack_after_sync() -> Proposal {
     Proposal::new(
         Hypothesis::new(ACK_AFTER_SYNC),
-        vec![Change::new(
-            ChangeKind::Rust,
-            digest_of(ACK_AFTER_SYNC_PATCH),
-        )],
+        vec![ack_after_sync_change()],
     )
 }
 
 fn applied() -> Tx {
-    draft()
-        .apply(&ack_after_sync(), candidate(CANDIDATE))
-        .expect("a rust-only proposal applies")
+    apply(&draft(), &ack_after_sync()).expect("a rust-only proposal applies")
 }
 
 fn fixture_matches(relative: &str, bytes: &[u8]) {
@@ -186,7 +206,7 @@ fn positive_begin_opens_a_draft_on_the_registers_frozen_base_triple() {
     assert_eq!(draft.supersedes(), None);
     assert_eq!(draft.status(), TransactionStatus::Draft);
     assert_eq!(draft.failure().as_str(), CRASH);
-    assert_eq!(draft.base_snapshot().as_str(), BASE);
+    assert_eq!(draft.base_snapshot(), &base_id());
     assert_eq!(draft.base_intent(), &register_intent());
     assert_eq!(draft.candidate_snapshot(), None);
     assert_eq!(draft.hypothesis(), &Hypothesis::unstated());
@@ -227,11 +247,14 @@ fn positive_apply_records_the_move_ack_after_sync_hypothesis() {
     assert_eq!(applied.gate_profile(), draft.gate_profile());
     assert_eq!(applied.gates(), draft.gates(), "apply resets every gate");
     assert_eq!(
-        applied.candidate_snapshot().map(SnapshotId::as_str),
-        Some(CANDIDATE)
+        applied.candidate_snapshot(),
+        Some(&snapshot_id(&repaired_content()))
     );
     assert_eq!(applied.hypothesis().as_prose(), ACK_AFTER_SYNC);
-    assert_eq!(applied.changes(), ack_after_sync().changes());
+    assert_eq!(
+        applied.changes(),
+        [ack_after_sync_change().recorded::<Blake3Hasher>()]
+    );
     assert_ne!(applied.repair_id(), draft.repair_id());
     let artifact = applied.artifact_json();
     assert_eq!(
@@ -257,20 +280,13 @@ fn negative_an_intent_weakening_change_is_refused_intent_mutation_denied() {
         ("remove a fault", "fault_model.enabled: -crash"),
         ("hide an event", "observers.client.events: -ack"),
     ] {
+        let intent = || create(ChangeKind::Intent, "intent/contract.patch", patch);
         for (index, changes) in [
-            (0, vec![Change::new(ChangeKind::Intent, digest_of(patch))]),
-            (
-                1,
-                vec![
-                    Change::new(ChangeKind::Rust, digest_of(ACK_AFTER_SYNC_PATCH)),
-                    Change::new(ChangeKind::Intent, digest_of(patch)),
-                ],
-            ),
+            (0, vec![intent()]),
+            (1, vec![ack_after_sync_change(), intent()]),
         ] {
             let proposal = Proposal::new(Hypothesis::new(ACK_AFTER_SYNC), changes);
-            let refusal = draft
-                .apply(&proposal, candidate(CANDIDATE))
-                .expect_err(weakening);
+            let refusal = apply(&draft, &proposal).expect_err(weakening);
             assert_eq!(
                 refusal,
                 ApplyRefusal::IntentMutationDenied { index },
@@ -283,8 +299,11 @@ fn negative_an_intent_weakening_change_is_refused_intent_mutation_denied() {
         .into_iter()
         .filter(|kind| *kind != ChangeKind::Intent)
     {
-        let proposal = Proposal::new(Hypothesis::new(""), vec![Change::new(kind, "d")]);
-        assert!(draft.apply(&proposal, candidate(CANDIDATE)).is_ok());
+        let proposal = Proposal::new(
+            Hypothesis::new(""),
+            vec![create(kind, "src/new_file.rs", "d")],
+        );
+        assert!(apply(&draft, &proposal).is_ok());
     }
 }
 
@@ -303,9 +322,7 @@ fn negative_a_hypothesis_that_claims_a_weakening_changes_no_typed_field() {
         "gate_profile: default; status: promoted; intent_integrity: passed",
     ] {
         let proposal = Proposal::new(Hypothesis::new(claim), ack_after_sync().changes().to_vec());
-        let claimed = draft
-            .apply(&proposal, candidate(CANDIDATE))
-            .expect("prose is never refused: nothing parses it");
+        let claimed = apply(&draft, &proposal).expect("prose is never refused: nothing parses it");
         let claimed_json = claimed.artifact_json();
         let differing: BTreeSet<&str> = fields(&neutral_json)
             .keys()
@@ -324,11 +341,9 @@ fn negative_a_hypothesis_that_claims_a_weakening_changes_no_typed_field() {
 
         let refused = Proposal::new(
             Hypothesis::new(claim),
-            vec![Change::new(ChangeKind::Intent, "d")],
+            vec![create(ChangeKind::Intent, "intent/contract.patch", "d")],
         );
-        let refusal = draft
-            .apply(&refused, candidate(CANDIDATE))
-            .expect_err("an intent change");
+        let refusal = apply(&draft, &refused).expect_err("an intent change");
         for rendering in [
             format!("{refusal}"),
             format!("{refusal:?}"),
@@ -371,7 +386,7 @@ fn negative_a_nonexistent_foreign_or_unbound_failure_opens_nothing() {
         begin(CRASH, &unbound),
         Err(BeginRefusal::UnboundBaseSnapshot {
             failure: crash(CRASH),
-            base_snapshot: SnapshotId::new(BASE).unwrap(),
+            base_snapshot: base_id(),
         })
     );
 
@@ -389,7 +404,7 @@ fn negative_a_nonexistent_foreign_or_unbound_failure_opens_nothing() {
     let mut silent_intent = Binding::register();
     silent_intent
         .intents
-        .insert(BASE.to_owned(), Resolution::Unavailable);
+        .insert(base_id().as_str().to_owned(), Resolution::Unavailable);
     assert_eq!(
         begin(CRASH, &silent_intent),
         Err(BeginRefusal::BindingUnavailable {
@@ -432,7 +447,7 @@ fn boundary_canonical_bytes_are_stable_and_survive_a_serialization_round_trip() 
     // Prose with quotes, controls, and non-ASCII has one spelling and round-trips.
     let awkward = "ack \"after\" sync\n\ttab \u{1} é ∀ \\";
     let proposal = Proposal::new(Hypothesis::new(awkward), Vec::new());
-    let transaction = draft().apply(&proposal, candidate(CANDIDATE)).unwrap();
+    let transaction = apply(&draft(), &proposal).unwrap();
     let reparsed = Json::parse(&transaction.to_artifact_bytes()).unwrap();
     assert_eq!(
         fields(&reparsed).get("hypothesis").and_then(Json::as_str),
@@ -451,45 +466,43 @@ fn boundary_canonical_bytes_are_stable_and_survive_a_serialization_round_trip() 
 fn boundary_the_identity_moves_with_every_field() {
     let base = Binding::register();
     let reference = applied();
-    let apply_with = |hypothesis: &str, changes: Vec<Change>, target: &str| {
-        draft()
-            .apply(
-                &Proposal::new(Hypothesis::new(hypothesis), changes),
-                candidate(target),
-            )
-            .unwrap()
+    let apply_with = |hypothesis: &str, changes: Vec<DeclaredChange>| {
+        apply(
+            &draft(),
+            &Proposal::new(Hypothesis::new(hypothesis), changes),
+        )
+        .unwrap()
     };
-    let rust = || {
-        vec![Change::new(
-            ChangeKind::Rust,
-            digest_of(ACK_AFTER_SYNC_PATCH),
-        )]
-    };
+    let rust = || vec![ack_after_sync_change()];
+
+    // Another base: the register with one more file. Its identity is content-derived.
+    let other_base_content = content(&[
+        (common::MANIFEST_PATH, common::MANIFEST.as_bytes()),
+        (common::MODEL_PATH, common::MODEL.as_bytes()),
+        (common::REPLICA, common::REPLICA_BEFORE.as_bytes()),
+        ("README.md", b"register"),
+    ]);
+    let other_base_id = snapshot_id(&other_base_content);
 
     let mut other_failure = Binding::register();
     other_failure.failures.insert(
         "crash_pr20_impl01_other".to_owned(),
-        Resolution::Found(SnapshotId::new(BASE).unwrap()),
+        Resolution::Found(base_id()),
     );
     let mut other_base = Binding::register();
-    other_base.failures.insert(
-        CRASH.to_owned(),
-        Resolution::Found(SnapshotId::new("ws_pr20_impl01_other_base").unwrap()),
-    );
+    other_base
+        .failures
+        .insert(CRASH.to_owned(), Resolution::Found(other_base_id.clone()));
     other_base.intents.insert(
-        "ws_pr20_impl01_other_base".to_owned(),
+        other_base_id.as_str().to_owned(),
         Resolution::Found(register_intent()),
     );
     let mut other_intent = Binding::register();
     other_intent.intents.insert(
-        BASE.to_owned(),
+        base_id().as_str().to_owned(),
         Resolution::Found(IntentId::new("in_pr20_impl01_other_intent").unwrap()),
     );
-    let apply_on = |transaction: Tx| {
-        transaction
-            .apply(&ack_after_sync(), candidate(CANDIDATE))
-            .unwrap()
-    };
+    let apply_on = |transaction: Tx| apply(&transaction, &ack_after_sync()).unwrap();
     let begin = |failure: &str, profile: GateProfile, binding: &Binding| {
         Tx::begin(crash(failure), profile, binding).unwrap()
     };
@@ -497,34 +510,42 @@ fn boundary_the_identity_moves_with_every_field() {
     let mut variants = vec![
         (
             "hypothesis, one byte",
-            apply_with(&format!("{ACK_AFTER_SYNC}."), rust(), CANDIDATE),
+            apply_with(&format!("{ACK_AFTER_SYNC}."), rust()),
         ),
         (
-            "changes, digest",
+            // A different edit: both the change digest and the candidate move. The
+            // candidate cannot move alone any more; it is derived from the changes.
+            "changes, digest and candidate_snapshot",
             apply_with(
                 ACK_AFTER_SYNC,
-                vec![Change::new(ChangeKind::Rust, "x")],
-                CANDIDATE,
+                vec![common::replace(ChangeKind::Rust, common::REPLICA, b"x")],
             ),
         ),
         (
             "changes, kind",
             apply_with(
                 ACK_AFTER_SYNC,
-                vec![Change::new(
+                vec![common::replace(
                     ChangeKind::Model,
-                    digest_of(ACK_AFTER_SYNC_PATCH),
+                    common::REPLICA,
+                    common::REPLICA_AFTER.as_bytes(),
                 )],
-                CANDIDATE,
             ),
         ),
+        ("changes, empty", apply_with(ACK_AFTER_SYNC, Vec::new())),
         (
-            "changes, empty",
-            apply_with(ACK_AFTER_SYNC, Vec::new(), CANDIDATE),
-        ),
-        (
-            "candidate_snapshot",
-            apply_with(ACK_AFTER_SYNC, rust(), "ws_pr20_impl01_other_candidate"),
+            // `changes` alone: a no-op replace leaves the candidate equal to the base,
+            // as the empty proposal does, and moves only the recorded changes. Since
+            // IMPL-02 a kind cannot move alone; it is part of the change's digest.
+            "changes, candidate held",
+            apply_with(
+                ACK_AFTER_SYNC,
+                vec![common::replace(
+                    ChangeKind::Rust,
+                    common::REPLICA,
+                    common::REPLICA_BEFORE.as_bytes(),
+                )],
+            ),
         ),
         (
             "failure",
@@ -536,7 +557,12 @@ fn boundary_the_identity_moves_with_every_field() {
         ),
         (
             "base_snapshot",
-            apply_on(begin(CRASH, GateProfile::PhaseB, &other_base)),
+            apply_to(
+                &begin(CRASH, GateProfile::PhaseB, &other_base),
+                &ack_after_sync(),
+                &other_base_content,
+            )
+            .unwrap(),
         ),
         (
             "base_intent",
@@ -625,7 +651,7 @@ fn differential_the_handle_matches_an_independent_continuum_value_construction()
         ("schema_id".to_owned(), string(SCHEMA_ID)),
         ("schema_epoch".to_owned(), Json::Integer(1)),
         ("version".to_owned(), Json::Integer(1)),
-        ("base_snapshot".to_owned(), string(BASE)),
+        ("base_snapshot".to_owned(), string(base_id().as_str())),
         ("base_intent".to_owned(), string(register_intent().as_str())),
         ("failure".to_owned(), string(CRASH)),
         ("hypothesis".to_owned(), string("")),
@@ -643,12 +669,19 @@ fn differential_the_handle_matches_an_independent_continuum_value_construction()
     assert_eq!(draft.identity().canonical_bytes(), bytes.as_slice());
     assert_eq!(draft.repair_id().as_str(), handle);
 
+    // The change digest, written from the change record grammar in this test rather
+    // than read back from the library: BLAKE3 over `canonical_bytes`, spelled
+    // `<algorithm>:<hex>`.
+    let change_digest = format!(
+        "blake3-256:{}",
+        Blake3Hasher::hash(&ack_after_sync_change().canonical_bytes()).to_token()
+    );
     let applied_preimage = Json::object([
         ("schema_id".to_owned(), string(SCHEMA_ID)),
         ("schema_epoch".to_owned(), Json::Integer(1)),
         ("version".to_owned(), Json::Integer(2)),
         ("supersedes".to_owned(), string(&handle)),
-        ("base_snapshot".to_owned(), string(BASE)),
+        ("base_snapshot".to_owned(), string(base_id().as_str())),
         ("base_intent".to_owned(), string(register_intent().as_str())),
         ("failure".to_owned(), string(CRASH)),
         ("hypothesis".to_owned(), string(ACK_AFTER_SYNC)),
@@ -657,15 +690,15 @@ fn differential_the_handle_matches_an_independent_continuum_value_construction()
             Json::Array(vec![
                 Json::object([
                     ("kind".to_owned(), string("rust")),
-                    (
-                        "digest".to_owned(),
-                        string(&digest_of(ACK_AFTER_SYNC_PATCH)),
-                    ),
+                    ("digest".to_owned(), string(&change_digest)),
                 ])
                 .unwrap(),
             ]),
         ),
-        ("candidate_snapshot".to_owned(), string(CANDIDATE)),
+        (
+            "candidate_snapshot".to_owned(),
+            string(snapshot_id(&repaired_content()).as_str()),
+        ),
         ("status".to_owned(), string("applied")),
         ("gate_profile".to_owned(), string("phase-b")),
         ("gates".to_owned(), Json::Array(gates)),
@@ -795,9 +828,7 @@ fn boundary_every_profile_emits_its_own_gate_list() {
     };
     for profile in GateProfile::ALL {
         let draft = Tx::begin(crash(CRASH), profile, &Binding::register()).unwrap();
-        let applied = draft
-            .apply(&ack_after_sync(), candidate(CANDIDATE))
-            .unwrap();
+        let applied = apply(&draft, &ack_after_sync()).unwrap();
         for transaction in [&draft, &applied] {
             assert_eq!(transaction.gate_profile(), profile);
             let names: Vec<GateName> = transaction.gates().iter().map(|gate| gate.name()).collect();

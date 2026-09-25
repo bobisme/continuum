@@ -1,0 +1,47 @@
+[change]
+bone = "bn-195b"
+author = "continuum-dev"
+summary = "PR-20 / IMPL-02, patch identity: continuum-repair replaces SealedCandidate::unchecked_from with SealedCandidate::seal, which derives the candidate snapshot from the base content plus declared, base-anchored file edits through continuum-workspace's Merkle Snapshot; repair.apply takes the base content and the declared changes, records the derived candidate_snapshot and each changes[].digest (<algorithm>:<hex> of the change's canonical record) in canonical least-path order, and refuses a wrong base, a stale or inapplicable edit, overlapping changes, and (gate 2's check) an undeclared edit in a supplied candidate, each typed"
+
+[semantic]
+covers = [
+  "crates/continuum-repair/src/",
+]
+reference_tests = [
+  "crates/continuum-repair/tests/pr20_impl02_patch_identity.rs::pr20_impl02_positive_ack_after_sync_yields_a_stable_patch_identity",
+  "crates/continuum-repair/tests/pr20_impl02_patch_identity.rs::pr20_impl02_positive_every_edit_kind_seals_to_the_content_it_describes",
+  "crates/continuum-repair/tests/pr20_impl02_patch_identity.rs::pr20_impl02_negative_an_undeclared_file_change_in_the_candidate_is_refused",
+  "crates/continuum-repair/tests/pr20_impl02_patch_identity.rs::pr20_impl02_negative_a_change_against_a_different_base_is_refused",
+  "crates/continuum-repair/tests/pr20_impl02_patch_identity.rs::pr20_impl02_negative_overlapping_and_malformed_changes_are_refused",
+  "crates/continuum-repair/tests/pr20_impl02_patch_identity.rs::pr20_impl02_negative_refusals_do_not_render_file_content",
+  "crates/continuum-repair/tests/pr20_impl02_patch_identity.rs::pr20_impl02_boundary_identity_changes_with_any_change_byte",
+  "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::positive_apply_records_the_move_ack_after_sync_hypothesis",
+  "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::negative_an_intent_weakening_change_is_refused_intent_mutation_denied",
+  "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::boundary_the_identity_moves_with_every_field",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-repair/tests/pr20_impl02_patch_identity.rs::pr20_impl02_metamorphic_reordering_commutative_changes_follows_the_canonical_order", relation = "set/map insertion order" },
+  { test = "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::boundary_canonical_bytes_are_stable_and_survive_a_serialization_round_trip", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuum-repair/tests/pr20_impl02_patch_identity.rs::pr20_impl02_differential_identities_match_independent_constructions", oracle = "continuum-workspace", subject = "continuum-repair" },
+  { test = "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::differential_the_handle_matches_an_independent_continuum_value_construction", oracle = "continuum-value", subject = "continuum-repair" },
+]
+
+[semantic.claim_impact]
+claims = ["C020", "C033"]
+reason = "Both rows bear on agent repair. Neither row's state or wording changes: C020 stays OBSERVED on the intent classification layer, which this change does not touch; C033 stays TARGET because no repair is evaluated or promoted yet, and gate 2 is not yet recorded as a gate status"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: candidate_snapshot is filled with the content identity of the sealed candidate and changes[].digest with the digest of the declared change's canonical record, both already-declared string fields; the two retained IMPL-01 fixtures are re-blessed with derived handles and still validate against the epoch-1 schema"
+unaffected = { repair-transaction = "the crate still emits epoch-1 instances; no field, enum, pattern or conditional moves", workspace-snapshot = "the candidate is built by continuum-workspace's existing Snapshot; no snapshot artifact shape moves" }
+
+[semantic.migration]
+verdict = "Preserved"
+note = "No published artifact, schema class or epoch moves: continuum-repair still writes epoch-1 repair-transaction instances, and no daemon path serves repair.begin or repair.apply yet (bn-23pwm wires them), so nothing on disk migrates. The crate API changes in continuum-repair only: SealedCandidate::unchecked_from and the public Change::new are removed, and RepairTransaction::apply takes the base WorkspaceContent and a Proposal of DeclaredChange values and returns Applied { transaction, candidate }. The IMPL-01 test fixtures are re-blessed because their base, candidate and change digest are now derived from content rather than written by hand"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-2doo5u"
+verdict = "approved"

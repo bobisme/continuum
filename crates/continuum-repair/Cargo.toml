@@ -14,15 +14,23 @@ publish = false
 #   writer here would be the second spelling ADR-0013 exists to prevent.
 # - `continuum-value`: the `rt_*` handle is a digest of the canonical preimage under
 #   the `ContentHasher` seam; this crate makes no hash-vendor decision.
+#
+# One edge for PR-20 / IMPL-02 (bn-195b):
+#
+# - `continuum-workspace`: the candidate is a workspace snapshot sealed from base +
+#   changes (RFC 0032), so it is built by that crate's Merkle `Snapshot` and ordering
+#   contract. A second snapshot notion here would give one workspace two identities.
 [dependencies]
 continuum-intent = { path = "../continuum-intent" }
 continuum-value = { path = "../continuum-value" }
+continuum-workspace = { path = "../continuum-workspace" }
 
 # Repeated because integration tests in `tests/` are separate crates and do not
 # inherit the library's dependencies (`continuum-semantic-diff/Cargo.toml`'s precedent).
 [dev-dependencies]
 continuum-intent = { path = "../continuum-intent" }
 continuum-value = { path = "../continuum-value" }
+continuum-workspace = { path = "../continuum-workspace" }
 
 [lints]
 workspace = true

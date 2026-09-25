@@ -2620,8 +2620,8 @@
         "line": 481,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "patch identity"
+      "status": "satisfied",
+      "summary": "patch identity (delivered: bn-195b \u2014 crates/continuum-repair/src/patch.rs: RFC 0032 makes the patch identity what gate 2 compares, the content identity of the candidate sealed from base + declared changes, so SealedCandidate::uncheckedfrom is gone and SealedCandidate::seal is the only way to a candidate. It re-derives the base content's identity and refuses anything but the transaction's frozen basesnapshot, applies declared file edits that each name what they expect \u2014 Create an absent path, Replace and Delete the leaf identity of the base file \u2014 and builds the candidate with continuum-workspace's Merkle Snapshot, so there is one snapshot notion. repair.apply now takes the base content and DeclaredChange values and records the derived candidatesnapshot and each changes[].digest, the <algorithm>:<hex> digest of the change's length-prefixed canonical record. Canonical order: the changes of one proposal must be path-disjoint, so they commute, and changes is written in ascending least-path order under the snapshot ordering contract, so reordering moves no byte of the rt preimage. Typed refusals: BaseMismatch, StaleBefore, MissingFile, CreateOverExisting, OverlappingChanges, Tree, and gate 2's SealedCandidate::check, which compares a supplied candidate exactly and names every undeclared path in UndeclaredEdits. Evidence crates/continuum-repair/tests/pr20impl02patchidentity.rs and the retained artifact pr20-impl02-ack-after-sync-patch-identity; the IMPL-01 fixtures were re-blessed with derived handles. Not here: gate 2 as a recorded gate status, IMPL-03; the daemon's request-size bound on changes, its base-content resolution, publication of the candidate's records, and a durable store for declared change payloads so a published version can be re-sealed, bn-23pwm)"
     },
     {
       "category": "pr-deliverable",
