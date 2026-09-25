@@ -272,8 +272,8 @@
         "line": 2242,
         "path": "plan.md"
       },
-      "status": "active",
-      "summary": "an ADR resolving build-vs-adopt for the \u00a79 incremental engine (salsa-derived vs custom), backed by a spike implementing the four reuse-edge classes and query.explaininvalidation over parse/elaborate/explore with a measured invalidation-precision baseline; Phase C is BLOCKED until this ADR exists."
+      "status": "satisfied",
+      "summary": "an ADR resolving build-vs-adopt for the \u00a79 incremental engine (salsa-derived vs custom), backed by a spike implementing the four reuse-edge classes and query.explaininvalidation over parse/elaborate/explore with a measured invalidation-precision baseline; Phase C is BLOCKED until this ADR exists (delivered: bn-31vf, bn-13sa, bn-3gf6 \u2014 ADR-0055 decides a custom engine with reversal criteria, on the spike pr22a-impl02-reuse-spike and the baseline pr22a-impl03-precision-baseline; the ADR lists the residuals that PR 23 and PR 24 own)."
     },
     {
       "category": "phase-exit",
@@ -2857,8 +2857,8 @@
         "line": 516,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "the ADR resolving build-vs-adopt for the incremental engine (salsa-derived vs custom); Phase C is BLOCKED until this ADR exists (plan \u00a721, docs/08 R21)"
+      "status": "satisfied",
+      "summary": "the ADR resolving build-vs-adopt for the incremental engine (salsa-derived vs custom); Phase C is BLOCKED until this ADR exists (plan \u00a721, docs/08 R21) (delivered: bn-13sa \u2014 ADR-0055, Accepted: the engine is custom and salsa is not adopted, because salsa supplies only the Exact class with early cutoff, so the licences, quarantine, provenance, typed explanations and budgets would all be a shim, and 29 of the 32 measured over-invalidations are key misses of the query decomposition, not memo-table effects; five reversal criteria; R21's kill signal did not fire on the spike corpora and stays live until the G5 reference workload exists; the residuals are listed in the ADR)"
     },
     {
       "category": "pr-deliverable",
@@ -2881,8 +2881,8 @@
         "line": 516,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "a measured invalidation-precision baseline recorded in the ADR."
+      "status": "satisfied",
+      "summary": "a measured invalidation-precision baseline recorded in the ADR (delivered: bn-3gf6 \u2014 evidence pr22a-impl03-precision-baseline in crates/continuum-incremental/tests/golden/, recorded in ADR-0055: precision and recall of invalidation against the independent clean recomputation, per lane and per reuse class, over the Die Hard spike corpus and a finite durable-register corpus, against module granularity; combined promotion lane precision 62/94, 659 per mille, against 345 per mille for module granularity, recall 62/62 and 0 under-invalidation in the promotion lane, in edits and trace mode; interactive recall is 967 per mille in edits mode and 860 and 840 per mille in trace mode, every miss an Experimental one; sound reuses Exact 53, Validated 6, Conservative 32; the register examples cannot be used directly because the engine takes no run configuration, an ADR residual)."
     },
     {
       "category": "pr-exit",

@@ -163,3 +163,121 @@ pub const CORPUS: &[Mutation] = &[
         )],
     },
 ];
+
+/// The second corpus model (PR-22A / IMPL-03, bn-3gf6): a finite, configuration-free
+/// concretization of `notes/plan/examples/durable_register.ctm`. The engine lowers
+/// without a run configuration, so the example's sorts, sets and maps are unrolled
+/// to three replicas, one epoch, two values and the majority quorums.
+pub fn durable_register_finite() -> String {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/durable_register_finite.ctm"
+    );
+    std::fs::read_to_string(path).expect("the fixture is present")
+}
+
+/// The mutation corpus of the second model, in the same classes as [`CORPUS`]:
+/// whitespace, comment, rename, property, semantic, two edits aimed at the
+/// `Experimental` heuristic (only `trap-join-lines` defeats it, through a parse
+/// error), and one parse failure.
+pub const REGISTER_CORPUS: &[Mutation] = &[
+    Mutation {
+        id: "ws-reindent",
+        kind: "whitespace",
+        description: "re-indent every action and add a blank line before each",
+        edits: &[("\n  action", "\n\n      action")],
+    },
+    Mutation {
+        id: "ws-trailing",
+        kind: "whitespace",
+        description: "trailing spaces after every closing brace",
+        edits: &[("}\n", "}   \n")],
+    },
+    Mutation {
+        id: "comment-edit",
+        kind: "comment",
+        description: "reword the comment on every Lose action",
+        edits: &[("never a durable one", "durable writes survive")],
+    },
+    Mutation {
+        id: "rename-action",
+        kind: "rename",
+        description: "rename the Sync actions to Flush everywhere",
+        edits: &[("Sync", "Flush")],
+    },
+    Mutation {
+        id: "rename-invariant",
+        kind: "rename",
+        description: "rename the invariant Agreement to SingleValue",
+        edits: &[("Agreement", "SingleValue")],
+    },
+    Mutation {
+        id: "prop-edit-equivalent",
+        kind: "property",
+        description: "restate Agreement as a1 + a2 <= 1 (the same verdict)",
+        edits: &[("{ a1 == 0 || a2 == 0 }", "{ a1 + a2 <= 1 }")],
+    },
+    Mutation {
+        id: "prop-add",
+        kind: "property",
+        description: "add the invariant AckNeedsBytes",
+        edits: &[(
+            "  invariant TypeOK",
+            "  invariant AckNeedsBytes { a1 == 0 || s1 == 1 || s2 == 1 }\n  invariant TypeOK",
+        )],
+    },
+    Mutation {
+        id: "prop-remove",
+        kind: "property",
+        description: "remove the invariant TypeOK",
+        edits: &[(
+            "  invariant TypeOK { s1 in 0..2 && s2 in 0..2 && s3 in 0..2 && a1 in 0..1 && a2 in 0..1 }\n",
+            "",
+        )],
+    },
+    Mutation {
+        id: "sem-domain-widen",
+        kind: "semantic",
+        description: "widen a1's domain to 0..2 (the reachable states do not change)",
+        edits: &[("a1: Nat where a1 <= 1", "a1: Nat where a1 <= 2")],
+    },
+    Mutation {
+        id: "sem-ack-one-replica",
+        kind: "semantic",
+        description: "Ack1 accepts replica 1 alone as a quorum (Agreement and AckedIsDurable fail)",
+        edits: &[(
+            "action Ack1 {\n    ((s1 == 1 && p1 == 0 && s2 == 1 && p2 == 0) ||",
+            "action Ack1 {\n    ((s1 == 1 && p1 == 0) ||",
+        )],
+    },
+    Mutation {
+        id: "sem-lose-durable",
+        kind: "semantic",
+        description: "Lose1 no longer needs a write in flight: a crash loses durable bytes (AckedIsDurable and Agreement fail)",
+        edits: &[("action Lose1 { p1 == 1 && ", "action Lose1 { ")],
+    },
+    Mutation {
+        id: "sem-no-crash-3",
+        kind: "semantic",
+        description: "Lose3's guard can never hold: replica 3 never crashes",
+        edits: &[("action Lose3 { p3 == 1 && ", "action Lose3 { p3 == 2 && ")],
+    },
+    Mutation {
+        id: "trap-join-lines",
+        kind: "heuristic-trap",
+        description: "join Ack1's guard and its update onto one line (line breaks separate statements)",
+        edits: &[(")\n    a1' == 1", ") a1' == 1")],
+    },
+    Mutation {
+        id: "trap-split-expression",
+        kind: "heuristic-trap",
+        description: "break the expression a2' == 1 across two lines",
+        edits: &[("a2' == 1", "a2' ==\n      1")],
+    },
+    Mutation {
+        id: "parse-error",
+        kind: "syntax",
+        description: "drop the model's closing brace",
+        edits: &[(") }\n}\n", ") }\n")],
+    },
+];

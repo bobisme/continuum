@@ -394,7 +394,7 @@ Flags raised against artifacts this RFC does not own (no silent divergence):
 - Stable reuse identities for nondeterministic engines (research/27 kill criterion) — candidate answer: canonicalize by committed frontier, not by execution. Whether that survives portfolio solvers is unsettled.
 - Whether the invalidation minimizer can run inside the interactive latency budget, or whether it is always a background task producing a defect artifact.
 - Whether a `Validated` edge's witness check can be made cheap enough to run on every reuse, or whether witness re-checking is itself sampled — and if sampled, whether that sampling is governed by the same confidence target as the parity audit.
-- The build-versus-adopt decision for the memoization substrate (Phase B ADR, plan §9.1, docs/08 R21), and whether an adopted substrate can express the four classes and the nine reasons without a shim that becomes the real engine.
+- The build-versus-adopt decision for the memoization substrate (Phase B ADR, plan §9.1, docs/08 R21), and whether an adopted substrate can express the four classes and the nine reasons without a shim that becomes the real engine. — **Resolved by [ADR-0055](../adr/0055-incremental-engine-build-vs-adopt.md):** the engine is custom; the ADR's reversal criteria say when to revisit.
 - Which of the seven RFC 0031 fields with no named dependency reason (`faults`, `completion_policy`, `nondeterminism`, `trust_boundaries`, `security_policy`, `optimization`, `non_vacuity`) deserve one, and whether adding one is a precision win or a soundness risk.
 
 ## Acceptance

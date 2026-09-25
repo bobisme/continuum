@@ -2262,7 +2262,7 @@ Deliver:
   (salsa-derived vs custom), backed by a spike implementing the four
   reuse-edge classes and `query.explain_invalidation` over
   parse/elaborate/explore with a measured invalidation-precision
-  baseline; Phase C is `BLOCKED` until this ADR exists.
+  baseline; Phase C is `BLOCKED` until this ADR exists (delivered: bn-31vf, bn-13sa, bn-3gf6 — ADR-0055 decides a custom engine with reversal criteria, on the spike `pr22a-impl02-reuse-spike` and the baseline `pr22a-impl03-precision-baseline`; the ADR lists the residuals that PR 23 and PR 24 own).
 
 Exit: an agent fixes ack-before-durable without changing intent and
 produces a promotion receipt under the Phase B gate profile.

@@ -1,0 +1,1676 @@
+{
+  "artifact_id": "pr22a-impl03-precision-baseline",
+  "schema_version": 1,
+  "bone": "bn-3gf6",
+  "requirement": "PR-22A-IMPL-03",
+  "adr": "notes/plan/adr/0055-incremental-engine-build-vs-adopt.md",
+  "spec": "notes/plan/rfcs/0030-incremental-semantic-query-engine.md",
+  "definitions": "unit: one compared label (parse, elaborate, explore, domain_safety, check_invariant) of one audited revision before->after. changed(L): the clean output of L for before is absent or differs from the clean output for after. TP: recomputed and changed. FP (over-invalidation): recomputed, and the clean output exists before and is equal after. FN (under-invalidation): reused, and the reused output differs from the clean output after; FN also counts every clean output the engine did not produce (fn_only_in_clean; a stale reuse stopped the pipeline), attributed to the licence the audit blames for the first divergence (by_licence missing_downstream). fn_experimental_misses are the FN on an Experimental derivation or blame in the interactive lane, fn_under_invalidated all others. judged_labels + fn_only_in_clean = module_granularity.labels (asserted). TN: reused and equal to the clean output after; tn_label_changed: TN where changed(L) also holds (content-addressed reuse across a label change). precision = TP/(TP+FP); recall = TP/(TP+FN). recompute_share = (TP+FP)/judged_labels. only_in_engine: labels the engine produced that the clean run of the edited source does not define (phantom artifacts, outside TP/FP/FN/TN and recall). recompute_wrong: recomputed labels whose output differs from the clean output (asserted 0). Every revision holds parity, except an interactive-lane mismatch blamed on one reuse, whose quarantine re-run must hold parity. by_licence stale_downstream_of_experimental: stale reuses whose own licence held but whose derivation is Experimental (the staleness came from an Experimental reuse upstream). strong_share_of_sound_reuse = correct Exact+Validated reuses / correct Exact+Validated+Conservative reuses (docs/08 R21: Conservative-collapse drives this toward 0). module_granularity: every compared label of the edited revision is recomputed, because each corpus model is one file; labels = its clean label count; FN = 0 by construction. subfile_reuses: correct reuses that module granularity would have recomputed (research/27). fp_by_cause: the engine's recompute cause of each FP (key-miss: some keyed input identity changed although this output did not). internal_unjudged: build_model and the projections have no clean counterpart and are counted only. Ratios: per_mille is rounded down; none when den = 0.",
+  "method": "edits_mode: for each edit, a fresh engine revises the base once (cold, not counted) and then the edit once (counted). trace_mode: one engine per lane revises the base once (not counted), then every edit in corpus order and the base again, each once (counted). In both, a Mismatch whose first divergence is attributed to one reuse (Blame::Reuse) quarantines that licence triple and revises the edit again; the re-run must restore parity, counts only in quarantine_reruns, and in a trace is the next step's baseline. An Inconclusive audit counts only in inconclusive. The FP and FN sets are asserted equal to audit::cone's over_invalidated and under_invalidated + experimental_misses.",
+  "corpora": {
+    "diehard": {
+      "model": "notes/plan/corpus/tla-examples/ports/TV-009/DieHard.ctm",
+      "edits": 17,
+      "edits_mode": {
+        "promotion": {
+          "counted_revisions": 17,
+          "inconclusive": 0,
+          "quarantine_reruns": 0,
+          "judged_labels": 92,
+          "spike": {
+            "tp_necessary_recompute": 31,
+            "fp_over_invalidated": 15,
+            "fn_under_invalidated": 0,
+            "fn_experimental_misses": 0,
+            "tn_correct_reuse": 46,
+            "tn_label_changed": 1,
+            "only_in_engine": 0,
+            "fn_only_in_clean": 0,
+            "recompute_wrong": 0,
+            "precision": {
+              "num": 31,
+              "den": 46,
+              "per_mille": 673
+            },
+            "recall": {
+              "num": 31,
+              "den": 31,
+              "per_mille": 1000
+            },
+            "recompute_share": {
+              "num": 46,
+              "den": 92,
+              "per_mille": 500
+            },
+            "strong_share_of_sound_reuse": {
+              "num": 32,
+              "den": 46,
+              "per_mille": 695
+            },
+            "explored_states": 66
+          },
+          "module_granularity": {
+            "tp_necessary_recompute": 32,
+            "fp_over_invalidated": 60,
+            "fn_under_invalidated": 0,
+            "precision": {
+              "num": 32,
+              "den": 92,
+              "per_mille": 347
+            },
+            "recall": {
+              "num": 32,
+              "den": 32,
+              "per_mille": 1000
+            },
+            "labels": 92,
+            "explored_states": 226
+          },
+          "by_licence": {
+            "Exact": {
+              "served": 29,
+              "correct": 29,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 29,
+                "den": 29,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 29
+            },
+            "Validated": {
+              "served": 3,
+              "correct": 3,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 3,
+                "den": 3,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 3
+            },
+            "Conservative": {
+              "served": 14,
+              "correct": 14,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 14,
+                "den": 14,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 14
+            },
+            "Experimental": {
+              "served": 0,
+              "correct": 0,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 0,
+                "den": 0,
+                "per_mille": "none"
+              },
+              "subfile_reuses": 0
+            }
+          },
+          "recompute_by_function": {
+            "check_invariant": {
+              "necessary": 6,
+              "over": 6
+            },
+            "domain_safety": {
+              "necessary": 1,
+              "over": 1
+            },
+            "elaborate": {
+              "necessary": 9,
+              "over": 1
+            },
+            "explore": {
+              "necessary": 3,
+              "over": 2
+            },
+            "parse": {
+              "necessary": 12,
+              "over": 5
+            }
+          },
+          "fp_by_cause": {
+            "key-miss": 14,
+            "witness-refused": 1
+          },
+          "internal_unjudged": {
+            "build_model": {
+              "reused": 6,
+              "recomputed": 9
+            },
+            "project_invariant": {
+              "reused": 12,
+              "recomputed": 18
+            },
+            "project_transition_system": {
+              "reused": 6,
+              "recomputed": 9
+            }
+          }
+        },
+        "interactive": {
+          "counted_revisions": 17,
+          "inconclusive": 0,
+          "quarantine_reruns": 1,
+          "judged_labels": 92,
+          "spike": {
+            "tp_necessary_recompute": 30,
+            "fp_over_invalidated": 10,
+            "fn_under_invalidated": 0,
+            "fn_experimental_misses": 1,
+            "tn_correct_reuse": 51,
+            "tn_label_changed": 1,
+            "only_in_engine": 5,
+            "fn_only_in_clean": 0,
+            "recompute_wrong": 0,
+            "precision": {
+              "num": 30,
+              "den": 40,
+              "per_mille": 750
+            },
+            "recall": {
+              "num": 30,
+              "den": 31,
+              "per_mille": 967
+            },
+            "recompute_share": {
+              "num": 40,
+              "den": 92,
+              "per_mille": 434
+            },
+            "strong_share_of_sound_reuse": {
+              "num": 32,
+              "den": 46,
+              "per_mille": 695
+            },
+            "explored_states": 66
+          },
+          "module_granularity": {
+            "tp_necessary_recompute": 32,
+            "fp_over_invalidated": 60,
+            "fn_under_invalidated": 0,
+            "precision": {
+              "num": 32,
+              "den": 92,
+              "per_mille": 347
+            },
+            "recall": {
+              "num": 32,
+              "den": 32,
+              "per_mille": 1000
+            },
+            "labels": 92,
+            "explored_states": 226
+          },
+          "by_licence": {
+            "Exact": {
+              "served": 29,
+              "correct": 29,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 29,
+                "den": 29,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 29
+            },
+            "Validated": {
+              "served": 3,
+              "correct": 3,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 3,
+                "den": 3,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 3
+            },
+            "Conservative": {
+              "served": 14,
+              "correct": 14,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 14,
+                "den": 14,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 14
+            },
+            "Experimental": {
+              "served": 6,
+              "correct": 5,
+              "stale": 1,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 5,
+                "den": 6,
+                "per_mille": 833
+              },
+              "subfile_reuses": 5
+            }
+          },
+          "recompute_by_function": {
+            "check_invariant": {
+              "necessary": 6,
+              "over": 6
+            },
+            "domain_safety": {
+              "necessary": 1,
+              "over": 1
+            },
+            "elaborate": {
+              "necessary": 9,
+              "over": 1
+            },
+            "explore": {
+              "necessary": 3,
+              "over": 2
+            },
+            "parse": {
+              "necessary": 11,
+              "over": 0
+            }
+          },
+          "fp_by_cause": {
+            "key-miss": 9,
+            "witness-refused": 1
+          },
+          "internal_unjudged": {
+            "build_model": {
+              "reused": 7,
+              "recomputed": 9
+            },
+            "project_invariant": {
+              "reused": 14,
+              "recomputed": 18
+            },
+            "project_transition_system": {
+              "reused": 7,
+              "recomputed": 9
+            }
+          }
+        }
+      },
+      "trace_mode": {
+        "promotion": {
+          "counted_revisions": 18,
+          "inconclusive": 0,
+          "quarantine_reruns": 0,
+          "judged_labels": 98,
+          "spike": {
+            "tp_necessary_recompute": 43,
+            "fp_over_invalidated": 10,
+            "fn_under_invalidated": 0,
+            "fn_experimental_misses": 0,
+            "tn_correct_reuse": 45,
+            "tn_label_changed": 6,
+            "only_in_engine": 0,
+            "fn_only_in_clean": 0,
+            "recompute_wrong": 0,
+            "precision": {
+              "num": 43,
+              "den": 53,
+              "per_mille": 811
+            },
+            "recall": {
+              "num": 43,
+              "den": 43,
+              "per_mille": 1000
+            },
+            "recompute_share": {
+              "num": 53,
+              "den": 98,
+              "per_mille": 540
+            },
+            "strong_share_of_sound_reuse": {
+              "num": 32,
+              "den": 45,
+              "per_mille": 711
+            },
+            "explored_states": 82
+          },
+          "module_granularity": {
+            "tp_necessary_recompute": 49,
+            "fp_over_invalidated": 49,
+            "fn_under_invalidated": 0,
+            "precision": {
+              "num": 49,
+              "den": 98,
+              "per_mille": 500
+            },
+            "recall": {
+              "num": 49,
+              "den": 49,
+              "per_mille": 1000
+            },
+            "labels": 98,
+            "explored_states": 242
+          },
+          "by_licence": {
+            "Exact": {
+              "served": 29,
+              "correct": 29,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 29,
+                "den": 29,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 29
+            },
+            "Validated": {
+              "served": 3,
+              "correct": 3,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 3,
+                "den": 3,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 3
+            },
+            "Conservative": {
+              "served": 13,
+              "correct": 13,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 13,
+                "den": 13,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 13
+            },
+            "Experimental": {
+              "served": 0,
+              "correct": 0,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 0,
+                "den": 0,
+                "per_mille": "none"
+              },
+              "subfile_reuses": 0
+            }
+          },
+          "recompute_by_function": {
+            "check_invariant": {
+              "necessary": 13,
+              "over": 2
+            },
+            "domain_safety": {
+              "necessary": 2,
+              "over": 1
+            },
+            "elaborate": {
+              "necessary": 10,
+              "over": 1
+            },
+            "explore": {
+              "necessary": 4,
+              "over": 2
+            },
+            "parse": {
+              "necessary": 14,
+              "over": 4
+            }
+          },
+          "fp_by_cause": {
+            "key-miss": 9,
+            "witness-refused": 1
+          },
+          "internal_unjudged": {
+            "build_model": {
+              "reused": 6,
+              "recomputed": 10
+            },
+            "project_invariant": {
+              "reused": 12,
+              "recomputed": 20
+            },
+            "project_transition_system": {
+              "reused": 6,
+              "recomputed": 10
+            }
+          }
+        },
+        "interactive": {
+          "counted_revisions": 18,
+          "inconclusive": 0,
+          "quarantine_reruns": 1,
+          "judged_labels": 93,
+          "spike": {
+            "tp_necessary_recompute": 37,
+            "fp_over_invalidated": 6,
+            "fn_under_invalidated": 0,
+            "fn_experimental_misses": 6,
+            "tn_correct_reuse": 49,
+            "tn_label_changed": 6,
+            "only_in_engine": 0,
+            "fn_only_in_clean": 5,
+            "recompute_wrong": 0,
+            "precision": {
+              "num": 37,
+              "den": 43,
+              "per_mille": 860
+            },
+            "recall": {
+              "num": 37,
+              "den": 43,
+              "per_mille": 860
+            },
+            "recompute_share": {
+              "num": 43,
+              "den": 93,
+              "per_mille": 462
+            },
+            "strong_share_of_sound_reuse": {
+              "num": 32,
+              "den": 45,
+              "per_mille": 711
+            },
+            "explored_states": 66
+          },
+          "module_granularity": {
+            "tp_necessary_recompute": 49,
+            "fp_over_invalidated": 49,
+            "fn_under_invalidated": 0,
+            "precision": {
+              "num": 49,
+              "den": 98,
+              "per_mille": 500
+            },
+            "recall": {
+              "num": 49,
+              "den": 49,
+              "per_mille": 1000
+            },
+            "labels": 98,
+            "explored_states": 242
+          },
+          "by_licence": {
+            "Exact": {
+              "served": 29,
+              "correct": 29,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 29,
+                "den": 29,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 29
+            },
+            "Validated": {
+              "served": 3,
+              "correct": 3,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 3,
+                "den": 3,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 3
+            },
+            "Conservative": {
+              "served": 13,
+              "correct": 13,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 13,
+                "den": 13,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 13
+            },
+            "Experimental": {
+              "served": 5,
+              "correct": 4,
+              "stale": 1,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 5,
+              "reuse_precision": {
+                "num": 4,
+                "den": 5,
+                "per_mille": 800
+              },
+              "subfile_reuses": 4
+            }
+          },
+          "recompute_by_function": {
+            "check_invariant": {
+              "necessary": 11,
+              "over": 2
+            },
+            "domain_safety": {
+              "necessary": 1,
+              "over": 1
+            },
+            "elaborate": {
+              "necessary": 9,
+              "over": 1
+            },
+            "explore": {
+              "necessary": 3,
+              "over": 2
+            },
+            "parse": {
+              "necessary": 13,
+              "over": 0
+            }
+          },
+          "fp_by_cause": {
+            "key-miss": 5,
+            "witness-refused": 1
+          },
+          "internal_unjudged": {
+            "build_model": {
+              "reused": 6,
+              "recomputed": 9
+            },
+            "project_invariant": {
+              "reused": 12,
+              "recomputed": 18
+            },
+            "project_transition_system": {
+              "reused": 6,
+              "recomputed": 9
+            }
+          }
+        }
+      },
+      "cases": {
+        "promotion": [
+          "ws-reindent: parity | TP 0 FP 1 FN 0 TN 5 | module TP 0 FP 6 | over: parse",
+          "ws-trailing: parity | TP 0 FP 1 FN 0 TN 5 | module TP 0 FP 6 | over: parse",
+          "comment-add: parity | TP 0 FP 1 FN 0 TN 5 | module TP 0 FP 6 | over: parse",
+          "comment-edit: parity | TP 0 FP 1 FN 0 TN 5 | module TP 0 FP 6 | over: parse",
+          "rename-let: parity | TP 1 FP 1 FN 0 TN 4 | module TP 1 FP 5 | over: elaborate",
+          "rename-invariant: parity | TP 2 FP 0 FN 0 TN 4 | module TP 3 FP 3",
+          "rename-action: parity | TP 2 FP 3 FN 0 TN 1 | module TP 2 FP 4 | over: explore check_invariant:NotSolved check_invariant:TypeOK",
+          "prop-edit: parity | TP 3 FP 0 FN 0 TN 3 | module TP 3 FP 3",
+          "prop-add: parity | TP 3 FP 0 FN 0 TN 4 | module TP 3 FP 4",
+          "prop-remove: parity | TP 2 FP 0 FN 0 TN 3 | module TP 2 FP 3",
+          "sem-domain-widen: parity | TP 2 FP 3 FN 0 TN 1 | module TP 2 FP 4 | over: explore check_invariant:NotSolved check_invariant:TypeOK",
+          "sem-fillbig-4: parity | TP 5 FP 1 FN 0 TN 0 | module TP 5 FP 1 | over: domain_safety",
+          "sem-emptybig-noop: parity | TP 3 FP 2 FN 0 TN 1 | module TP 3 FP 3 | over: check_invariant:NotSolved check_invariant:TypeOK",
+          "sem-domain-narrow: parity | TP 6 FP 0 FN 0 TN 0 | module TP 6 FP 0",
+          "trap-join-lines: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0",
+          "trap-split-expression: parity | TP 0 FP 1 FN 0 TN 5 | module TP 0 FP 6 | over: parse",
+          "parse-error: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0"
+        ],
+        "interactive": [
+          "ws-reindent: parity | TP 0 FP 0 FN 0 TN 6 | module TP 0 FP 6",
+          "ws-trailing: parity | TP 0 FP 0 FN 0 TN 6 | module TP 0 FP 6",
+          "comment-add: parity | TP 0 FP 0 FN 0 TN 6 | module TP 0 FP 6",
+          "comment-edit: parity | TP 0 FP 0 FN 0 TN 6 | module TP 0 FP 6",
+          "rename-let: parity | TP 1 FP 1 FN 0 TN 4 | module TP 1 FP 5 | over: elaborate",
+          "rename-invariant: parity | TP 2 FP 0 FN 0 TN 4 | module TP 3 FP 3",
+          "rename-action: parity | TP 2 FP 3 FN 0 TN 1 | module TP 2 FP 4 | over: explore check_invariant:NotSolved check_invariant:TypeOK",
+          "prop-edit: parity | TP 3 FP 0 FN 0 TN 3 | module TP 3 FP 3",
+          "prop-add: parity | TP 3 FP 0 FN 0 TN 4 | module TP 3 FP 4",
+          "prop-remove: parity | TP 2 FP 0 FN 0 TN 3 | module TP 2 FP 3",
+          "sem-domain-widen: parity | TP 2 FP 3 FN 0 TN 1 | module TP 2 FP 4 | over: explore check_invariant:NotSolved check_invariant:TypeOK",
+          "sem-fillbig-4: parity | TP 5 FP 1 FN 0 TN 0 | module TP 5 FP 1 | over: domain_safety",
+          "sem-emptybig-noop: parity | TP 3 FP 2 FN 0 TN 1 | module TP 3 FP 3 | over: check_invariant:NotSolved check_invariant:TypeOK",
+          "sem-domain-narrow: parity | TP 6 FP 0 FN 0 TN 0 | module TP 6 FP 0",
+          "trap-join-lines: mismatch | TP 0 FP 0 FN 1 TN 0 | module TP 1 FP 0 | only in engine 5 | quarantined (Experimental, parse, 1)",
+          "trap-split-expression: parity | TP 0 FP 0 FN 0 TN 6 | module TP 0 FP 6",
+          "parse-error: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0"
+        ]
+      },
+      "trace_cases": {
+        "promotion": [
+          "ws-reindent: parity | TP 0 FP 1 FN 0 TN 5 | module TP 0 FP 6 | over: parse",
+          "ws-trailing: parity | TP 0 FP 1 FN 0 TN 5 | module TP 0 FP 6 | over: parse",
+          "comment-add: parity | TP 0 FP 1 FN 0 TN 5 | module TP 0 FP 6 | over: parse",
+          "comment-edit: parity | TP 0 FP 1 FN 0 TN 5 | module TP 0 FP 6 | over: parse",
+          "rename-let: parity | TP 1 FP 1 FN 0 TN 4 | module TP 1 FP 5 | over: elaborate",
+          "rename-invariant: parity | TP 2 FP 0 FN 0 TN 4 | module TP 3 FP 3",
+          "rename-action: parity | TP 3 FP 2 FN 0 TN 1 | module TP 3 FP 3 | over: explore check_invariant:TypeOK",
+          "prop-edit: parity | TP 3 FP 0 FN 0 TN 3 | module TP 3 FP 3",
+          "prop-add: parity | TP 4 FP 0 FN 0 TN 3 | module TP 4 FP 3",
+          "prop-remove: parity | TP 2 FP 0 FN 0 TN 3 | module TP 2 FP 3",
+          "sem-domain-widen: parity | TP 3 FP 2 FN 0 TN 1 | module TP 3 FP 3 | over: explore check_invariant:NotSolved",
+          "sem-fillbig-4: parity | TP 5 FP 1 FN 0 TN 0 | module TP 5 FP 1 | over: domain_safety",
+          "sem-emptybig-noop: parity | TP 5 FP 0 FN 0 TN 1 | module TP 5 FP 1",
+          "sem-domain-narrow: parity | TP 6 FP 0 FN 0 TN 0 | module TP 6 FP 0",
+          "trap-join-lines: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0",
+          "trap-split-expression: parity | TP 6 FP 0 FN 0 TN 0 | module TP 6 FP 0",
+          "parse-error: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0",
+          "base: parity | TP 1 FP 0 FN 0 TN 5 | module TP 6 FP 0"
+        ],
+        "interactive": [
+          "ws-reindent: parity | TP 0 FP 0 FN 0 TN 6 | module TP 0 FP 6",
+          "ws-trailing: parity | TP 0 FP 0 FN 0 TN 6 | module TP 0 FP 6",
+          "comment-add: parity | TP 0 FP 0 FN 0 TN 6 | module TP 0 FP 6",
+          "comment-edit: parity | TP 0 FP 0 FN 0 TN 6 | module TP 0 FP 6",
+          "rename-let: parity | TP 1 FP 1 FN 0 TN 4 | module TP 1 FP 5 | over: elaborate",
+          "rename-invariant: parity | TP 2 FP 0 FN 0 TN 4 | module TP 3 FP 3",
+          "rename-action: parity | TP 3 FP 2 FN 0 TN 1 | module TP 3 FP 3 | over: explore check_invariant:TypeOK",
+          "prop-edit: parity | TP 3 FP 0 FN 0 TN 3 | module TP 3 FP 3",
+          "prop-add: parity | TP 4 FP 0 FN 0 TN 3 | module TP 4 FP 3",
+          "prop-remove: parity | TP 2 FP 0 FN 0 TN 3 | module TP 2 FP 3",
+          "sem-domain-widen: parity | TP 3 FP 2 FN 0 TN 1 | module TP 3 FP 3 | over: explore check_invariant:NotSolved",
+          "sem-fillbig-4: parity | TP 5 FP 1 FN 0 TN 0 | module TP 5 FP 1 | over: domain_safety",
+          "sem-emptybig-noop: parity | TP 5 FP 0 FN 0 TN 1 | module TP 5 FP 1",
+          "sem-domain-narrow: parity | TP 6 FP 0 FN 0 TN 0 | module TP 6 FP 0",
+          "trap-join-lines: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0",
+          "trap-split-expression: mismatch | TP 0 FP 0 FN 6 TN 0 | module TP 6 FP 0 | only in clean: elaborate explore domain_safety check_invariant:NotSolved check_invariant:TypeOK | quarantined (Experimental, parse, 1)",
+          "parse-error: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0",
+          "base: parity | TP 1 FP 0 FN 0 TN 5 | module TP 6 FP 0"
+        ]
+      }
+    },
+    "durable_register_finite": {
+      "model": "crates/continuum-incremental/tests/fixtures/durable_register_finite.ctm",
+      "edits": 15,
+      "edits_mode": {
+        "promotion": {
+          "counted_revisions": 15,
+          "inconclusive": 0,
+          "quarantine_reruns": 0,
+          "judged_labels": 93,
+          "spike": {
+            "tp_necessary_recompute": 31,
+            "fp_over_invalidated": 17,
+            "fn_under_invalidated": 0,
+            "fn_experimental_misses": 0,
+            "tn_correct_reuse": 45,
+            "tn_label_changed": 1,
+            "only_in_engine": 0,
+            "fn_only_in_clean": 0,
+            "recompute_wrong": 0,
+            "precision": {
+              "num": 31,
+              "den": 48,
+              "per_mille": 645
+            },
+            "recall": {
+              "num": 31,
+              "den": 31,
+              "per_mille": 1000
+            },
+            "recompute_share": {
+              "num": 48,
+              "den": 93,
+              "per_mille": 516
+            },
+            "strong_share_of_sound_reuse": {
+              "num": 27,
+              "den": 45,
+              "per_mille": 600
+            },
+            "explored_states": 1378
+          },
+          "module_granularity": {
+            "tp_necessary_recompute": 32,
+            "fp_over_invalidated": 61,
+            "fn_under_invalidated": 0,
+            "precision": {
+              "num": 32,
+              "den": 93,
+              "per_mille": 344
+            },
+            "recall": {
+              "num": 32,
+              "den": 32,
+              "per_mille": 1000
+            },
+            "labels": 93,
+            "explored_states": 3362
+          },
+          "by_licence": {
+            "Exact": {
+              "served": 24,
+              "correct": 24,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 24,
+                "den": 24,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 24
+            },
+            "Validated": {
+              "served": 3,
+              "correct": 3,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 3,
+                "den": 3,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 3
+            },
+            "Conservative": {
+              "served": 18,
+              "correct": 18,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 18,
+                "den": 18,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 18
+            },
+            "Experimental": {
+              "served": 0,
+              "correct": 0,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 0,
+                "den": 0,
+                "per_mille": "none"
+              },
+              "subfile_reuses": 0
+            }
+          },
+          "recompute_by_function": {
+            "check_invariant": {
+              "necessary": 7,
+              "over": 10
+            },
+            "domain_safety": {
+              "necessary": 0,
+              "over": 2
+            },
+            "elaborate": {
+              "necessary": 9,
+              "over": 0
+            },
+            "explore": {
+              "necessary": 4,
+              "over": 1
+            },
+            "parse": {
+              "necessary": 11,
+              "over": 4
+            }
+          },
+          "fp_by_cause": {
+            "key-miss": 15,
+            "witness-refused": 2
+          },
+          "internal_unjudged": {
+            "build_model": {
+              "reused": 4,
+              "recomputed": 9
+            },
+            "project_invariant": {
+              "reused": 12,
+              "recomputed": 27
+            },
+            "project_transition_system": {
+              "reused": 4,
+              "recomputed": 9
+            }
+          }
+        },
+        "interactive": {
+          "counted_revisions": 15,
+          "inconclusive": 0,
+          "quarantine_reruns": 1,
+          "judged_labels": 93,
+          "spike": {
+            "tp_necessary_recompute": 30,
+            "fp_over_invalidated": 13,
+            "fn_under_invalidated": 0,
+            "fn_experimental_misses": 1,
+            "tn_correct_reuse": 49,
+            "tn_label_changed": 1,
+            "only_in_engine": 6,
+            "fn_only_in_clean": 0,
+            "recompute_wrong": 0,
+            "precision": {
+              "num": 30,
+              "den": 43,
+              "per_mille": 697
+            },
+            "recall": {
+              "num": 30,
+              "den": 31,
+              "per_mille": 967
+            },
+            "recompute_share": {
+              "num": 43,
+              "den": 93,
+              "per_mille": 462
+            },
+            "strong_share_of_sound_reuse": {
+              "num": 27,
+              "den": 45,
+              "per_mille": 600
+            },
+            "explored_states": 1378
+          },
+          "module_granularity": {
+            "tp_necessary_recompute": 32,
+            "fp_over_invalidated": 61,
+            "fn_under_invalidated": 0,
+            "precision": {
+              "num": 32,
+              "den": 93,
+              "per_mille": 344
+            },
+            "recall": {
+              "num": 32,
+              "den": 32,
+              "per_mille": 1000
+            },
+            "labels": 93,
+            "explored_states": 3362
+          },
+          "by_licence": {
+            "Exact": {
+              "served": 24,
+              "correct": 24,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 24,
+                "den": 24,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 24
+            },
+            "Validated": {
+              "served": 3,
+              "correct": 3,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 3,
+                "den": 3,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 3
+            },
+            "Conservative": {
+              "served": 18,
+              "correct": 18,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 18,
+                "den": 18,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 18
+            },
+            "Experimental": {
+              "served": 5,
+              "correct": 4,
+              "stale": 1,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 4,
+                "den": 5,
+                "per_mille": 800
+              },
+              "subfile_reuses": 4
+            }
+          },
+          "recompute_by_function": {
+            "check_invariant": {
+              "necessary": 7,
+              "over": 10
+            },
+            "domain_safety": {
+              "necessary": 0,
+              "over": 2
+            },
+            "elaborate": {
+              "necessary": 9,
+              "over": 0
+            },
+            "explore": {
+              "necessary": 4,
+              "over": 1
+            },
+            "parse": {
+              "necessary": 10,
+              "over": 0
+            }
+          },
+          "fp_by_cause": {
+            "key-miss": 11,
+            "witness-refused": 2
+          },
+          "internal_unjudged": {
+            "build_model": {
+              "reused": 5,
+              "recomputed": 9
+            },
+            "project_invariant": {
+              "reused": 15,
+              "recomputed": 27
+            },
+            "project_transition_system": {
+              "reused": 5,
+              "recomputed": 9
+            }
+          }
+        }
+      },
+      "trace_mode": {
+        "promotion": {
+          "counted_revisions": 16,
+          "inconclusive": 0,
+          "quarantine_reruns": 0,
+          "judged_labels": 100,
+          "spike": {
+            "tp_necessary_recompute": 43,
+            "fp_over_invalidated": 11,
+            "fn_under_invalidated": 0,
+            "fn_experimental_misses": 0,
+            "tn_correct_reuse": 46,
+            "tn_label_changed": 9,
+            "only_in_engine": 0,
+            "fn_only_in_clean": 0,
+            "recompute_wrong": 0,
+            "precision": {
+              "num": 43,
+              "den": 54,
+              "per_mille": 796
+            },
+            "recall": {
+              "num": 43,
+              "den": 43,
+              "per_mille": 1000
+            },
+            "recompute_share": {
+              "num": 54,
+              "den": 100,
+              "per_mille": 540
+            },
+            "strong_share_of_sound_reuse": {
+              "num": 28,
+              "den": 46,
+              "per_mille": 608
+            },
+            "explored_states": 1626
+          },
+          "module_granularity": {
+            "tp_necessary_recompute": 52,
+            "fp_over_invalidated": 48,
+            "fn_under_invalidated": 0,
+            "precision": {
+              "num": 52,
+              "den": 100,
+              "per_mille": 520
+            },
+            "recall": {
+              "num": 52,
+              "den": 52,
+              "per_mille": 1000
+            },
+            "labels": 100,
+            "explored_states": 3610
+          },
+          "by_licence": {
+            "Exact": {
+              "served": 23,
+              "correct": 23,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 23,
+                "den": 23,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 23
+            },
+            "Validated": {
+              "served": 5,
+              "correct": 5,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 5,
+                "den": 5,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 5
+            },
+            "Conservative": {
+              "served": 18,
+              "correct": 18,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 18,
+                "den": 18,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 18
+            },
+            "Experimental": {
+              "served": 0,
+              "correct": 0,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 0,
+                "den": 0,
+                "per_mille": "none"
+              },
+              "subfile_reuses": 0
+            }
+          },
+          "recompute_by_function": {
+            "check_invariant": {
+              "necessary": 15,
+              "over": 5
+            },
+            "domain_safety": {
+              "necessary": 0,
+              "over": 2
+            },
+            "elaborate": {
+              "necessary": 10,
+              "over": 0
+            },
+            "explore": {
+              "necessary": 5,
+              "over": 1
+            },
+            "parse": {
+              "necessary": 13,
+              "over": 3
+            }
+          },
+          "fp_by_cause": {
+            "key-miss": 9,
+            "witness-refused": 2
+          },
+          "internal_unjudged": {
+            "build_model": {
+              "reused": 4,
+              "recomputed": 10
+            },
+            "project_invariant": {
+              "reused": 12,
+              "recomputed": 30
+            },
+            "project_transition_system": {
+              "reused": 4,
+              "recomputed": 10
+            }
+          }
+        },
+        "interactive": {
+          "counted_revisions": 16,
+          "inconclusive": 0,
+          "quarantine_reruns": 1,
+          "judged_labels": 94,
+          "spike": {
+            "tp_necessary_recompute": 37,
+            "fp_over_invalidated": 8,
+            "fn_under_invalidated": 0,
+            "fn_experimental_misses": 7,
+            "tn_correct_reuse": 48,
+            "tn_label_changed": 8,
+            "only_in_engine": 0,
+            "fn_only_in_clean": 6,
+            "recompute_wrong": 0,
+            "precision": {
+              "num": 37,
+              "den": 45,
+              "per_mille": 822
+            },
+            "recall": {
+              "num": 37,
+              "den": 44,
+              "per_mille": 840
+            },
+            "recompute_share": {
+              "num": 45,
+              "den": 94,
+              "per_mille": 478
+            },
+            "strong_share_of_sound_reuse": {
+              "num": 27,
+              "den": 45,
+              "per_mille": 600
+            },
+            "explored_states": 1378
+          },
+          "module_granularity": {
+            "tp_necessary_recompute": 52,
+            "fp_over_invalidated": 48,
+            "fn_under_invalidated": 0,
+            "precision": {
+              "num": 52,
+              "den": 100,
+              "per_mille": 520
+            },
+            "recall": {
+              "num": 52,
+              "den": 52,
+              "per_mille": 1000
+            },
+            "labels": 100,
+            "explored_states": 3610
+          },
+          "by_licence": {
+            "Exact": {
+              "served": 24,
+              "correct": 24,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 24,
+                "den": 24,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 24
+            },
+            "Validated": {
+              "served": 3,
+              "correct": 3,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 3,
+                "den": 3,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 3
+            },
+            "Conservative": {
+              "served": 18,
+              "correct": 18,
+              "stale": 0,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 0,
+              "reuse_precision": {
+                "num": 18,
+                "den": 18,
+                "per_mille": 1000
+              },
+              "subfile_reuses": 18
+            },
+            "Experimental": {
+              "served": 4,
+              "correct": 3,
+              "stale": 1,
+              "stale_downstream_of_experimental": 0,
+              "missing_downstream": 6,
+              "reuse_precision": {
+                "num": 3,
+                "den": 4,
+                "per_mille": 750
+              },
+              "subfile_reuses": 3
+            }
+          },
+          "recompute_by_function": {
+            "check_invariant": {
+              "necessary": 12,
+              "over": 5
+            },
+            "domain_safety": {
+              "necessary": 0,
+              "over": 2
+            },
+            "elaborate": {
+              "necessary": 9,
+              "over": 0
+            },
+            "explore": {
+              "necessary": 4,
+              "over": 1
+            },
+            "parse": {
+              "necessary": 12,
+              "over": 0
+            }
+          },
+          "fp_by_cause": {
+            "key-miss": 6,
+            "witness-refused": 2
+          },
+          "internal_unjudged": {
+            "build_model": {
+              "reused": 4,
+              "recomputed": 9
+            },
+            "project_invariant": {
+              "reused": 12,
+              "recomputed": 27
+            },
+            "project_transition_system": {
+              "reused": 4,
+              "recomputed": 9
+            }
+          }
+        }
+      },
+      "cases": {
+        "promotion": [
+          "ws-reindent: parity | TP 0 FP 1 FN 0 TN 6 | module TP 0 FP 7 | over: parse",
+          "ws-trailing: parity | TP 0 FP 1 FN 0 TN 6 | module TP 0 FP 7 | over: parse",
+          "comment-edit: parity | TP 0 FP 1 FN 0 TN 6 | module TP 0 FP 7 | over: parse",
+          "rename-action: parity | TP 3 FP 3 FN 0 TN 1 | module TP 3 FP 4 | over: check_invariant:AckedIsDurable check_invariant:Agreement check_invariant:TypeOK",
+          "rename-invariant: parity | TP 2 FP 0 FN 0 TN 5 | module TP 3 FP 4",
+          "prop-edit-equivalent: parity | TP 2 FP 1 FN 0 TN 4 | module TP 2 FP 5 | over: check_invariant:Agreement",
+          "prop-add: parity | TP 3 FP 0 FN 0 TN 5 | module TP 3 FP 5",
+          "prop-remove: parity | TP 2 FP 0 FN 0 TN 4 | module TP 2 FP 4",
+          "sem-domain-widen: parity | TP 2 FP 4 FN 0 TN 1 | module TP 2 FP 5 | over: explore check_invariant:AckedIsDurable check_invariant:Agreement check_invariant:TypeOK",
+          "sem-ack-one-replica: parity | TP 6 FP 1 FN 0 TN 0 | module TP 6 FP 1 | over: domain_safety",
+          "sem-lose-durable: parity | TP 6 FP 1 FN 0 TN 0 | module TP 6 FP 1 | over: domain_safety",
+          "sem-no-crash-3: parity | TP 3 FP 3 FN 0 TN 1 | module TP 3 FP 4 | over: check_invariant:AckedIsDurable check_invariant:Agreement check_invariant:TypeOK",
+          "trap-join-lines: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0",
+          "trap-split-expression: parity | TP 0 FP 1 FN 0 TN 6 | module TP 0 FP 7 | over: parse",
+          "parse-error: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0"
+        ],
+        "interactive": [
+          "ws-reindent: parity | TP 0 FP 0 FN 0 TN 7 | module TP 0 FP 7",
+          "ws-trailing: parity | TP 0 FP 0 FN 0 TN 7 | module TP 0 FP 7",
+          "comment-edit: parity | TP 0 FP 0 FN 0 TN 7 | module TP 0 FP 7",
+          "rename-action: parity | TP 3 FP 3 FN 0 TN 1 | module TP 3 FP 4 | over: check_invariant:AckedIsDurable check_invariant:Agreement check_invariant:TypeOK",
+          "rename-invariant: parity | TP 2 FP 0 FN 0 TN 5 | module TP 3 FP 4",
+          "prop-edit-equivalent: parity | TP 2 FP 1 FN 0 TN 4 | module TP 2 FP 5 | over: check_invariant:Agreement",
+          "prop-add: parity | TP 3 FP 0 FN 0 TN 5 | module TP 3 FP 5",
+          "prop-remove: parity | TP 2 FP 0 FN 0 TN 4 | module TP 2 FP 4",
+          "sem-domain-widen: parity | TP 2 FP 4 FN 0 TN 1 | module TP 2 FP 5 | over: explore check_invariant:AckedIsDurable check_invariant:Agreement check_invariant:TypeOK",
+          "sem-ack-one-replica: parity | TP 6 FP 1 FN 0 TN 0 | module TP 6 FP 1 | over: domain_safety",
+          "sem-lose-durable: parity | TP 6 FP 1 FN 0 TN 0 | module TP 6 FP 1 | over: domain_safety",
+          "sem-no-crash-3: parity | TP 3 FP 3 FN 0 TN 1 | module TP 3 FP 4 | over: check_invariant:AckedIsDurable check_invariant:Agreement check_invariant:TypeOK",
+          "trap-join-lines: mismatch | TP 0 FP 0 FN 1 TN 0 | module TP 1 FP 0 | only in engine 6 | quarantined (Experimental, parse, 1)",
+          "trap-split-expression: parity | TP 0 FP 0 FN 0 TN 7 | module TP 0 FP 7",
+          "parse-error: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0"
+        ]
+      },
+      "trace_cases": {
+        "promotion": [
+          "ws-reindent: parity | TP 0 FP 1 FN 0 TN 6 | module TP 0 FP 7 | over: parse",
+          "ws-trailing: parity | TP 0 FP 1 FN 0 TN 6 | module TP 0 FP 7 | over: parse",
+          "comment-edit: parity | TP 0 FP 1 FN 0 TN 6 | module TP 0 FP 7 | over: parse",
+          "rename-action: parity | TP 3 FP 3 FN 0 TN 1 | module TP 3 FP 4 | over: check_invariant:AckedIsDurable check_invariant:Agreement check_invariant:TypeOK",
+          "rename-invariant: parity | TP 2 FP 0 FN 0 TN 5 | module TP 4 FP 3",
+          "prop-edit-equivalent: parity | TP 3 FP 0 FN 0 TN 4 | module TP 3 FP 4",
+          "prop-add: parity | TP 3 FP 0 FN 0 TN 5 | module TP 3 FP 5",
+          "prop-remove: parity | TP 2 FP 0 FN 0 TN 4 | module TP 2 FP 4",
+          "sem-domain-widen: parity | TP 3 FP 3 FN 0 TN 1 | module TP 3 FP 4 | over: explore check_invariant:AckedIsDurable check_invariant:Agreement",
+          "sem-ack-one-replica: parity | TP 6 FP 1 FN 0 TN 0 | module TP 6 FP 1 | over: domain_safety",
+          "sem-lose-durable: parity | TP 6 FP 1 FN 0 TN 0 | module TP 6 FP 1 | over: domain_safety",
+          "sem-no-crash-3: parity | TP 6 FP 0 FN 0 TN 1 | module TP 6 FP 1",
+          "trap-join-lines: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0",
+          "trap-split-expression: parity | TP 6 FP 0 FN 0 TN 1 | module TP 7 FP 0",
+          "parse-error: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0",
+          "base: parity | TP 1 FP 0 FN 0 TN 6 | module TP 7 FP 0"
+        ],
+        "interactive": [
+          "ws-reindent: parity | TP 0 FP 0 FN 0 TN 7 | module TP 0 FP 7",
+          "ws-trailing: parity | TP 0 FP 0 FN 0 TN 7 | module TP 0 FP 7",
+          "comment-edit: parity | TP 0 FP 0 FN 0 TN 7 | module TP 0 FP 7",
+          "rename-action: parity | TP 3 FP 3 FN 0 TN 1 | module TP 3 FP 4 | over: check_invariant:AckedIsDurable check_invariant:Agreement check_invariant:TypeOK",
+          "rename-invariant: parity | TP 2 FP 0 FN 0 TN 5 | module TP 4 FP 3",
+          "prop-edit-equivalent: parity | TP 3 FP 0 FN 0 TN 4 | module TP 3 FP 4",
+          "prop-add: parity | TP 3 FP 0 FN 0 TN 5 | module TP 3 FP 5",
+          "prop-remove: parity | TP 2 FP 0 FN 0 TN 4 | module TP 2 FP 4",
+          "sem-domain-widen: parity | TP 3 FP 3 FN 0 TN 1 | module TP 3 FP 4 | over: explore check_invariant:AckedIsDurable check_invariant:Agreement",
+          "sem-ack-one-replica: parity | TP 6 FP 1 FN 0 TN 0 | module TP 6 FP 1 | over: domain_safety",
+          "sem-lose-durable: parity | TP 6 FP 1 FN 0 TN 0 | module TP 6 FP 1 | over: domain_safety",
+          "sem-no-crash-3: parity | TP 6 FP 0 FN 0 TN 1 | module TP 6 FP 1",
+          "trap-join-lines: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0",
+          "trap-split-expression: mismatch | TP 0 FP 0 FN 7 TN 0 | module TP 7 FP 0 | only in clean: elaborate explore domain_safety check_invariant:AckedIsDurable check_invariant:Agreement check_invariant:TypeOK | quarantined (Experimental, parse, 1)",
+          "parse-error: parity | TP 1 FP 0 FN 0 TN 0 | module TP 1 FP 0",
+          "base: parity | TP 1 FP 0 FN 0 TN 6 | module TP 7 FP 0"
+        ]
+      }
+    }
+  },
+  "combined_edits_mode": {
+    "promotion": {
+      "counted_revisions": 32,
+      "inconclusive": 0,
+      "quarantine_reruns": 0,
+      "judged_labels": 185,
+      "spike": {
+        "tp_necessary_recompute": 62,
+        "fp_over_invalidated": 32,
+        "fn_under_invalidated": 0,
+        "fn_experimental_misses": 0,
+        "tn_correct_reuse": 91,
+        "tn_label_changed": 2,
+        "only_in_engine": 0,
+        "fn_only_in_clean": 0,
+        "recompute_wrong": 0,
+        "precision": {
+          "num": 62,
+          "den": 94,
+          "per_mille": 659
+        },
+        "recall": {
+          "num": 62,
+          "den": 62,
+          "per_mille": 1000
+        },
+        "recompute_share": {
+          "num": 94,
+          "den": 185,
+          "per_mille": 508
+        },
+        "strong_share_of_sound_reuse": {
+          "num": 59,
+          "den": 91,
+          "per_mille": 648
+        },
+        "explored_states": 1444
+      },
+      "module_granularity": {
+        "tp_necessary_recompute": 64,
+        "fp_over_invalidated": 121,
+        "fn_under_invalidated": 0,
+        "precision": {
+          "num": 64,
+          "den": 185,
+          "per_mille": 345
+        },
+        "recall": {
+          "num": 64,
+          "den": 64,
+          "per_mille": 1000
+        },
+        "labels": 185,
+        "explored_states": 3588
+      },
+      "by_licence": {
+        "Exact": {
+          "served": 53,
+          "correct": 53,
+          "stale": 0,
+          "stale_downstream_of_experimental": 0,
+          "missing_downstream": 0,
+          "reuse_precision": {
+            "num": 53,
+            "den": 53,
+            "per_mille": 1000
+          },
+          "subfile_reuses": 53
+        },
+        "Validated": {
+          "served": 6,
+          "correct": 6,
+          "stale": 0,
+          "stale_downstream_of_experimental": 0,
+          "missing_downstream": 0,
+          "reuse_precision": {
+            "num": 6,
+            "den": 6,
+            "per_mille": 1000
+          },
+          "subfile_reuses": 6
+        },
+        "Conservative": {
+          "served": 32,
+          "correct": 32,
+          "stale": 0,
+          "stale_downstream_of_experimental": 0,
+          "missing_downstream": 0,
+          "reuse_precision": {
+            "num": 32,
+            "den": 32,
+            "per_mille": 1000
+          },
+          "subfile_reuses": 32
+        },
+        "Experimental": {
+          "served": 0,
+          "correct": 0,
+          "stale": 0,
+          "stale_downstream_of_experimental": 0,
+          "missing_downstream": 0,
+          "reuse_precision": {
+            "num": 0,
+            "den": 0,
+            "per_mille": "none"
+          },
+          "subfile_reuses": 0
+        }
+      },
+      "recompute_by_function": {
+        "check_invariant": {
+          "necessary": 13,
+          "over": 16
+        },
+        "domain_safety": {
+          "necessary": 1,
+          "over": 3
+        },
+        "elaborate": {
+          "necessary": 18,
+          "over": 1
+        },
+        "explore": {
+          "necessary": 7,
+          "over": 3
+        },
+        "parse": {
+          "necessary": 23,
+          "over": 9
+        }
+      },
+      "fp_by_cause": {
+        "key-miss": 29,
+        "witness-refused": 3
+      },
+      "internal_unjudged": {
+        "build_model": {
+          "reused": 10,
+          "recomputed": 18
+        },
+        "project_invariant": {
+          "reused": 24,
+          "recomputed": 45
+        },
+        "project_transition_system": {
+          "reused": 10,
+          "recomputed": 18
+        }
+      }
+    },
+    "interactive": {
+      "counted_revisions": 32,
+      "inconclusive": 0,
+      "quarantine_reruns": 2,
+      "judged_labels": 185,
+      "spike": {
+        "tp_necessary_recompute": 60,
+        "fp_over_invalidated": 23,
+        "fn_under_invalidated": 0,
+        "fn_experimental_misses": 2,
+        "tn_correct_reuse": 100,
+        "tn_label_changed": 2,
+        "only_in_engine": 11,
+        "fn_only_in_clean": 0,
+        "recompute_wrong": 0,
+        "precision": {
+          "num": 60,
+          "den": 83,
+          "per_mille": 722
+        },
+        "recall": {
+          "num": 60,
+          "den": 62,
+          "per_mille": 967
+        },
+        "recompute_share": {
+          "num": 83,
+          "den": 185,
+          "per_mille": 448
+        },
+        "strong_share_of_sound_reuse": {
+          "num": 59,
+          "den": 91,
+          "per_mille": 648
+        },
+        "explored_states": 1444
+      },
+      "module_granularity": {
+        "tp_necessary_recompute": 64,
+        "fp_over_invalidated": 121,
+        "fn_under_invalidated": 0,
+        "precision": {
+          "num": 64,
+          "den": 185,
+          "per_mille": 345
+        },
+        "recall": {
+          "num": 64,
+          "den": 64,
+          "per_mille": 1000
+        },
+        "labels": 185,
+        "explored_states": 3588
+      },
+      "by_licence": {
+        "Exact": {
+          "served": 53,
+          "correct": 53,
+          "stale": 0,
+          "stale_downstream_of_experimental": 0,
+          "missing_downstream": 0,
+          "reuse_precision": {
+            "num": 53,
+            "den": 53,
+            "per_mille": 1000
+          },
+          "subfile_reuses": 53
+        },
+        "Validated": {
+          "served": 6,
+          "correct": 6,
+          "stale": 0,
+          "stale_downstream_of_experimental": 0,
+          "missing_downstream": 0,
+          "reuse_precision": {
+            "num": 6,
+            "den": 6,
+            "per_mille": 1000
+          },
+          "subfile_reuses": 6
+        },
+        "Conservative": {
+          "served": 32,
+          "correct": 32,
+          "stale": 0,
+          "stale_downstream_of_experimental": 0,
+          "missing_downstream": 0,
+          "reuse_precision": {
+            "num": 32,
+            "den": 32,
+            "per_mille": 1000
+          },
+          "subfile_reuses": 32
+        },
+        "Experimental": {
+          "served": 11,
+          "correct": 9,
+          "stale": 2,
+          "stale_downstream_of_experimental": 0,
+          "missing_downstream": 0,
+          "reuse_precision": {
+            "num": 9,
+            "den": 11,
+            "per_mille": 818
+          },
+          "subfile_reuses": 9
+        }
+      },
+      "recompute_by_function": {
+        "check_invariant": {
+          "necessary": 13,
+          "over": 16
+        },
+        "domain_safety": {
+          "necessary": 1,
+          "over": 3
+        },
+        "elaborate": {
+          "necessary": 18,
+          "over": 1
+        },
+        "explore": {
+          "necessary": 7,
+          "over": 3
+        },
+        "parse": {
+          "necessary": 21,
+          "over": 0
+        }
+      },
+      "fp_by_cause": {
+        "key-miss": 20,
+        "witness-refused": 3
+      },
+      "internal_unjudged": {
+        "build_model": {
+          "reused": 12,
+          "recomputed": 18
+        },
+        "project_invariant": {
+          "reused": 29,
+          "recomputed": 45
+        },
+        "project_transition_system": {
+          "reused": 12,
+          "recomputed": 18
+        }
+      }
+    }
+  }
+}
