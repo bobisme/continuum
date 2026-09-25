@@ -81,6 +81,14 @@ EXTERNAL_SCHEMA_PAIRS = {
     "schemas/run-config.schema.json": (
         "crates/continuum-cml-elab/tests/configs/ring.run-config.json",
     ),
+    # The transaction versions `continuum-repair`'s PR-20 / IMPL-01 suite emits
+    # (bn-2d70): `repair.begin`'s draft and `repair.apply`'s applied version.
+    # `tests/pr20_impl01_hypothesis_evidence.rs` asserts the library renders
+    # exactly these bytes; this gate checks them against the schema.
+    "schemas/repair-transaction.schema.json": (
+        "crates/continuum-repair/tests/fixtures/pr20-impl01-ack-after-sync-draft.json",
+        "crates/continuum-repair/tests/fixtures/pr20-impl01-ack-after-sync-applied.json",
+    ),
 }
 
 # The normative protocol artifacts `rule conformance.registry_agreement` binds

@@ -158,6 +158,7 @@ const PR12_GOLDEN: &str =
     include_str!("../../continuum-semantic-diff/tests/golden/pr12_exit_evidence.txt");
 const EVIDENCE_EDGE: &str = include_str!("../../continuum-evidence/src/edge.rs");
 const REPAIR_LIB: &str = include_str!("../../continuum-repair/src/lib.rs");
+const REPAIR_TRANSACTION: &str = include_str!("../../continuum-repair/src/transaction.rs");
 
 // --- the verb map --------------------------------------------------------------------------
 
@@ -945,19 +946,25 @@ mod dependent_evidence {
     }
 
     #[test]
-    fn boundary_inv011_reclassification_awaits_the_repair_crate() {
-        // INV-011's half of the AGENTS.md sentence — a repair that changes protected
-        // intent is reclassified at promotion — belongs to `continuum-repair`
-        // (plan §8, PR 20), which is still the PR-1/IMPL-01 scaffold: its stated
-        // responsibility includes exactly this ("a property-weakening patch is
-        // reclassified and blocked rather than merged"), and it exports nothing.
-        assert!(REPAIR_LIB.contains("PR-1 / IMPL-01 scaffold"));
+    fn boundary_inv011_apply_refuses_intent_changes_and_promotion_reclassification_is_absent() {
+        // INV-011's half of the AGENTS.md sentence belongs to `continuum-repair`
+        // (plan §8, PR 20). bn-2d70 (PR-20 / IMPL-01) landed its first half: an
+        // `intent`-kind change through ordinary repair authority is refused
+        // `IntentMutationDenied` at `repair.apply` (RFC 0032, "Intent integrity and
+        // reclassification"), and a hypothesis is prose that nothing reads. This guard
+        // keeps that refusal in place.
         assert!(REPAIR_LIB.contains("INV-011"));
         assert!(REPAIR_LIB.contains("reclassified and blocked rather than merged"));
-        for item in ["pub fn", "pub struct", "pub enum"] {
+        assert!(REPAIR_TRANSACTION.contains("IntentMutationDenied { index }"));
+        assert!(REPAIR_TRANSACTION.contains("change.kind() == ChangeKind::Intent"));
+        // The second half is still absent, and this pin goes red when it lands: a
+        // `model` or `rust` change that weakens a property is classified only by the
+        // RFC 0031 diff behind gate 3, and there is no evaluate, promote, or
+        // reclassification path in the crate yet (IMPL-04, IMPL-06).
+        for absent in ["pub fn evaluate", "pub fn promote", "pub fn reclassify"] {
             assert!(
-                !REPAIR_LIB.contains(item),
-                "the scaffold exports nothing yet; a landed `{item}` re-opens this row"
+                !REPAIR_TRANSACTION.contains(absent),
+                "`{absent}` landed; rewrite this row as a positive"
             );
         }
     }

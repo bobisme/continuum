@@ -501,6 +501,10 @@ version = "0.0.0"
 [[package]]
 name = "continuum-repair"
 version = "0.0.0"
+dependencies = [
+ "continuum-intent",
+ "continuum-value",
+]
 
 [[package]]
 name = "continuum-sarif"

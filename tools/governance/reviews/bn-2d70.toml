@@ -1,0 +1,43 @@
+[change]
+bone = "bn-2d70"
+author = "continuum-dev"
+summary = "PR-20 / IMPL-01, the repair hypothesis: continuum-repair gains the RFC 0032 transaction skeleton as far as the hypothesis needs it. repair.begin resolves the frozen base triple from a crashpack through a FailureBinding seam and opens a draft v1 with twelve gates by identity; repair.apply records the hypothesis as untrusted prose that nothing parses and refuses any intent-kind change IntentMutationDenied (INV-011); canonical ID5 bytes and an rt_ content identity that excludes repair_id"
+
+[semantic]
+covers = [
+  "crates/continuum-repair/src/",
+]
+reference_tests = [
+  "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::positive_begin_opens_a_draft_on_the_registers_frozen_base_triple",
+  "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::positive_apply_records_the_move_ack_after_sync_hypothesis",
+  "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::negative_an_intent_weakening_change_is_refused_intent_mutation_denied",
+  "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::negative_a_hypothesis_that_claims_a_weakening_changes_no_typed_field",
+  "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::negative_a_nonexistent_foreign_or_unbound_failure_opens_nothing",
+  "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::boundary_the_identity_moves_with_every_field",
+  "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::boundary_the_closed_sets_and_fields_are_the_schemas",
+  "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::boundary_every_profile_emits_its_own_gate_list",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::boundary_canonical_bytes_are_stable_and_survive_a_serialization_round_trip", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuum-repair/tests/pr20_impl01_hypothesis_evidence.rs::differential_the_handle_matches_an_independent_continuum_value_construction", oracle = "continuum-value", subject = "continuum-repair" },
+]
+
+[semantic.claim_impact]
+claims = ["C020", "C033"]
+reason = "Both rows bear on agent repair. Neither row's state or wording changes: C020 stays OBSERVED on the intent classification and policy layer, and this skeleton adds only the apply-time refusal of intent-kind changes, not the gate-3 classification path; C033 stays TARGET because no agent repair is evaluated or promoted yet"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the crate writes repair-transaction instances that conform to the existing epoch-1 schema, and the two retained fixtures are registered in validate_dossier.py so the dossier gate checks them against it"
+unaffected = { repair-transaction = "the crate emits instances of this class and conforms to it exactly; the hypothesis stays the schema's untyped string, and no field, enum, or conditional moves" }
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-repair was a documented stub with no types; it gains the handle, hypothesis, and transaction modules and edges to continuum-intent and continuum-value. No existing crate, artifact, wire shape, or IDL operation changes, and no daemon path calls the new code yet"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-jm061m"
+verdict = "approved"
