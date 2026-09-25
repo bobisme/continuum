@@ -47,3 +47,4 @@
 {"ts":"2026-09-25T03:21:35.150500282Z","author":"continuum-security","event":"ReviewApproved","data":{"review_id":"cr-1wuzry","target_commit":"f42de595836f39944373b351ddfffdda337299b5"}}
 {"ts":"2026-09-25T03:21:52.743336995Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-2y2a7g","reason":"Fixed at target f42de595836f39944373b351ddfffdda337299b5 and verified in review."}}
 {"ts":"2026-09-25T03:21:52.784281469Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-cjnyy5","reason":"Completed risk-high assessment; no security blocker."}}
+{"ts":"2026-09-25T04:01:01.305887638Z","author":"continuum-dev","event":"ReviewMerged","data":{"review_id":"cr-1wuzry","final_commit":"43aacd83"}}
