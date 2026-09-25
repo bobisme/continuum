@@ -5,3 +5,4 @@
 {"ts":"2026-09-25T15:34:48.191889933Z","author":"continuum-security","event":"ReviewerVoted","data":{"review_id":"cr-3od0bs","vote":"lgtm","reason":"LGTM: full persisted range reviewed with no security blockers. This static approval does not replace any risk:critical human gate.","target_commit":"c65f8e759a0d9ce0f46e49353c1236a2a601bb7f"}}
 {"ts":"2026-09-25T15:34:48.266870146Z","author":"continuum-security","event":"ReviewApproved","data":{"review_id":"cr-3od0bs","target_commit":"c65f8e759a0d9ce0f46e49353c1236a2a601bb7f"}}
 {"ts":"2026-09-25T15:35:03.257431455Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-26xggn","reason":"Informational risk review complete; no finding requires author action."}}
+{"ts":"2026-09-25T16:42:48.516761535Z","author":"continuum-dev","event":"ReviewMerged","data":{"review_id":"cr-3od0bs","final_commit":"32fcb48a95c59494f99baa3e6253ba3d6fc1c0ae"}}
