@@ -29,8 +29,15 @@
 //!   each pass declares what it preserves (INV-013) and refuses rather than change the
 //!   checked property; and every attempt is recorded in RFC 0028's minimizer transcript.
 //!
+//! - [`mechanism`] (PR 18, bn-5kmuf): replay validation. A failure's causal mechanism
+//!   (labelled steps, happens-before and order edges, and guards), derived from the
+//!   original failure, and the check that a result's own replay embeds it. Every entry
+//!   point of [`reduce`] and [`scenario`] goes through it, and returns a core only as a
+//!   [`mechanism::Validated`] one.
+//!
 //! The debugger core itself (PR 19) is not here yet.
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 
+pub mod mechanism;
 pub mod reduce;
 pub mod scenario;

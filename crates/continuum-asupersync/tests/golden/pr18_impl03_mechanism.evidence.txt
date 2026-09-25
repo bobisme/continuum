@@ -1,0 +1,124 @@
+# PR 18 (bn-5kmuf): replay validation. Each reduction's result is replayed and checked to reproduce the same failure through the same causal mechanism.
+# Regenerate: PR18_IMPL03_BLESS=1 cargo test -p continuum-asupersync --test pr18_impl03_mechanism
+# Mechanism: steps; edges `a hb b` (happens-before) or `a before b` (replay order); guards: forbidden labels between two steps, until a loss. Positions are story indices.
+
+[pr18-impl03-01-m01-agreement]
+run: M01 scenario plan 0 log 146, target abstract_register::Agreement, 137 events
+mechanism derived from the original failure: steps [0=Ack(epoch=0,value=v0) 1=Submit(n=a,epoch=0,value=v0) 2=Submit(n=b,epoch=0,value=v0) 3=Lose(n=a,epoch=0,value=v0) 4=Ack(epoch=0,value=v1)]; edges [1 hb 0, 2 hb 0, 1 hb 3, 3 hb 4]; guards [no Submit of a between 1 and 0; no Sync of a between 1 and 0; no Submit of b between 2 and 0; no Sync of b between 2 and 0; no Submit of a between 1 and 3]
+program replay, closure and deletion over atoms: validated core of 93 events; 2 validation replays; checks: Input: preserved: mechanism [5, 4, 5] embedded at [5, 2, 3, 7, 13] of a 14-step story (1 replay, 4841907 work); Pass(Closure): preserved: mechanism [5, 4, 5] embedded at [5, 2, 3, 7, 10] of a 11-step story (1 replay, 3416732 work)
+scenario reduction: checks: Input: preserved: mechanism [5, 4, 5] embedded at [5, 2, 3, 7, 13] of a 14-step story (1 replay, 191104883 work)
+composed event reduction of the reduced run (137 events): validated core of 93 events; checks: Input: preserved: mechanism [5, 4, 5] embedded at [5, 2, 3, 7, 13] of a 14-step story (1 replay, 4841907 work); Pass(Closure): preserved: mechanism [5, 4, 5] embedded at [5, 2, 3, 7, 10] of a 11-step story (1 replay, 3416732 work)
+
+[pr18-impl03-02-m01-acked-not-durable]
+run: M01 sweep-one-epoch plan 81 log 5, target RuntimeToAbstract/AckedNotDurable, 97 events
+mechanism derived from the original failure: steps [0=Ack(epoch=0,value=v0) 1=Submit(n=a,epoch=0,value=v0) 2=Submit(n=b,epoch=0,value=v0)]; edges [1 hb 0, 2 hb 0]; guards [no Submit of a between 1 and 0; no Sync of a between 1 and 0; no Submit of b between 2 and 0; no Sync of b between 2 and 0]
+program replay, closure and deletion over atoms: validated core of 46 events; 2 validation replays; checks: Input: preserved: mechanism [3, 2, 4] embedded at [4, 2, 3] of a 10-step story (1 replay, 2434536 work); Pass(Closure): preserved: mechanism [3, 2, 4] embedded at [4, 2, 3] of a 5-step story (1 replay, 1327837 work)
+scenario reduction: checks: Input: preserved: mechanism [3, 2, 4] embedded at [4, 2, 3] of a 10-step story (1 replay, 138675112 work); Dimension { round: 0, dimension: Owner }: preserved: mechanism [3, 2, 4] embedded at [4, 2, 3] of a 7-step story (1 replay, 84935463 work)
+composed event reduction of the reduced run (73 events): validated core of 42 events; checks: Input: preserved: mechanism [3, 2, 4] embedded at [4, 2, 3] of a 7-step story (1 replay, 1383783 work); Pass(Closure): preserved: mechanism [3, 2, 4] embedded at [4, 2, 3] of a 5-step story (1 replay, 861917 work)
+
+[pr18-impl03-03-corpus]
+corpus: the 400 failing runs of M01's scenario plan; program-replay cores validated: 400; composed cores validated: 400
+scenario candidates whose failing run the mechanism check rejected, never kept: 24 on 24 runs (logs [14, 15, 22, 26, 30, 45, 82, 129, 132, 139, 202, 214, 218, 251, 258, 277, 281, 287, 310, 312, 317, 318, 334, 379])
+distinct mechanisms derived from the original failures: 7
+  47 runs: [RuntimeToAbstract/AckedNotDurable] steps [0=Ack(epoch=0,value=v0) 1=Submit(n=a,epoch=0,value=v0) 2=Submit(n=b,epoch=0,value=v0)]; edges [1 hb 0, 2 hb 0]; guards [no Submit of a between 1 and 0; no Sync of a between 1 and 0; no Submit of b between 2 and 0; no Sync of b between 2 and 0]
+  287 runs: [RuntimeToAbstract/AckedNotDurable] steps [0=Ack(epoch=0,value=v0) 1=Submit(n=a,epoch=0,value=v0) 2=Submit(n=b,epoch=0,value=v0)]; edges [1 hb 0, 2 hb 0]; guards [no Submit of a between 1 and 0; no Sync of a between 1 and 0; no Submit of b between 2 and 0]
+  1 runs: [RuntimeToAbstract/AckedNotDurable] steps [0=Ack(epoch=0,value=v1) 1=Submit(n=a,epoch=0,value=v1) 2=Submit(n=c,epoch=0,value=v1)]; edges [1 hb 0, 2 hb 0]; guards [no Submit of a between 1 and 0; no Sync of a between 1 and 0; no Submit of c between 2 and 0; no Sync of c between 2 and 0]
+  20 runs: [RuntimeToAbstract/AckedNotDurable] steps [0=Ack(epoch=0,value=v1) 1=Submit(n=a,epoch=0,value=v1) 2=Submit(n=c,epoch=0,value=v1)]; edges [1 hb 0, 2 hb 0]; guards [no Submit of a between 1 and 0; no Sync of a between 1 and 0; no Submit of c between 2 and 0]
+  3 runs: [RuntimeToAbstract/AckedNotDurable] steps [0=Ack(epoch=0,value=v1) 1=Submit(n=c,epoch=0,value=v1) 2=Submit(n=a,epoch=0,value=v1)]; edges [1 hb 0, 2 hb 0]; guards [no Submit of c between 1 and 0; no Sync of c between 1 and 0; no Submit of a between 2 and 0]
+  41 runs: [abstract_register::Agreement] steps [0=Ack(epoch=0,value=v0) 1=Submit(n=a,epoch=0,value=v0) 2=Submit(n=b,epoch=0,value=v0) 3=Lose(n=a,epoch=0,value=v0) 4=Ack(epoch=0,value=v1)]; edges [1 hb 0, 2 hb 0, 1 hb 3, 3 hb 4]; guards [no Submit of a between 1 and 0; no Sync of a between 1 and 0; no Submit of b between 2 and 0; no Submit of a between 1 and 3]
+  1 runs: [abstract_register::Agreement] steps [0=Ack(epoch=0,value=v0) 1=Submit(n=a,epoch=0,value=v0) 2=Submit(n=b,epoch=0,value=v0) 3=Lose(n=a,epoch=0,value=v0) 4=Ack(epoch=0,value=v1)]; edges [1 hb 0, 2 hb 0, 1 hb 3, 3 hb 4]; guards [no Submit of a between 1 and 0; no Sync of a between 1 and 0; no Submit of b between 2 and 0; no Sync of b between 2 and 0; no Submit of a between 1 and 3]
+
+[pr18-impl03-04-substrate-cores]
+M01 scenario plan 0 log 146, substrate replay, deletion over Configurations: rejected candidate of 89 events: NotARun (operation group 30 is held in part (1 of 3 events))
+M01 scenario plan 0 log 146, substrate replay, deletion over Atoms: rejected candidate of 19 events: NotARun (operation group 25 is held in part (2 of 3 events))
+M01 sweep-one-epoch plan 81 log 5, substrate replay, deletion over Configurations: rejected candidate of 40 events: NotARun (operation group 22 is held in part (1 of 3 events))
+M01 sweep-one-epoch plan 81 log 5, substrate replay, deletion over Atoms: rejected candidate of 9 events: NotARun (operation group 20 is held in part (2 of 3 events))
+
+[pr18-impl03-05-bn-25z9o-regressions]
+bn-25z9o's reduced configuration for these runs: epochs 1, only used owners spawned; a: e0 v0 clean | b: e0 v0 clean | c: e0 idle; its run, the original order carried over, fails the target through another mechanism
+  scenario plan 0 log 14 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 15 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 22 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 26 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 30 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 45 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 82 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 129 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 132 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 139 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 202 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 214 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 218 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 251 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 258 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 277 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 281 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 287 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 310 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 312 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 317 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 318 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 334 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 379 (round-0 Owner pass): bn-25z9o's run checked against the original mechanism: rejected MissingStep { step: 0 }; the reduction now: composed core validated true
+  scenario plan 0 log 20 (round-0 Fault pass): bn-25z9o's run checked against the original mechanism: rejected GuardBroken { guard: 1 }; the reduction now: composed core validated true
+  scenario plan 0 log 131 (round-0 Fault pass): bn-25z9o's run checked against the original mechanism: rejected GuardBroken { guard: 1 }; the reduction now: composed core validated true
+  scenario plan 0 log 180 (round-0 Fault pass): bn-25z9o's run checked against the original mechanism: rejected GuardBroken { guard: 1 }; the reduction now: composed core validated true
+  scenario plan 0 log 211 (round-0 Fault pass): bn-25z9o's run checked against the original mechanism: rejected GuardBroken { guard: 1 }; the reduction now: composed core validated true
+  scenario plan 0 log 282 (round-0 Fault pass): bn-25z9o's run checked against the original mechanism: rejected GuardBroken { guard: 1 }; the reduction now: composed core validated true
+  scenario plan 0 log 389 (round-0 Fault pass): bn-25z9o's run checked against the original mechanism: rejected GuardBroken { guard: 1 }; the reduction now: composed core validated true
+  scenario plan 0 log 394 (round-0 Fault pass): bn-25z9o's run checked against the original mechanism: rejected GuardBroken { guard: 1 }; the reduction now: composed core validated true
+
+[pr18-impl03-06-seeded-wrong-mechanism]
+validated cores checked against a mechanism with other steps (each core fails its target through its own chain):
+  RuntimeToAbstract/AckedNotDurable core of log 5 against the mechanism of log 318: rejected: MissingStep { step: 0 }
+  RuntimeToAbstract/AckedNotDurable core of log 5 against the mechanism of log 14: rejected: MissingStep { step: 0 }
+  RuntimeToAbstract/AckedNotDurable core of log 5 against the mechanism of log 45: rejected: MissingStep { step: 0 }
+  RuntimeToAbstract/AckedNotDurable core of log 0 against the mechanism of log 318: rejected: MissingStep { step: 0 }
+  RuntimeToAbstract/AckedNotDurable core of log 0 against the mechanism of log 14: rejected: MissingStep { step: 0 }
+  RuntimeToAbstract/AckedNotDurable core of log 0 against the mechanism of log 45: rejected: MissingStep { step: 0 }
+  RuntimeToAbstract/AckedNotDurable core of log 318 against the mechanism of log 5: rejected: MissingStep { step: 0 }
+  RuntimeToAbstract/AckedNotDurable core of log 318 against the mechanism of log 0: rejected: MissingStep { step: 0 }
+  RuntimeToAbstract/AckedNotDurable core of log 14 against the mechanism of log 5: rejected: MissingStep { step: 0 }
+  RuntimeToAbstract/AckedNotDurable core of log 14 against the mechanism of log 0: rejected: MissingStep { step: 0 }
+  RuntimeToAbstract/AckedNotDurable core of log 45 against the mechanism of log 5: rejected: MissingStep { step: 0 }
+  RuntimeToAbstract/AckedNotDurable core of log 45 against the mechanism of log 0: rejected: MissingStep { step: 0 }
+  M01 scenario plan 0 log 146's core against its mechanism with replicas a and b swapped (b's bytes lost): rejected: MissingStep { step: 3 }
+  M01 scenario plan 0 log 146's core against its mechanism with v0 and v1 swapped (v1 acknowledged first): rejected: MissingStep { step: 2 }
+story mutants of M01 scenario plan 0 log 146's validated core:
+  the core's own story: preserved at [5, 2, 3, 7, 10]
+  the crash's Lose removed: rejected MissingStep { step: 3 }
+  the Lose moved after the second acknowledgement: rejected OrderBroken { edge: 3 }
+  a Sync of a between its Submit and the first acknowledgement: rejected GuardBroken { guard: 1 }
+  a resubmits before its bytes are lost: rejected GuardBroken { guard: 4 }
+  a's bytes lost, v0 submitted again and synced before the first acknowledgement: rejected GuardBroken { guard: 1 }
+  the second acknowledgement removed: rejected MissingStep { step: 4 }
+
+[pr18-impl03-07-entry-points]
+M01 scenario plan 0 log 146 closure_pass (program replay): validated core of 93 events; stages checked [Input, Pass(Closure)]; validator replays 2
+M01 scenario plan 0 log 146 deletion_pass over Configurations (program replay): validated core of 93 events; stages checked [Input, Pass(Deletion(Configurations))]; validator replays 2
+M01 scenario plan 0 log 146 deletion_pass over Atoms (program replay): validated core of 93 events; stages checked [Input, Pass(Deletion(Atoms))]; validator replays 2
+M01 scenario plan 0 log 146 minimize over Configurations (program replay): validated core of 93 events; stages checked [Input, Pass(Closure)]; validator replays 2
+M01 scenario plan 0 log 146 minimize over Atoms (program replay): validated core of 93 events; stages checked [Input, Pass(Closure)]; validator replays 2
+M01 scenario plan 0 log 146 closure_pass (substrate replay): rejected candidate of 89 events: NotARun (operation group 30 is held in part (1 of 3 events)); stages checked [Input, Pass(Closure)]; validator replays 2
+M01 scenario plan 0 log 146 deletion_pass over Configurations (substrate replay): rejected candidate of 89 events: NotARun (operation group 30 is held in part (1 of 3 events)); stages checked [Input, Pass(Deletion(Configurations))]; validator replays 2
+M01 scenario plan 0 log 146 deletion_pass over Atoms (substrate replay): rejected candidate of 17 events: NotARun (operation group 25 is held in part (2 of 3 events)); stages checked [Input, Pass(Deletion(Atoms))]; validator replays 2
+M01 scenario plan 0 log 146 minimize over Configurations (substrate replay): rejected candidate of 89 events: NotARun (operation group 30 is held in part (1 of 3 events)); stages checked [Input, Pass(Closure)]; validator replays 2
+M01 scenario plan 0 log 146 minimize over Atoms (substrate replay): rejected candidate of 19 events: NotARun (operation group 25 is held in part (2 of 3 events)); stages checked [Input, Pass(Closure), Pass(Deletion(Atoms))]; validator replays 3
+M01 scenario plan 0 log 146 reduce_scenario: validated configuration epochs 1, every owner spawned; a: e0 v0 crash-submitted->v1 | b: e0 v0 clean | c: e0 v1 clean; stages checked [Input]
+M01 sweep-one-epoch plan 81 log 5 closure_pass (program replay): validated core of 46 events; stages checked [Input, Pass(Closure)]; validator replays 2
+M01 sweep-one-epoch plan 81 log 5 deletion_pass over Configurations (program replay): validated core of 46 events; stages checked [Input, Pass(Deletion(Configurations))]; validator replays 2
+M01 sweep-one-epoch plan 81 log 5 deletion_pass over Atoms (program replay): validated core of 46 events; stages checked [Input, Pass(Deletion(Atoms))]; validator replays 2
+M01 sweep-one-epoch plan 81 log 5 minimize over Configurations (program replay): validated core of 46 events; stages checked [Input, Pass(Closure)]; validator replays 2
+M01 sweep-one-epoch plan 81 log 5 minimize over Atoms (program replay): validated core of 46 events; stages checked [Input, Pass(Closure)]; validator replays 2
+M01 sweep-one-epoch plan 81 log 5 closure_pass (substrate replay): rejected candidate of 40 events: NotARun (operation group 22 is held in part (1 of 3 events)); stages checked [Input, Pass(Closure)]; validator replays 2
+M01 sweep-one-epoch plan 81 log 5 deletion_pass over Configurations (substrate replay): rejected candidate of 40 events: NotARun (operation group 22 is held in part (1 of 3 events)); stages checked [Input, Pass(Deletion(Configurations))]; validator replays 2
+M01 sweep-one-epoch plan 81 log 5 deletion_pass over Atoms (substrate replay): rejected candidate of 9 events: NotARun (operation group 17 is held in part (2 of 6 events)); stages checked [Input, Pass(Deletion(Atoms))]; validator replays 2
+M01 sweep-one-epoch plan 81 log 5 minimize over Configurations (substrate replay): rejected candidate of 40 events: NotARun (operation group 22 is held in part (1 of 3 events)); stages checked [Input, Pass(Closure)]; validator replays 2
+M01 sweep-one-epoch plan 81 log 5 minimize over Atoms (substrate replay): rejected candidate of 9 events: NotARun (operation group 20 is held in part (2 of 3 events)); stages checked [Input, Pass(Closure), Pass(Deletion(Atoms))]; validator replays 3
+M01 sweep-one-epoch plan 81 log 5 reduce_scenario: validated configuration epochs 1, only used owners spawned; a: e0 v0 clean | b: e0 v0 clean | c: e0 idle; stages checked [Input, Dimension { round: 0, dimension: Owner }]
+
+[pr18-impl03-08-undecided]
+M01 scenario plan 0 log 146 under a validator with no mechanism: inconclusive Unsupported; no best set; checks: Input: undecided Unsupported: no failure to derive a mechanism from
+M01 scenario plan 0 log 146 under a validation allowance of no replay: inconclusive ResourceExhausted; no best set; checks: Input: undecided ResourceExhausted: the validation allowance ran out before the validation replay
+M01 scenario plan 0 log 146 under a validation allowance of 1000 work units: inconclusive ResourceExhausted; no best set; checks: Input: undecided ResourceExhausted: the validation allowance ran out before the validation replay
+M01 scenario plan 0 log 146 under a validation allowance of one replay: inconclusive ResourceExhausted; best set of 93 events, its check undecided ResourceExhausted: the validation allowance ran out before the validation replay; checks: Input: preserved: mechanism [5, 4, 5] embedded at [5, 2, 3, 7, 13] of a 14-step story (1 replay, 4841907 work); Pass(Closure): undecided ResourceExhausted: the validation allowance ran out before the validation replay

@@ -123,832 +123,22 @@ mod mutants;
 #[allow(dead_code)]
 mod program;
 
-use baseline::{Fate, Replica};
-use continuum_asupersync::binding::SubstrateOp;
-use continuum_asupersync::choice::ChoiceLog;
+#[path = "support/pr18_scenario.rs"]
+#[allow(dead_code)]
+mod scenario;
+
+use baseline::Fate;
 use continuum_debugger::reduce::{Budget, Deletion, Guarantee, Reduction};
 use continuum_debugger::scenario::{
-    Candidate, ConfigAttempt, ConfigVerdict, Dimension, DimensionEnd, Preserved, Ran, Scenario,
-    ScenarioGuarantee, ScenarioReduction, reduce_scenario,
+    ConfigAttempt, ConfigVerdict, Dimension, DimensionEnd, Ran, Scenario, ScenarioGuarantee,
+    ScenarioReduction, reduce_scenario,
 };
 use continuum_value::assurance::InconclusiveReason;
 use program::{
-    Case, NODES, ProgramReduction, Target, acked_witness, agreement_witness, attempt_line,
-    campaign_finds_target, case_built, corpus, keeps_mechanism, median, minimize_program, story,
-    transcript_licenses,
+    Case, Target, acked_witness, agreement_witness, attempt_line, campaign_finds_target,
+    case_built, corpus, median, minimize_program, story, transcript_licenses,
 };
-use register::{Act, Built, Plan, Raw, Role};
-
-/// The scenario reduction's budget: runs, and work units.
-const SCENARIO_BUDGET: Budget = Budget::new(512, 1 << 34);
-
-/// Schedules the search runs when the guided run does not fail: every admissible one when
-/// there are at most this many, otherwise this many sampled.
-const SEARCH_LOGS: usize = 24;
-
-/// Predicted work per act of a configuration's plan, per schedule run: the binding's
-/// events, the lift, the model and the projection, each linear in the run.
-const WORK_PER_ACT: u64 = 1 << 12;
-
-// ---------------------------------------------------------------------------
-// the configuration
-// ---------------------------------------------------------------------------
-
-/// A register configuration: the plan's epochs and replicas, and whether the build spawns
-/// only the owners the scripts use.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct Config {
-    epochs: u8,
-    replicas: [Replica; 3],
-    pruned: bool,
-}
-
-impl Config {
-    fn start(epochs: u8, replicas: [Replica; 3]) -> Self {
-        Self {
-            epochs,
-            replicas,
-            pruned: false,
-        }
-    }
-
-    /// The correct plan, before the defect.
-    fn correct_plan(&self) -> Plan {
-        baseline::plan_of("scenario-reduction", self.epochs, self.replicas)
-    }
-
-    /// M01's plan: the correct plan with its defect.
-    fn plan(&self) -> Plan {
-        mutants::ack_before_sync(&self.correct_plan())
-    }
-
-    fn built(&self) -> Built {
-        let plan = self.plan();
-        if self.pruned {
-            register::build_pruned(&plan)
-        } else {
-            register::build_with_shutdown(&plan)
-        }
-    }
-
-    /// The written slots, `(replica, slot index, epoch, fate)`.
-    fn slots(&self) -> impl Iterator<Item = (usize, usize, u8, Fate)> + '_ {
-        self.replicas.iter().enumerate().flat_map(move |(n, r)| {
-            r.slots[..usize::from(self.epochs)]
-                .iter()
-                .enumerate()
-                .filter(|(_, (_, f))| *f != Fate::Idle)
-                .map(move |(k, &(e, f))| (n, k, e, f))
-        })
-    }
-
-    /// The values the written slots use: each slot's value and each re-proposed value.
-    fn values(&self) -> BTreeSet<u8> {
-        let mut out = BTreeSet::new();
-        for (n, _, e, f) in self.slots() {
-            out.insert(self.replicas[n].values[usize::from(e)]);
-            if let Fate::CrashReserved { retry } | Fate::CrashSubmitted { retry } = f {
-                out.insert(retry);
-            }
-        }
-        out
-    }
-
-    fn acts(&self) -> u64 {
-        self.plan()
-            .replicas
-            .iter()
-            .map(|s| s.len() as u64)
-            .sum::<u64>()
-    }
-
-    fn render(&self) -> String {
-        let replicas: Vec<String> = self
-            .replicas
-            .iter()
-            .enumerate()
-            .map(|(n, r)| {
-                let slots: Vec<String> = r.slots[..usize::from(self.epochs)]
-                    .iter()
-                    .map(|&(e, f)| {
-                        if f == Fate::Idle {
-                            format!("e{e} idle")
-                        } else {
-                            format!(
-                                "e{e} {} {}",
-                                register::VALUES[usize::from(r.values[usize::from(e)])],
-                                f.token()
-                            )
-                        }
-                    })
-                    .collect();
-                format!("{}: {}", NODES[n], slots.join(", "))
-            })
-            .collect();
-        format!(
-            "epochs {}, {}; {}",
-            self.epochs,
-            if self.pruned {
-                "only used owners spawned"
-            } else {
-                "every owner spawned"
-            },
-            replicas.join(" | ")
-        )
-    }
-}
-
-/// How deep in its write a fault falls: the owner-free part of the fault measure.
-const fn depth(f: Fate) -> u64 {
-    match f {
-        Fate::AbortRetry | Fate::CrashReserved { .. } => 1,
-        Fate::CrashSubmitted { .. } => 2,
-        Fate::CrashSynced => 3,
-        Fate::CrashReplied => 4,
-        Fate::Idle | Fate::Clean => 0,
-    }
-}
-
-const fn faults(f: Fate) -> bool {
-    depth(f) > 0
-}
-
-// ---------------------------------------------------------------------------
-// the original run's order, carried to a reduced program
-// ---------------------------------------------------------------------------
-
-/// An operation's identity across configurations: its replica, act, epoch and how many
-/// times that act on that epoch came before it in the replica's script; or its
-/// coordinator and index; or its place in the setup or the shutdown.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum OpKey {
-    Setup(usize),
-    Replica {
-        node: usize,
-        act: u8,
-        epoch: u8,
-        occurrence: usize,
-    },
-    Coordinator {
-        epoch: u8,
-        value: u8,
-        index: usize,
-    },
-    Shutdown(usize),
-}
-
-const fn act_code(a: Act) -> (u8, u8) {
-    match a {
-        Act::Reserve(e) => (0, e),
-        Act::Submit(e) => (1, e),
-        Act::Sync(e) => (2, e),
-        Act::Release(e) => (3, e),
-        Act::Abort(e) => (4, e),
-        Act::Confirm(e) => (5, e),
-        Act::Crash | Act::CrashRepropose(..) => (6, 0),
-    }
-}
-
-/// Each actor's operations' keys. A build without carriers has one operation per act in
-/// each replica's program; that is checked.
-fn op_keys(plan: &Plan, built: &Built) -> Vec<Vec<OpKey>> {
-    let actors = built.programs.len();
-    let mut out = vec![(0..built.programs[0].len()).map(OpKey::Setup).collect()];
-    for (n, script) in plan.replicas.iter().enumerate() {
-        assert_eq!(
-            script.len(),
-            built.programs[1 + n].len(),
-            "one operation per act"
-        );
-        let mut seen: BTreeMap<(u8, u8), usize> = BTreeMap::new();
-        out.push(
-            script
-                .iter()
-                .map(|&a| {
-                    let (act, epoch) = act_code(a);
-                    let k = seen.entry((act, epoch)).or_default();
-                    let key = OpKey::Replica {
-                        node: n,
-                        act,
-                        epoch,
-                        occurrence: *k,
-                    };
-                    *k += 1;
-                    key
-                })
-                .collect(),
-        );
-    }
-    let coordinators: Vec<(u8, u8)> = built
-        .roles
-        .tasks
-        .iter()
-        .filter_map(|(r, _)| match *r {
-            Role::Coordinator { epoch, value } => Some((epoch, value)),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        4 + coordinators.len() + 1,
-        actors,
-        "setup, replicas, coordinators, shutdown"
-    );
-    for (k, &(epoch, value)) in coordinators.iter().enumerate() {
-        out.push(
-            (0..built.programs[4 + k].len())
-                .map(|index| OpKey::Coordinator {
-                    epoch,
-                    value,
-                    index,
-                })
-                .collect(),
-        );
-    }
-    out.push(
-        (0..built.programs[actors - 1].len())
-            .map(OpKey::Shutdown)
-            .collect(),
-    );
-    out
-}
-
-/// The original run's order: each operation's key, by its position in the run.
-fn original_rank(c: &Case, plan: &Plan) -> BTreeMap<OpKey, u64> {
-    let keys = op_keys(plan, &c.built);
-    let programs = &c.built.programs;
-    let mut cursor = vec![0_usize; programs.len()];
-    let mut out = BTreeMap::new();
-    for (at, choice) in c.log.choices().iter().enumerate() {
-        let enabled: Vec<usize> = (0..programs.len())
-            .filter(|&a| cursor[a] < programs[a].len())
-            .collect();
-        let actor = enabled[choice.0 as usize];
-        out.insert(keys[actor][cursor[actor]], at as u64);
-        cursor[actor] += 1;
-    }
-    out
-}
-
-// ---------------------------------------------------------------------------
-// the scenario
-// ---------------------------------------------------------------------------
-
-/// The durable register's reachable states, by epochs, computed once each.
-fn reach(epochs: u8) -> &'static BTreeSet<Raw> {
-    static CELL: OnceLock<[BTreeSet<Raw>; 2]> = OnceLock::new();
-    &CELL.get_or_init(|| [register::reachable(1), register::reachable(2)])[usize::from(epochs - 1)]
-}
-
-/// How a configuration's run was found.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Found {
-    /// The original order, carried over.
-    Guided,
-    /// The `k`th schedule of the search.
-    Searched(usize),
-}
-
-/// The register's configuration space around one failing run.
-struct RegisterScenario {
-    target: Target,
-    /// A value the question names, if any: the value pass is then refused (INV-013).
-    pinned: Option<u8>,
-    rank: BTreeMap<OpKey, u64>,
-    /// Each configuration that failed: its failing schedule and how it was found.
-    found: BTreeMap<Config, (ChoiceLog, Found)>,
-    /// Each configuration decided without a schedule.
-    decided_statically: Vec<Config>,
-    /// Binding executions: two per schedule judged (the campaign's checker, then the
-    /// journal the mechanism is read from).
-    executions: std::cell::Cell<u64>,
-}
-
-impl RegisterScenario {
-    fn new(c: &Case, start: &Config) -> Self {
-        let mut s = Self::for_target(c.target);
-        s.rank = original_rank(c, &start.plan());
-        s
-    }
-
-    /// A scenario with no original run to follow: every operation ranks alike, so the
-    /// guided walk is the lowest admissible actor first.
-    fn for_target(target: Target) -> Self {
-        Self {
-            target,
-            pinned: None,
-            rank: BTreeMap::new(),
-            found: BTreeMap::new(),
-            decided_statically: Vec::new(),
-            executions: std::cell::Cell::new(0),
-        }
-    }
-
-    fn measure_of(c: &Config) -> [u64; 3] {
-        let built = c.built();
-        let owners = built.roles.tasks.len() as u64 + u64::from(built.roles.regions);
-        let faults: u64 = c
-            .slots()
-            .filter(|(_, _, _, f)| faults(*f))
-            .map(|(_, _, _, f)| 16 + depth(f))
-            .sum();
-        let values = 4 * u64::from(c.epochs) + c.values().len() as u64;
-        [owners, faults, values]
-    }
-
-    /// The minimum number of values the target's statement needs.
-    const fn values_needed(&self) -> usize {
-        match self.target {
-            Target::Agreement => 2,
-            Target::AckedNotDurable => 1,
-        }
-    }
-
-    /// The schedule-free decision: whether the built program has the acknowledgements the
-    /// target needs. `None` when it may; a reason when no run can fail.
-    fn statically_holds(&self, built: &Built) -> Option<String> {
-        // The layout of a build without carriers: setup, three replicas, the coordinators
-        // in role order, the shutdown.
-        let coordinators = built
-            .roles
-            .tasks
-            .iter()
-            .filter(|(r, _)| matches!(r, Role::Coordinator { .. }))
-            .count();
-        assert!(
-            built.roles.mailboxes.is_empty() && built.programs.len() == 4 + coordinators + 1,
-            "setup, replicas, coordinators, shutdown"
-        );
-        let mut ackers: BTreeMap<u8, usize> = BTreeMap::new();
-        let mut k = 0;
-        for (role, _) in &built.roles.tasks {
-            if let Role::Coordinator { epoch, .. } = *role {
-                if built.programs[4 + k]
-                    .iter()
-                    .any(|op| matches!(op, SubstrateOp::Reserve { .. }))
-                {
-                    *ackers.entry(epoch).or_default() += 1;
-                }
-                k += 1;
-            }
-        }
-        match self.target {
-            Target::Agreement if ackers.values().all(|&n| n < 2) => Some(
-                "decided without a schedule: no epoch has two coordinators with an acknowledgement in their program, so no run acknowledges two values of one epoch"
-                    .to_owned(),
-            ),
-            Target::AckedNotDurable if ackers.is_empty() => Some(
-                "decided without a schedule: no coordinator has an acknowledgement in its program, so no run acknowledges"
-                    .to_owned(),
-            ),
-            _ => None,
-        }
-    }
-
-    /// Run `built` under `log` and check the target and the mechanism.
-    fn fails(&self, config: &Config, built: &Built, log: &ChoiceLog) -> Result<(), String> {
-        self.executions.set(self.executions.get() + 2);
-        let Some(c) = case_built(
-            String::new(),
-            built.clone(),
-            config.epochs,
-            log,
-            Some(self.target),
-            reach(config.epochs),
-        ) else {
-            return Err("the target does not fail".to_owned());
-        };
-        let all: Vec<usize> = (0..c.journal.len()).collect();
-        if keeps_mechanism(&story(&c, &all), self.target) {
-            Ok(())
-        } else {
-            Err("the target fails without the mechanism".to_owned())
-        }
-    }
-
-    fn seed(config: &Config) -> u64 {
-        // FNV-1a over the configuration's fields, each spelled by this file (the fates by
-        // their stable tokens): a function of the configuration alone (INV-005, INV-006).
-        let mut bytes = vec![config.epochs, u8::from(config.pruned)];
-        for r in &config.replicas {
-            bytes.extend(r.values);
-            bytes.push(r.epochs);
-            for &(e, f) in &r.slots {
-                bytes.push(e);
-                bytes.extend(f.token().bytes());
-                bytes.push(0);
-            }
-        }
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        for b in bytes {
-            h ^= u64::from(b);
-            h = h.wrapping_mul(0x0100_0000_01b3);
-        }
-        h ^ baseline::SCENARIO_SEED
-    }
-}
-
-impl Scenario for RegisterScenario {
-    type Config = Config;
-
-    fn declare(&self, dimension: Dimension) -> Result<Vec<Preserved>, String> {
-        if dimension == Dimension::Value {
-            if let Some(v) = self.pinned {
-                return Err(format!(
-                    "the question names {}: renaming values would change the checked property (INV-013)",
-                    register::VALUES[usize::from(v)]
-                ));
-            }
-        }
-        Ok(vec![
-            Preserved::Property,
-            Preserved::Defect,
-            Preserved::Semantics,
-            Preserved::Bounds,
-        ])
-    }
-
-    fn measure(&self, config: &Config) -> [u64; 3] {
-        Self::measure_of(config)
-    }
-
-    fn candidates(&self, config: &Config, dimension: Dimension) -> Vec<Candidate<Config>> {
-        let mut out: Vec<Candidate<Config>> = Vec::new();
-        let slot_name = |n: usize, e: u8| format!("replica {} epoch {e}", NODES[n]);
-        match dimension {
-            Dimension::Owner => {
-                // Pruning is offered only when some owner is unused: otherwise the pruned
-                // build is the same program (`pruning_changes_nothing_when_every_owner_is_used`)
-                // and removes nothing. Every other candidate goes to the engine, which
-                // records and stops on any that is not smaller.
-                if !config.pruned {
-                    let mut c = config.clone();
-                    c.pruned = true;
-                    if Self::measure_of(&c)[0] < Self::measure_of(config)[0] {
-                        out.push(Candidate {
-                            config: c,
-                            label: "spawn only the owners the scripts use".to_owned(),
-                        });
-                    }
-                }
-                for n in (0..3).rev() {
-                    for k in (0..usize::from(config.epochs)).rev() {
-                        let (e, f) = config.replicas[n].slots[k];
-                        if f == Fate::Idle {
-                            continue;
-                        }
-                        let mut c = config.clone();
-                        c.replicas[n].slots[k] = (e, Fate::Idle);
-                        c.pruned = true;
-                        out.push(Candidate {
-                            config: c,
-                            label: format!("{} idle: its writers are not spawned", slot_name(n, e)),
-                        });
-                    }
-                }
-            }
-            Dimension::Fault => {
-                for n in (0..3).rev() {
-                    for k in (0..usize::from(config.epochs)).rev() {
-                        let (e, f) = config.replicas[n].slots[k];
-                        if !faults(f) {
-                            continue;
-                        }
-                        let value = config.replicas[n].values[usize::from(e)];
-                        let mut clean = vec![value];
-                        if let Fate::CrashReserved { retry } | Fate::CrashSubmitted { retry } = f {
-                            if retry != value {
-                                clean.push(retry);
-                            }
-                        }
-                        for v in clean {
-                            let mut c = config.clone();
-                            c.replicas[n].slots[k] = (e, Fate::Clean);
-                            c.replicas[n].values[usize::from(e)] = v;
-                            out.push(Candidate {
-                                config: c,
-                                label: format!(
-                                    "{}: fault {} dropped, writes {}",
-                                    slot_name(n, e),
-                                    f.token(),
-                                    register::VALUES[usize::from(v)]
-                                ),
-                            });
-                        }
-                        let earlier = match f {
-                            Fate::CrashReplied => Some(Fate::CrashSynced),
-                            Fate::CrashSynced => Some(Fate::CrashSubmitted { retry: value }),
-                            Fate::CrashSubmitted { retry } => Some(Fate::CrashReserved { retry }),
-                            _ => None,
-                        };
-                        if let Some(g) = earlier {
-                            let mut c = config.clone();
-                            c.replicas[n].slots[k] = (e, g);
-                            out.push(Candidate {
-                                config: c,
-                                label: format!(
-                                    "{}: fault {} moved earlier to {}",
-                                    slot_name(n, e),
-                                    f.token(),
-                                    g.token()
-                                ),
-                            });
-                        }
-                    }
-                }
-            }
-            Dimension::Value => {
-                if config.epochs == 2 {
-                    for keep in 0..2_u8 {
-                        let mut c = config.clone();
-                        c.epochs = 1;
-                        for r in &mut c.replicas {
-                            let fate = r
-                                .slots
-                                .iter()
-                                .find(|(e, _)| *e == keep)
-                                .map_or(Fate::Idle, |s| s.1);
-                            *r = Replica {
-                                values: [r.values[usize::from(keep)], 0],
-                                slots: [(0, fate), (1, Fate::Idle)],
-                                epochs: 1,
-                            };
-                        }
-                        out.push(Candidate {
-                            config: c,
-                            label: format!("epoch {} dropped, epoch {keep} renamed 0", 1 - keep),
-                        });
-                    }
-                }
-                let used = config.values();
-                for &w in &used {
-                    for &u in &used {
-                        if w == u {
-                            continue;
-                        }
-                        let rename = |v: u8| if v == w { u } else { v };
-                        let mut c = config.clone();
-                        for r in &mut c.replicas {
-                            r.values = r.values.map(rename);
-                            for s in &mut r.slots {
-                                s.1 = match s.1 {
-                                    Fate::CrashReserved { retry } => Fate::CrashReserved {
-                                        retry: rename(retry),
-                                    },
-                                    Fate::CrashSubmitted { retry } => Fate::CrashSubmitted {
-                                        retry: rename(retry),
-                                    },
-                                    other => other,
-                                };
-                            }
-                        }
-                        out.push(Candidate {
-                            config: c,
-                            label: format!(
-                                "{} renamed {}: one value fewer",
-                                register::VALUES[usize::from(w)],
-                                register::VALUES[usize::from(u)]
-                            ),
-                        });
-                    }
-                }
-            }
-        }
-        out
-    }
-
-    fn candidates_cost(&self, config: &Config) -> u64 {
-        // At most 3 * 2 * 3 candidates per dimension, each built twice (its measure here
-        // and the engine's), each build linear in the acts.
-        64 * WORK_PER_ACT * (8 + config.acts())
-    }
-
-    fn admits(&self, _dimension: Dimension, config: &Config) -> Result<(), String> {
-        if let Err(v) = baseline::discipline(&config.correct_plan(), baseline::SCENARIO) {
-            return Err(format!(
-                "outside the campaign's declared bounds or the correct protocol: {v:?}"
-            ));
-        }
-        if let Some(v) = self.pinned {
-            if !config.values().contains(&v) {
-                return Err(format!(
-                    "the question names {}: a configuration that no longer uses it changes the checked property (INV-013)",
-                    register::VALUES[usize::from(v)]
-                ));
-            }
-        }
-        if config.values().len() < self.values_needed() {
-            return Err(format!(
-                "{} is a statement about two distinct values of one epoch: a one-value domain makes it vacuous, which changes what is checked (INV-013)",
-                self.target.name()
-            ));
-        }
-        Ok(())
-    }
-
-    fn run_cost(&self, config: &Config) -> u64 {
-        (1 + SEARCH_LOGS as u64) * WORK_PER_ACT * (8 + config.acts())
-    }
-
-    fn run(&mut self, config: &Config) -> Ran {
-        let plan = config.plan();
-        let built = config.built();
-        if let Some(why) = self.statically_holds(&built) {
-            self.decided_statically.push(config.clone());
-            return Ran::Holds(why);
-        }
-        let keys = op_keys(&plan, &built);
-        let fallback = u64::MAX / 2;
-        let guided = register::guided_log(&built, |a, i| {
-            self.rank.get(&keys[a][i]).copied().unwrap_or(fallback)
-        });
-        // A guided walk that parks every actor says nothing of the program's other
-        // schedules: the search below still runs.
-        let first = match guided {
-            None => "every actor parks under it".to_owned(),
-            Some(guided) => match self.fails(config, &built, &guided) {
-                Ok(()) => {
-                    self.found.insert(config.clone(), (guided, Found::Guided));
-                    return Ran::Fails;
-                }
-                Err(why) => why,
-            },
-        };
-        let (scope, logs) = baseline::logs_for(&built, SEARCH_LOGS, Self::seed(config));
-        let mut without_mechanism = 0;
-        for (k, log) in logs.iter().enumerate() {
-            match self.fails(config, &built, log) {
-                Ok(()) => {
-                    self.found
-                        .insert(config.clone(), (log.clone(), Found::Searched(k)));
-                    return Ran::Fails;
-                }
-                Err(why) if why.contains("mechanism") => without_mechanism += 1,
-                Err(_) => {}
-            }
-        }
-        match scope {
-            baseline::Scope::Exhaustive => Ran::Holds(format!(
-                "the original order: {first}; every one of the {} admissible schedules holds ({without_mechanism} fail without the mechanism)",
-                logs.len()
-            )),
-            baseline::Scope::Sampled { seed } => Ran::Inconclusive(
-                InconclusiveReason::ResourceExhausted,
-                format!(
-                    "the original order: {first}; none of {} schedules sampled from seed {seed} fails with the mechanism ({without_mechanism} fail without it); the search is not exhaustive",
-                    logs.len()
-                ),
-            ),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// the composition
-// ---------------------------------------------------------------------------
-
-/// A failing run's scenario reduction composed with the event reduction.
-struct Composed {
-    start: Config,
-    scenario: ScenarioReduction<Config>,
-    /// How the reduced configuration's run was found, and its case.
-    found: Found,
-    reduced: Case,
-    /// bn-2z08o's closure and deletion over atoms of the reduced run.
-    events: ProgramReduction,
-    /// Configurations decided without a schedule.
-    decided_statically: Vec<Config>,
-    /// The original run's length.
-    original_len: usize,
-    /// Binding executions the minimization spent: the scenario passes' schedules (two
-    /// each), the reduced run's case (two), and the event reduction's operation
-    /// boundaries (one per operation prefix) and replays (at most one each).
-    executions: u64,
-}
-
-impl Composed {
-    fn core_len(&self) -> usize {
-        self.events.reduction.core().expect("reduced").events.len()
-    }
-
-    fn ratio(&self) -> f64 {
-        self.core_len() as f64 / self.original_len as f64
-    }
-}
-
-fn compose_with(c: &Case, start: Config, pinned: Option<u8>, budget: Budget) -> Composed {
-    let mut s = RegisterScenario::new(c, &start);
-    s.pinned = pinned;
-    let scenario = reduce_scenario(&mut s, start.clone(), budget);
-    let config = scenario
-        .config()
-        .expect("the scenario reduction finished")
-        .clone();
-    let (log, found) = s.found[&config].clone();
-    let reduced = case_built(
-        format!("{} reduced", c.label),
-        config.built(),
-        config.epochs,
-        &log,
-        Some(c.target),
-        reach(config.epochs),
-    )
-    .expect("the reduced configuration fails");
-    let events = minimize_program(&reduced, Deletion::Atoms);
-    let executions = s.executions.get() + 2 + events.ops.ops.len() as u64 + events.replays;
-    Composed {
-        start,
-        scenario,
-        found,
-        reduced,
-        events,
-        decided_statically: s.decided_statically,
-        original_len: c.journal.len(),
-        executions,
-    }
-}
-
-fn compose(c: &Case, start: Config) -> Composed {
-    compose_with(c, start, None, SCENARIO_BUDGET)
-}
-
-/// M01's two witnesses, as `pr18_impl01_reduction.rs` reduces them, and their start
-/// configurations.
-fn agreement_start() -> Config {
-    Config::start(1, baseline::scenario_replicas())
-}
-
-fn acked_start() -> Config {
-    Config::start(
-        1,
-        baseline::one_epoch_sweep_replicas(baseline::SCENARIO)[81],
-    )
-}
-
-fn agreement_composed() -> &'static Composed {
-    static CELL: OnceLock<Composed> = OnceLock::new();
-    CELL.get_or_init(|| compose(agreement_witness(), agreement_start()))
-}
-
-fn acked_composed() -> &'static Composed {
-    static CELL: OnceLock<Composed> = OnceLock::new();
-    CELL.get_or_init(|| compose(acked_witness(), acked_start()))
-}
-
-/// Independent check of the scenario's minimality claims from its transcript and passes
-/// alone: the kept entries rebuild the version count; in the last round every claimed
-/// dimension's entries were tried against the final version, every one is a decided
-/// non-failure, and there are as many as its pass offered. Returns the dimensions whose
-/// claim the transcript licenses.
-fn scenario_licenses(r: &ScenarioReduction<Config>) -> Result<Vec<Dimension>, String> {
-    let ScenarioReduction::Reduced {
-        versions,
-        guarantees,
-        passes,
-        attempts,
-        ..
-    } = r
-    else {
-        return Err("not reduced".to_owned());
-    };
-    if attempts.omitted != 0 {
-        return Err(format!("{} attempts omitted", attempts.omitted));
-    }
-    let kept = attempts
-        .entries
-        .iter()
-        .filter(|a| a.dimension.is_some() && a.verdict == ConfigVerdict::Fails)
-        .count();
-    if kept + 1 != versions.len() {
-        return Err("the kept entries do not rebuild the versions".to_owned());
-    }
-    let last_round = passes.iter().map(|p| p.round).max().unwrap_or(0);
-    let final_version = (versions.len() - 1) as u64;
-    let mut out = Vec::new();
-    for d in Dimension::ALL {
-        let claimed = guarantees.contains(&d.minimality());
-        let record = passes
-            .iter()
-            .find(|p| p.round == last_round && p.dimension == d)
-            .ok_or("no last-round pass")?;
-        let entries: Vec<&ConfigAttempt> = attempts
-            .entries
-            .iter()
-            .filter(|a| a.dimension == Some(d) && a.round == last_round)
-            .collect();
-        let licensed = record.end == DimensionEnd::Done
-            && entries.len() as u64 == record.offered
-            && entries
-                .iter()
-                .all(|a| a.version == final_version && a.verdict.decided_non_failure());
-        if claimed && !licensed {
-            return Err(format!("{d:?}: the claim is not licensed"));
-        }
-        if licensed {
-            out.push(d);
-        }
-    }
-    Ok(out)
-}
+use scenario::*;
 
 // ---------------------------------------------------------------------------
 // rendering
@@ -965,6 +155,10 @@ fn config_attempt_line(a: &ConfigAttempt) -> String {
         ConfigVerdict::Inconclusive(r) => format!("inconclusive({r:?})"),
         ConfigVerdict::OutOfScope => "out-of-scope (not run)".to_owned(),
         ConfigVerdict::NotSmaller => "not-smaller".to_owned(),
+        ConfigVerdict::MechanismLost { why, decided } => format!(
+            "mechanism-lost({why:?}, {})",
+            if decided { "decided" } else { "undecided" }
+        ),
     };
     let memo = a
         .memo_of
@@ -985,6 +179,7 @@ fn config_attempt_line(a: &ConfigAttempt) -> String {
 fn scenario_lines(r: &ScenarioReduction<Config>) -> Vec<String> {
     let (passes, spent) = match r {
         ScenarioReduction::Reduced { passes, spent, .. }
+        | ScenarioReduction::Rejected { passes, spent, .. }
         | ScenarioReduction::Inconclusive { passes, spent, .. } => (passes, spent),
         ScenarioReduction::Refused { why, .. } => return vec![format!("refused: {why:?}")],
     };
@@ -992,7 +187,7 @@ fn scenario_lines(r: &ScenarioReduction<Config>) -> Vec<String> {
         .iter()
         .map(|p| {
             format!(
-                "round {} pass {:?}: measure {:?} -> {:?}; {} offered, {} run, {} kept, {} held, {} not a run, {} out of scope, {} inconclusive, {} memo; {:?}",
+                "round {} pass {:?}: measure {:?} -> {:?}; {} offered, {} run, {} kept, {} held, {} not a run, {} out of scope, {} inconclusive, {} memo, {} mechanism lost; {:?}",
                 p.round,
                 p.dimension,
                 p.before,
@@ -1005,6 +200,7 @@ fn scenario_lines(r: &ScenarioReduction<Config>) -> Vec<String> {
                 p.out_of_scope,
                 p.inconclusive,
                 p.memo,
+                p.mechanism_lost,
                 p.end
             )
         })
@@ -1079,11 +275,12 @@ fn composed_section(id: &str, c: &Case, k: &Composed) -> String {
     let st = story(r, &core.events);
     let _ = writeln!(
         s,
-        "  core: {} events: {:.1}% of the original run, {:.1}% of the reduced run; mechanism kept: {}; campaign checker on the core's re-execution reports {}: {}; atom minimality from the transcript alone: {:?}",
+        "  core: {} events: {:.1}% of the original run, {:.1}% of the reduced run; mechanism check (bn-5kmuf): preserved, the original failure's mechanism embedded at story positions {:?} of {}; campaign checker on the core's re-execution reports {}: {}; atom minimality from the transcript alone: {:?}",
         core.events.len(),
         100.0 * k.ratio(),
         100.0 * core.events.len() as f64 / r.journal.len() as f64,
-        keeps_mechanism(&st, r.target),
+        core.record().embedding,
+        core.record().story,
         r.target.name(),
         campaign_finds_target(r, &k.events.ops, &core.events),
         transcript_licenses(&k.events.order, core, red.attempts().expect("attempts"))
@@ -1117,6 +314,10 @@ struct CorpusFacts {
     guarantees: BTreeMap<ScenarioGuarantee, usize>,
     licensed: usize,
     mechanism: usize,
+    /// Runs whose scenario reduction rejected a candidate by the mechanism check, and how
+    /// many candidates (bn-5kmuf).
+    lost_runs: usize,
+    lost_candidates: u64,
     campaign: usize,
     atom_minimal: usize,
     start_log_is_original: usize,
@@ -1147,6 +348,8 @@ fn corpus_facts() -> &'static CorpusFacts {
             guarantees: BTreeMap::new(),
             licensed: 0,
             mechanism: 0,
+            lost_runs: 0,
+            lost_candidates: 0,
             campaign: 0,
             atom_minimal: 0,
             start_log_is_original: 0,
@@ -1184,9 +387,25 @@ fn corpus_facts() -> &'static CorpusFacts {
             if scenario_licenses(&k.scenario).is_ok() {
                 f.licensed += 1;
             }
+            // A composed core is returned only when the validator preserved it
+            // (bn-5kmuf): `core()` is the validated core, so each one counts.
             let core = k.events.reduction.core().expect("reduced");
-            if keeps_mechanism(&story(&k.reduced, &core.events), c.target) {
-                f.mechanism += 1;
+            f.mechanism += 1;
+            let lost: u64 = k
+                .scenario
+                .checks()
+                .expect("checks")
+                .iter()
+                .filter(|e| {
+                    matches!(
+                        e.outcome,
+                        continuum_debugger::mechanism::Outcome::Rejected(..)
+                    )
+                })
+                .count() as u64;
+            if lost > 0 {
+                f.lost_runs += 1;
+                f.lost_candidates += lost;
             }
             if campaign_finds_target(&k.reduced, &k.events.ops, &core.events) {
                 f.campaign += 1;
@@ -1285,8 +504,13 @@ fn corpus_section() -> String {
     }
     let _ = writeln!(
         s,
-        "composed cores: {} of {} keep the mechanism; the campaign's checker reports the target on {} re-executed cores; {} are atom-minimal",
+        "composed cores: {} of {} validated against the original failure's mechanism (bn-5kmuf); the campaign's checker reports the target on {} re-executed cores; {} are atom-minimal",
         f.mechanism, f.runs, f.campaign, f.atom_minimal
+    );
+    let _ = writeln!(
+        s,
+        "candidates whose failure reproduced through another mechanism, rejected by the mechanism check and never kept: {} on {} runs",
+        f.lost_candidates, f.lost_runs
     );
     let _ = writeln!(
         s,
@@ -1437,7 +661,7 @@ fn static_facts() -> (usize, usize, usize) {
         for log in &logs {
             schedules += 1;
             assert!(
-                s.fails(cfg, &built, log).is_err(),
+                s.fails(cfg, &built, log) == Judged::Holds,
                 "{}: a schedule-free decision holds on every schedule",
                 cfg.render()
             );
@@ -1592,7 +816,7 @@ fn the_agreement_scenario_is_already_owner_fault_and_value_minimal() {
         panic!("reduced: {:?}", k.scenario);
     };
     assert_eq!(versions.len(), 1, "nothing kept");
-    assert_eq!(*config, k.start);
+    assert_eq!(*config.subject(), k.start);
     for g in [
         ScenarioGuarantee::Reproduces,
         ScenarioGuarantee::OwnerMinimal,
@@ -1607,11 +831,9 @@ fn the_agreement_scenario_is_already_owner_fault_and_value_minimal() {
         k.events.reduction.core().expect("core").events,
         before.events
     );
+    // The composed core is validated against the original failure's mechanism.
     let core = k.events.reduction.core().expect("core");
-    assert!(keeps_mechanism(
-        &story(&k.reduced, &core.events),
-        Target::Agreement
-    ));
+    assert_eq!(core.record().mechanism, [5, 4, 5]);
 }
 
 /// M01's AckedNotDurable witness loses owners, faults or values it does not need, and the
@@ -1631,10 +853,7 @@ fn the_acked_not_durable_scenario_reduces_and_keeps_the_mechanism() {
     assert!(guarantees.contains(&ScenarioGuarantee::Reproduces));
     assert!(scenario_licenses(&k.scenario).is_ok());
     let core = k.events.reduction.core().expect("core");
-    assert!(keeps_mechanism(
-        &story(&k.reduced, &core.events),
-        Target::AckedNotDurable
-    ));
+    assert_eq!(core.record().mechanism, [3, 2, 4]);
     assert!(campaign_finds_target(
         &k.reduced,
         &k.events.ops,
@@ -1869,8 +1088,8 @@ fn an_exhausted_budget_is_inconclusive_with_the_last_failing_configuration() {
             assert!(best.is_none());
         } else {
             let best = best.as_ref().expect("the start failed");
-            assert_eq!(versions.last(), Some(best));
-            assert_eq!(s.run(best), Ran::Fails);
+            assert_eq!(versions.last(), Some(best.subject()));
+            assert_eq!(s.run(best.subject()), Ran::Fails);
         }
     }
     let mut s = RegisterScenario::new(c, &start);

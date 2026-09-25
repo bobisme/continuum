@@ -14,6 +14,9 @@ use continuum_asupersync::causal::{self, Access, Footprint, Key, Renaming, Restr
 use continuum_asupersync::choice::ChoiceLog;
 use continuum_asupersync::journal::Journal;
 use continuum_asupersync::lift::{LiftVerdict, lift};
+use continuum_debugger::mechanism::{
+    Edge, Guard, Mechanism, Order, Story, StoryReplay, Undecided, Validator,
+};
 use continuum_debugger::reduce::{
     self, Attempts, Budget, CausalOrder, Deletion, NotReplayable, Pass, Reduction, Replay,
     Replayed, Trial, Verdict,
@@ -310,6 +313,13 @@ pub fn ops_of(o: &Operations, events: &[usize]) -> Vec<(usize, usize)> {
         .collect()
 }
 
+/// The durable register's reachable states, by epochs, computed once each.
+pub fn reachable(epochs: u8) -> &'static BTreeSet<Raw> {
+    static CELL: OnceLock<[BTreeSet<Raw>; 2]> = OnceLock::new();
+    &CELL.get_or_init(|| [register::reachable(1), register::reachable(2)])
+        [usize::from(epochs.clamp(1, 2) - 1)]
+}
+
 /// The differential: the campaign's own checker (`register_baseline::run_one`: the
 /// binding, the lift, the A7 model, the projection and the scenario properties), run on
 /// the program truncated to `core`'s operations, reports `c`'s target finding. Apart
@@ -320,7 +330,7 @@ pub fn campaign_finds_target(c: &Case, o: &Operations, core: &[usize]) -> bool {
     };
     let mut built = c.built.clone();
     built.programs = programs;
-    let report = baseline::run_one(&built, c.epochs, &log, &register::reachable(c.epochs));
+    let report = baseline::run_one(&built, c.epochs, &log, reachable(c.epochs));
     report.findings.iter().any(|f| {
         matches!(
             (f, c.target),
@@ -451,13 +461,36 @@ pub struct ProgramOracle<'a> {
 impl Replay for ProgramOracle<'_> {
     fn replay(&mut self, kept: &[usize]) -> Replayed {
         self.replays += 1;
-        let o = self.ops;
+        let r = match program_restriction(self.case, self.ops, kept) {
+            Ok(r) => r,
+            Err(refused) => return refused,
+        };
+        match replay_restricted(&r, &self.case.built.roles, self.case.target) {
+            Replayed::Fails { witnesses } => Replayed::Fails {
+                witnesses: witnesses.into_iter().map(|w| kept[w]).collect(),
+            },
+            other => other,
+        }
+    }
+}
+
+/// The program-level replay's run check (bn-2z08o), shared by [`ProgramOracle`] and
+/// [`ProgramValidator`]: `kept` holds whole operation groups, its operations are a prefix
+/// of each actor's program, and the program truncated to them, re-executed through the
+/// binding in the run's order, emits exactly `kept`'s sub-journal. That sub-journal, or
+/// the refusal as a replay verdict.
+pub fn program_restriction(
+    c: &Case,
+    o: &Operations,
+    kept: &[usize],
+) -> Result<Restriction, Replayed> {
+    let refused: Replayed = 'check: {
         let mut held: BTreeMap<usize, usize> = BTreeMap::new();
         for &e in kept {
             let Some(&g) = o.group_of.get(e) else {
                 // The reduction passed an index outside the trace: its contract, not a
                 // judgement of the program.
-                return Replayed::NotReplayable(NotReplayable::Inconclusive(
+                break 'check Replayed::NotReplayable(NotReplayable::Inconclusive(
                     InconclusiveReason::EngineError,
                     format!("event {e} is not in the journal"),
                 ));
@@ -467,14 +500,14 @@ impl Replay for ProgramOracle<'_> {
         for (&g, &n) in &held {
             let (a, b) = o.groups[g].events;
             if n != b - a {
-                return Replayed::NotReplayable(NotReplayable::Nonconforming(format!(
+                break 'check Replayed::NotReplayable(NotReplayable::Nonconforming(format!(
                     "operation group {g} is held in part ({n} of {} events)",
                     b - a
                 )));
             }
         }
         let ops = ops_of(o, kept);
-        let Some(rerun) = rerun(&self.case.built.programs, &ops) else {
+        let Some(rerun) = rerun(&c.built.programs, &ops) else {
             let mut next = BTreeMap::new();
             let (actor, index) = ops
                 .iter()
@@ -486,14 +519,14 @@ impl Replay for ProgramOracle<'_> {
                     skip
                 })
                 .expect("a skipped operation");
-            return Replayed::NotReplayable(NotReplayable::Nonconforming(format!(
+            break 'check Replayed::NotReplayable(NotReplayable::Nonconforming(format!(
                 "not a run of the program: actor {actor} runs operation {index} without the ones before it"
             )));
         };
         let journal = match rerun {
             Ok(j) => j,
             Err(refusal) => {
-                return Replayed::NotReplayable(match refusal.inconclusive_reason() {
+                break 'check Replayed::NotReplayable(match refusal.inconclusive_reason() {
                     Some(reason) => {
                         NotReplayable::Inconclusive(reason, format!("binding: {refusal}"))
                     }
@@ -501,16 +534,16 @@ impl Replay for ProgramOracle<'_> {
                 });
             }
         };
-        let r = match causal::restrict(&self.case.journal, kept) {
+        let r = match causal::restrict(&c.journal, kept) {
             Ok(r) => r,
             Err(e @ causal::CausalError::TooManyEvents) => {
-                return Replayed::NotReplayable(NotReplayable::Inconclusive(
+                break 'check Replayed::NotReplayable(NotReplayable::Inconclusive(
                     InconclusiveReason::ResourceExhausted,
                     format!("restriction: {e:?}"),
                 ));
             }
             Err(e) => {
-                return Replayed::NotReplayable(NotReplayable::Inconclusive(
+                break 'check Replayed::NotReplayable(NotReplayable::Inconclusive(
                     InconclusiveReason::EngineError,
                     format!("restriction: {e:?}"),
                 ));
@@ -519,44 +552,56 @@ impl Replay for ProgramOracle<'_> {
         if let Some(at) = (0..journal.len().max(r.journal.len()))
             .find(|&i| journal.events().get(i) != r.journal.events().get(i))
         {
-            return Replayed::NotReplayable(NotReplayable::Nonconforming(format!(
+            break 'check Replayed::NotReplayable(NotReplayable::Nonconforming(format!(
                 "the program's re-execution differs from the candidate at event {at}"
             )));
         }
-        match replay_restricted(&r, &self.case.built.roles, self.case.target) {
-            Replayed::Fails { witnesses } => Replayed::Fails {
-                witnesses: witnesses.into_iter().map(|w| kept[w]).collect(),
-            },
-            other => other,
-        }
-    }
+        return Ok(r);
+    };
+    Err(refused)
 }
 
 /// A reduction under the program-level replay: the run's operations, the program's
-/// order, the reduction and how many replays it ran.
+/// order, the reduction and how many replays it ran, and how many validation replays.
 pub struct ProgramReduction {
     pub ops: Operations,
     pub order: CausalOrder,
     pub reduction: Reduction,
     pub replays: u64,
+    pub validations: u64,
 }
 
-/// Closure, then deletion with candidates from `mode`, under the program-level replay.
+/// Closure, then deletion with candidates from `mode`, under the program-level replay,
+/// validated against the mechanism derived from `c`.
 pub fn minimize_program(c: &Case, mode: Deletion) -> ProgramReduction {
-    let ops = operations_of(c);
+    minimize_program_with(c, mode, None)
+}
+
+/// [`minimize_program`], validated against `mechanism` when given (a composed reduction
+/// passes the original failure's mechanism, renamed), else against `c`'s own.
+pub fn minimize_program_with(
+    c: &Case,
+    mode: Deletion,
+    mechanism: Option<Result<Mechanism<String>, Undecided>>,
+) -> ProgramReduction {
+    let ops = operations(c).clone();
     let order = program_order(c, &ops);
     let mut oracle = ProgramOracle {
         case: c,
         ops: &ops,
         replays: 0,
     };
-    let reduction = reduce::minimize(&order, mode, &mut oracle, BUDGET);
+    let mechanism = mechanism.unwrap_or_else(|| derive_mechanism(c));
+    let mut validator = ProgramValidator::with(c, &ops, mechanism);
+    let reduction = reduce::minimize(&order, mode, &mut oracle, &mut validator, BUDGET);
     let replays = oracle.replays;
+    let validations = validator.replays;
     ProgramReduction {
         ops,
         order,
         reduction,
         replays,
+        validations,
     }
 }
 
@@ -571,14 +616,54 @@ pub fn acked_program() -> &'static ProgramReduction {
     CELL.get_or_init(|| minimize_program(acked_witness(), Deletion::Atoms))
 }
 
-/// Whether a core's causal story keeps M01's mechanism (`replicated_register.md`'s causal
-/// core of ack-before-sync): a value is acknowledged over volatile bytes, that is, two
-/// distinct replicas submitted it before its acknowledgement and fewer than two of them
-/// synced it by then. Under `Agreement`, also: one of those unsynced submissions is lost
-/// to a crash before that replica submits again, and the other value is acknowledged
-/// after the loss. The first value's acknowledgement may come before or after the loss:
-/// a coordinator can acknowledge after it, over a confirmation the loss made false.
-pub fn keeps_mechanism(st: &[String], target: Target) -> bool {
+/// One way a causal story shows M01's mechanism (`replicated_register.md`'s causal core
+/// of ack-before-sync): the acknowledgement of a value over volatile bytes, the two
+/// submissions it rests on, and under `Agreement` the loss of one of them and the later
+/// acknowledgement of another value. Positions are indices into the story.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chain {
+    /// The acknowledgement over volatile bytes.
+    pub ack: usize,
+    /// The two submissions of its value it rests on. At least one is volatile.
+    pub submits: Vec<Submission>,
+    /// Under `Agreement`: the node whose volatile submission is lost, the `Lose`, and the
+    /// acknowledgement of another value after it.
+    pub loss: Option<(String, usize, usize)>,
+}
+
+/// One submission a [`Chain`] rests on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Submission {
+    /// The replica.
+    pub node: String,
+    /// The `Submit`'s position: the replica's last submission of the value before the
+    /// acknowledgement.
+    pub at: usize,
+    /// Whether it was volatile: not synced before the acknowledgement, or before its loss
+    /// (a `Sync` after the loss is another write's).
+    pub volatile: bool,
+    /// The value submitted.
+    pub value: String,
+}
+
+/// Every [`Chain`] of `st` for `target`, in a fixed order: by acknowledgement, then lost
+/// node, then later acknowledgement. `prefer(k, i)` ranks the submissions a chain picks:
+/// volatile ones first, then those `prefer` holds of (the derivation passes "happens
+/// before the acknowledgement"), then by node.
+///
+/// Every operation of a chain is in the acknowledgement's epoch (bn-5kmuf, cr-2lnu3c
+/// th-2q3qcy). The durable register keeps one slot per replica and epoch
+/// (`register::durable_of`, `Target::offending`, the observer's slot keys), so a `Sync`,
+/// `Lose` or `Submit` of another epoch writes another slot and says nothing about this
+/// one: cross-epoch durability does not count. A label with no epoch never counts.
+///
+/// A value is acknowledged over volatile bytes at `i` when two distinct replicas submitted
+/// it in its epoch before `i` and fewer than two of those submissions were synced by then. Under
+/// `Agreement`, also: one of those unsynced submissions is lost to a crash before that
+/// replica submits again, and the other value is acknowledged after the loss. The first
+/// value's acknowledgement may come before or after the loss: a coordinator can
+/// acknowledge after it, over a confirmation the loss made false.
+pub fn chains(st: &[String], target: Target, prefer: &dyn Fn(usize, usize) -> bool) -> Vec<Chain> {
     let field = |label: &str, key: &str| -> Option<String> {
         let inner = label.split_once('(')?.1.trim_end_matches(')');
         inner
@@ -586,19 +671,25 @@ pub fn keeps_mechanism(st: &[String], target: Target) -> bool {
             .find_map(|p| p.strip_prefix(key).map(str::to_owned))
     };
     let kind = |label: &str| label.split_once('(').map_or("", |(k, _)| k).to_owned();
-    let acks: Vec<(usize, String)> = st
+    // Each acknowledgement with its value and epoch; one with no epoch is no ack here.
+    let acks: Vec<(usize, String, String)> = st
         .iter()
         .enumerate()
         .filter(|(_, l)| l.starts_with("Ack("))
-        .filter_map(|(i, l)| Some((i, field(l, "value=")?)))
+        .filter_map(|(i, l)| Some((i, field(l, "value=")?, field(l, "epoch=")?)))
         .collect();
+    let in_epoch = |l: &str, epoch: &str| field(l, "epoch=").as_deref() == Some(epoch);
     // The replicas that submitted `value` before `i` (their confirmations are sent), each
     // with where, and whether that submission was synced before `i` and before any loss.
-    let submitted = |i: usize, value: &str| -> BTreeMap<String, (usize, bool)> {
+    // Each also with the first `Lose` of it before `i`, if any.
+    let submitted = |i: usize, value: &str, epoch: &str| -> BTreeMap<String, (usize, bool)> {
         let mut out: BTreeMap<String, (usize, bool)> = BTreeMap::new();
         let mut lost: BTreeSet<String> = BTreeSet::new();
         for (k, l) in st[..i].iter().enumerate() {
             let Some(n) = field(l, "n=") else { continue };
+            if !in_epoch(l, epoch) {
+                continue;
+            }
             let of_value = field(l, "value=").as_deref() == Some(value);
             match kind(l).as_str() {
                 "Submit" if of_value => {
@@ -618,38 +709,484 @@ pub fn keeps_mechanism(st: &[String], target: Target) -> bool {
         }
         out
     };
-    acks.iter().any(|(i, value)| {
-        let by = submitted(*i, value);
+    // The two submissions a chain rests on: `must` first when given, then by rank.
+    let pick =
+        |i: usize, value: &str, by: &BTreeMap<String, (usize, bool)>, must: Option<&String>| {
+            let submission = |n: &String, k: usize, synced: bool| Submission {
+                node: n.clone(),
+                at: k,
+                volatile: !synced,
+                value: value.to_owned(),
+            };
+            let mut ranked: Vec<Submission> = by
+                .iter()
+                .filter(|(n, _)| Some(*n) != must)
+                .map(|(n, &(k, synced))| submission(n, k, synced))
+                .collect();
+            ranked.sort_by_key(|s| (!s.volatile, !prefer(s.at, i), s.node.clone()));
+            let mut out: Vec<Submission> = must
+                .map(|n| {
+                    let (k, synced) = by[n];
+                    vec![submission(n, k, synced)]
+                })
+                .unwrap_or_default();
+            out.extend(ranked);
+            out.truncate(2);
+            out
+        };
+    let mut out = Vec::new();
+    for (i, value, epoch) in &acks {
+        let by = submitted(*i, value, epoch);
         let volatile: Vec<(&String, usize)> = by
             .iter()
             .filter(|(_, (_, synced))| !synced)
             .map(|(n, (k, _))| (n, *k))
             .collect();
         let over_volatile = by.len() >= 2 && by.len() - volatile.len() < 2;
+        if !over_volatile {
+            continue;
+        }
         match target {
-            Target::AckedNotDurable => over_volatile,
+            Target::AckedNotDurable => out.push(Chain {
+                ack: *i,
+                submits: pick(*i, value, &by, None),
+                loss: None,
+            }),
             Target::Agreement => {
-                // A volatile submission of the acknowledged value, lost before the
-                // replica submits again, and an acknowledgement of another value after
-                // that loss.
-                volatile.iter().any(|&(n, k)| {
+                // A volatile submission of the acknowledged value, lost before the replica
+                // submits again, and an acknowledgement of another value after that loss.
+                for &(n, k) in &volatile {
                     let lost = st[k + 1..]
                         .iter()
                         .take_while(|l| {
-                            !(kind(l) == "Submit" && field(l, "n=").as_ref() == Some(n))
+                            !(kind(l) == "Submit"
+                                && field(l, "n=").as_ref() == Some(n)
+                                && in_epoch(l, epoch))
                         })
                         .position(|l| {
                             kind(l) == "Lose"
                                 && field(l, "n=").as_ref() == Some(n)
                                 && field(l, "value=").as_deref() == Some(value.as_str())
+                                && in_epoch(l, epoch)
                         })
                         .map(|p| k + 1 + p);
-                    over_volatile
-                        && lost.is_some_and(|at| acks.iter().any(|(j, w)| *j > at && w != value))
-                })
+                    let Some(at) = lost else { continue };
+                    // Agreement is two values acknowledged for one epoch.
+                    for (j, w, f) in &acks {
+                        if *j > at && w != value && f == epoch {
+                            out.push(Chain {
+                                ack: *i,
+                                submits: pick(*i, value, &by, Some(n)),
+                                loss: Some((n.clone(), at, *j)),
+                            });
+                        }
+                    }
+                }
             }
         }
-    })
+    }
+    out
+}
+
+/// Whether a core's causal story keeps M01's mechanism in some form: it has a
+/// [`Chain`]. The existence form, which the scenario's candidate search reads
+/// (bn-25z9o); the validator checks the original failure's own chain
+/// ([`derive_mechanism`], bn-5kmuf).
+pub fn keeps_mechanism(st: &[String], target: Target) -> bool {
+    !chains(st, target, &|_, _| false).is_empty()
+}
+
+// ---------------------------------------------------------------------------
+// the mechanism validator (bn-5kmuf)
+// ---------------------------------------------------------------------------
+
+/// A story's labels, each step's journal position, and each step's happens-before
+/// predecessors among the steps.
+pub type RegisterStory = (Vec<String>, Vec<usize>, Vec<Vec<usize>>);
+
+/// The durable-register story of `journal` under `roles`: each projected step that is
+/// not a stutter, its label and its journal position, and its immediate happens-before
+/// predecessors among the story's steps under the journal's own causal order (the
+/// footprint dependence with the register observer's footprints for `target`,
+/// [`observer_footprints`]). Computed from the journal alone.
+pub fn register_story(
+    journal: &Journal,
+    roles: &Roles,
+    target: Target,
+) -> Result<RegisterStory, String> {
+    let steps = register::observe(roles, journal).map_err(|e| format!("projection: {e:?}"))?;
+    let (labels, seqs): (Vec<String>, Vec<usize>) = steps
+        .into_iter()
+        .filter_map(|s| match s.expect {
+            Expect::Stutter => None,
+            Expect::Step(l) | Expect::StepPrefix(l) => Some((l, s.seq as usize)),
+        })
+        .unzip();
+    let observer = observer_footprints(journal, roles, target);
+    let preds = causal::predecessors_with(journal, CAUSAL_WORK, &observer)
+        .map_err(|e| format!("causal order: {e:?}"))?;
+    let order = CausalOrder::from_predecessors(preds).map_err(|e| format!("{e:?}"))?;
+    let at: BTreeMap<usize, usize> = seqs.iter().enumerate().map(|(k, &q)| (q, k)).collect();
+    let story_preds = seqs
+        .iter()
+        .enumerate()
+        .map(|(k, &q)| {
+            order
+                .down_closure(&[q])
+                .into_iter()
+                .filter_map(|p| at.get(&p).copied())
+                .filter(|&p| p < k)
+                .collect()
+        })
+        .collect();
+    Ok((labels, seqs, story_preds))
+}
+
+/// The guards' labels, each in one epoch: the acknowledgement's. A label of another
+/// epoch writes another slot, so it neither breaks nor ends a guard (bn-5kmuf,
+/// th-2q3qcy).
+fn syncs_of(n: &str, epoch: &str) -> Vec<String> {
+    vec![format!("Sync(n={n},epoch={epoch})")]
+}
+
+fn resubmits_of(n: &str, epoch: &str, value: &str) -> Vec<String> {
+    vec![format!("Submit(n={n},epoch={epoch},value={value})")]
+}
+
+fn loses_of(n: &str, epoch: &str, value: &str) -> Vec<String> {
+    vec![format!("Lose(n={n},epoch={epoch},value={value})")]
+}
+
+fn submits_of(n: &str, epoch: &str) -> Vec<String> {
+    register::VALUES
+        .iter()
+        .map(|v| format!("Submit(n={n},epoch={epoch},value={v})"))
+        .collect()
+}
+
+/// The mechanism of `chain` in the story `labels` whose happens-before relation is
+/// `hb`: the acknowledgement, its two submissions, and under `Agreement` the loss and the
+/// later acknowledgement. Edges: each submission before the acknowledgement; the lost
+/// submission before its `Lose`, and the `Lose` before the later acknowledgement. Each
+/// edge is `HappensBefore` when `hb` orders it, `Precedes` otherwise. Guards: no later
+/// `Submit` of the value by a submission's node before the acknowledgement (the chain's
+/// submission is the node's last); no `Sync`
+/// of a volatile submission's node between it and the acknowledgement, until a `Lose` of
+/// that value by that node (a `Sync` after the loss is another write's); no `Submit` of
+/// the lost node between its submission and the `Lose`.
+pub fn chain_mechanism(
+    labels: &[String],
+    chain: &Chain,
+    hb: &dyn Fn(usize, usize) -> bool,
+) -> Result<Mechanism<String>, String> {
+    // Every step is in the acknowledgement's epoch; a label with no epoch, or another,
+    // is no mechanism this derivation names (fail closed).
+    let epoch_of = |l: &str| {
+        l.split_once("epoch=")
+            .map(|(_, r)| r.split([',', ')']).next().unwrap_or("").to_owned())
+    };
+    let epoch = epoch_of(&labels[chain.ack]).ok_or("the acknowledgement names no epoch")?;
+    let mut named: Vec<usize> = vec![chain.ack];
+    named.extend(chain.submits.iter().map(|s| s.at));
+    if let Some((_, lose, later)) = &chain.loss {
+        named.extend([*lose, *later]);
+    }
+    if let Some(&p) = named
+        .iter()
+        .find(|&&p| epoch_of(&labels[p]).as_deref() != Some(epoch.as_str()))
+    {
+        return Err(format!(
+            "step {} is not in the acknowledgement's epoch {epoch}",
+            labels[p]
+        ));
+    }
+    let mut steps = vec![labels[chain.ack].clone()];
+    let mut pos = vec![chain.ack];
+    let mut edges: Vec<(usize, usize)> = Vec::new();
+    let mut guards = Vec::new();
+    let mut lost_step = None;
+    for sub in &chain.submits {
+        let s = steps.len();
+        steps.push(labels[sub.at].clone());
+        pos.push(sub.at);
+        edges.push((s, 0));
+        if chain.loss.as_ref().is_some_and(|(n, ..)| *n == sub.node) {
+            lost_step = Some(s);
+        }
+        // The chain's submission is the node's last of the value before the
+        // acknowledgement: no later one in between.
+        guards.push(Guard {
+            after: s,
+            before: 0,
+            forbidden: resubmits_of(&sub.node, &epoch, &sub.value),
+            until: Vec::new(),
+        });
+        if sub.volatile {
+            guards.push(Guard {
+                after: s,
+                before: 0,
+                forbidden: syncs_of(&sub.node, &epoch),
+                until: loses_of(&sub.node, &epoch, &sub.value),
+            });
+        }
+    }
+    if let Some((n, lose, later)) = &chain.loss {
+        let lost = lost_step.ok_or("the lost node's submission is not in the chain")?;
+        let l = steps.len();
+        steps.push(labels[*lose].clone());
+        pos.push(*lose);
+        steps.push(labels[*later].clone());
+        pos.push(*later);
+        edges.push((lost, l));
+        edges.push((l, l + 1));
+        guards.push(Guard {
+            after: lost,
+            before: l,
+            forbidden: submits_of(n, &epoch),
+            until: Vec::new(),
+        });
+    }
+    let edges = edges
+        .into_iter()
+        .map(|(from, to)| Edge {
+            from,
+            to,
+            order: if hb(pos[from], pos[to]) {
+                Order::HappensBefore
+            } else {
+                Order::Precedes
+            },
+        })
+        .collect();
+    Mechanism::new(steps, edges, guards).map_err(|e| format!("{e:?}"))
+}
+
+/// The mechanism of `c`'s failure, derived from the original run (bn-5kmuf). The run's
+/// story and happens-before order ([`register_story`]); the failure's witnesses, from
+/// the replay of the whole run ([`replay_restricted`]); and the first [`Chain`] whose
+/// acknowledgements are witnesses (under `Agreement`, both of them), with submissions
+/// ranked by whether they happen before the acknowledgement. A run with no such chain
+/// has no mechanism this derivation can name: an INV-008 `Unsupported`, never a guess.
+pub fn derive_mechanism(c: &Case) -> Result<Mechanism<String>, Undecided> {
+    let undecided = |reason, detail: String| Undecided { reason, detail };
+    let (labels, seqs, preds) = register_story(&c.journal, &c.built.roles, c.target)
+        .map_err(|e| undecided(InconclusiveReason::EngineError, e))?;
+    let all: Vec<usize> = (0..c.journal.len()).collect();
+    let r = causal::restrict(&c.journal, &all)
+        .map_err(|e| undecided(InconclusiveReason::EngineError, format!("{e:?}")))?;
+    let Replayed::Fails { witnesses } = replay_restricted(&r, &c.built.roles, c.target) else {
+        return Err(undecided(
+            InconclusiveReason::EngineError,
+            "the original run does not replay to its failure".to_owned(),
+        ));
+    };
+    let witness_acks: BTreeSet<usize> = seqs
+        .iter()
+        .enumerate()
+        .filter(|&(k, q)| witnesses.contains(q) && labels[k].starts_with("Ack("))
+        .map(|(k, _)| k)
+        .collect();
+    let order = CausalOrder::from_predecessors(preds)
+        .map_err(|e| undecided(InconclusiveReason::EngineError, format!("{e:?}")))?;
+    let past: Vec<Vec<usize>> = (0..labels.len())
+        .map(|k| order.down_closure(&[k]))
+        .collect();
+    let hb = |a: usize, b: usize| a != b && past[b].binary_search(&a).is_ok();
+    let chain = chains(&labels, c.target, &hb)
+        .into_iter()
+        .find(|ch| {
+            witness_acks.contains(&ch.ack)
+                && ch
+                    .loss
+                    .as_ref()
+                    .is_none_or(|(_, _, later)| witness_acks.contains(later))
+        })
+        .ok_or_else(|| {
+            undecided(
+                InconclusiveReason::Unsupported,
+                format!(
+                    "no chain of M01's mechanism among the witnesses of {}",
+                    c.target.name()
+                ),
+            )
+        })?;
+    chain_mechanism(&labels, &chain, &hb).map_err(|e| undecided(InconclusiveReason::EngineError, e))
+}
+
+/// A rendering of a mechanism: its steps, edges and guards.
+pub fn render_mechanism(m: &Mechanism<String>) -> String {
+    let edges: Vec<String> = m
+        .edges()
+        .iter()
+        .map(|e| {
+            format!(
+                "{}{}{}",
+                e.from,
+                match e.order {
+                    Order::HappensBefore => " hb ",
+                    Order::Precedes => " before ",
+                },
+                e.to
+            )
+        })
+        .collect();
+    let guards: Vec<String> = m
+        .guards()
+        .iter()
+        .map(|g| {
+            let kinds: BTreeSet<&str> = g
+                .forbidden
+                .iter()
+                .map(|l| l.split_once('(').map_or(l.as_str(), |(k, _)| k))
+                .collect();
+            let node = g
+                .forbidden
+                .first()
+                .and_then(|l| l.split_once("n=").map(|(_, r)| &r[..1]))
+                .unwrap_or("?");
+            format!(
+                "no {} of {node} between {} and {}",
+                kinds.into_iter().collect::<Vec<_>>().join("/"),
+                g.after,
+                g.before
+            )
+        })
+        .collect();
+    let steps: Vec<String> = m
+        .steps()
+        .iter()
+        .enumerate()
+        .map(|(k, l)| format!("{k}={l}"))
+        .collect();
+    format!(
+        "steps [{}]; edges [{}]; guards [{}]",
+        steps.join(" "),
+        edges.join(", "),
+        guards.join("; ")
+    )
+}
+
+/// The register's mechanism validator for event reductions (bn-5kmuf): it replays a core
+/// through the program, apart from the reduction's oracle, whatever that oracle was. The
+/// core must be a run of the program ([`program_restriction`]: whole operation groups, a
+/// prefix of each actor, re-executed to exactly the core's journal), the campaign's own
+/// checker must report the target on the re-execution ([`campaign_finds_target`]), and
+/// the story of the re-executed journal, with its own causal order, is what the
+/// mechanism is embedded in.
+pub struct ProgramValidator<'a> {
+    pub case: &'a Case,
+    pub ops: &'a Operations,
+    pub mechanism: Result<Mechanism<String>, Undecided>,
+    /// Validation replays run.
+    pub replays: u64,
+}
+
+impl<'a> ProgramValidator<'a> {
+    /// The validator of `c`'s failure, with the mechanism derived from `c`.
+    pub fn new(c: &'a Case, ops: &'a Operations) -> Self {
+        Self::with(c, ops, derive_mechanism(c))
+    }
+
+    /// The validator of `c`'s failure against `mechanism`: a composed reduction checks
+    /// the reduced run against the original failure's mechanism, renamed.
+    pub fn with(
+        c: &'a Case,
+        ops: &'a Operations,
+        mechanism: Result<Mechanism<String>, Undecided>,
+    ) -> Self {
+        Self {
+            case: c,
+            ops,
+            mechanism,
+            replays: 0,
+        }
+    }
+}
+
+impl Validator<[usize]> for ProgramValidator<'_> {
+    type Label = String;
+
+    fn mechanism(&mut self) -> Result<Mechanism<String>, Undecided> {
+        self.mechanism.clone()
+    }
+
+    fn story_cost(&self, kept: &[usize]) -> u64 {
+        // The re-execution, the campaign's checker, the projection and the causal order:
+        // each linear in the run, the story's closure quadratic in its steps.
+        let n = self.case.journal.len() as u64 + kept.len() as u64 + 1;
+        n.saturating_mul(n).saturating_mul(64)
+    }
+
+    fn story(&mut self, kept: &[usize]) -> StoryReplay<String> {
+        self.replays += 1;
+        let r = match program_restriction(self.case, self.ops, kept) {
+            Ok(r) => r,
+            Err(Replayed::NotReplayable(NotReplayable::Nonconforming(why))) => {
+                return StoryReplay::NotARun(why);
+            }
+            Err(Replayed::NotReplayable(NotReplayable::Inconclusive(reason, why))) => {
+                return StoryReplay::Inconclusive(reason, why);
+            }
+            Err(other) => {
+                return StoryReplay::Inconclusive(
+                    InconclusiveReason::EngineError,
+                    format!("the run check answered {other:?}"),
+                );
+            }
+        };
+        if !campaign_finds_target(self.case, self.ops, kept) {
+            return StoryReplay::Holds(format!(
+                "the campaign's checker on the core's re-execution does not report {}",
+                self.case.target.name()
+            ));
+        }
+        let roles = carry_roles(&self.case.built.roles, &r.renaming);
+        match register_story(&r.journal, &roles, self.case.target) {
+            Ok((labels, _, preds)) => match Story::new(labels, preds) {
+                Ok(story) => StoryReplay::Fails(story),
+                Err(why) => StoryReplay::Inconclusive(InconclusiveReason::EngineError, why),
+            },
+            Err(why) => StoryReplay::NotARun(why),
+        }
+    }
+}
+
+/// A validator with no mechanism: it cannot decide, so every check is an INV-008
+/// `Unsupported` inconclusive and never a pass. For a reduction that is refused before
+/// any check (an input that holds, a start that is not a configuration).
+pub struct NoMechanism;
+
+impl Validator<[usize]> for NoMechanism {
+    type Label = String;
+
+    fn mechanism(&mut self) -> Result<Mechanism<String>, Undecided> {
+        Err(Undecided {
+            reason: InconclusiveReason::Unsupported,
+            detail: "no failure to derive a mechanism from".to_owned(),
+        })
+    }
+
+    fn story_cost(&self, _kept: &[usize]) -> u64 {
+        0
+    }
+
+    fn story(&mut self, _kept: &[usize]) -> StoryReplay<String> {
+        StoryReplay::Inconclusive(
+            InconclusiveReason::Unsupported,
+            "no failure to derive a mechanism from".to_owned(),
+        )
+    }
+}
+
+/// The core of a finished reduction whatever its check said: the validated core, or the
+/// candidate the validator rejected. For measuring the substrate replay's cores, which
+/// the validator rejects (bn-5kmuf); never a claim that a rejected candidate is a core.
+pub fn result_events(r: &Reduction) -> Option<&reduce::Core> {
+    match r {
+        Reduction::Reduced { core, .. } => Some(core.subject()),
+        Reduction::Rejected { candidate, .. } => Some(candidate),
+        _ => None,
+    }
 }
 
 /// One transcript entry, as the retained artifact renders it.
@@ -830,6 +1367,13 @@ pub struct Case {
     pub target: Target,
     /// The plan's epochs.
     pub epochs: u8,
+    /// The run's operations, found once ([`operations`]).
+    pub ops: OnceLock<Operations>,
+}
+
+/// `c`'s operations ([`operations_of`]), found on first use and kept.
+pub fn operations(c: &Case) -> &Operations {
+    c.ops.get_or_init(|| operations_of(c))
 }
 
 /// The run of `plan` under `log`, when it fails: its target is `want` when the run
@@ -875,6 +1419,7 @@ pub fn case_built(
         observer,
         target,
         epochs,
+        ops: OnceLock::new(),
     })
 }
 
@@ -942,10 +1487,14 @@ pub fn corpus() -> &'static Vec<Case> {
     })
 }
 
+/// Closure, then deletion with candidates from `mode`, under the substrate replay
+/// ([`RegisterOracle`]), validated by the program ([`ProgramValidator`]) against the
+/// mechanism derived from `c`.
 pub fn minimize(c: &Case, mode: Deletion) -> (Reduction, u64) {
     let order = order_of(c);
     let mut oracle = RegisterOracle::new(&c.journal, &c.built.roles, c.target);
-    let r = reduce::minimize(&order, mode, &mut oracle, BUDGET);
+    let mut validator = ProgramValidator::new(c, operations(c));
+    let r = reduce::minimize(&order, mode, &mut oracle, &mut validator, BUDGET);
     (r, oracle.replays)
 }
 

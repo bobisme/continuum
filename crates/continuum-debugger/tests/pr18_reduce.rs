@@ -5,6 +5,9 @@
 
 use std::collections::BTreeSet;
 
+use continuum_debugger::mechanism::{
+    Edge, Mechanism, Order, Story, StoryReplay, Undecided, Validator,
+};
 use continuum_debugger::reduce::{
     self, Attempts, Budget, CausalOrder, Deletion, Guarantee, NotReplayable, OrderError, Pass,
     PassEnd, Reduction, Refusal, Replayed, TranscriptBound, Trial, Verdict,
@@ -65,6 +68,82 @@ fn needs<'a>(
     }
 }
 
+/// The mechanism check of these synthetic failures (bn-5kmuf): the mechanism is the
+/// events the failure needs, labelled by their index, with a happens-before edge
+/// wherever the trace orders two of them; a replay fails exactly when it holds them all,
+/// and its story is the kept events with the trace's happens-before order among them.
+struct Needs<'a> {
+    order: &'a CausalOrder,
+    needed: Vec<usize>,
+}
+
+fn v<'a>(order: &'a CausalOrder, needed: &[usize]) -> Needs<'a> {
+    let mut needed = needed.to_vec();
+    needed.sort_unstable();
+    needed.dedup();
+    Needs { order, needed }
+}
+
+/// `b`'s happens-before past, over the predecessor lists alone (atoms are not order).
+fn hb_past(order: &CausalOrder, b: usize) -> Vec<usize> {
+    let mut seen = BTreeSet::new();
+    let mut stack = vec![b];
+    while let Some(x) = stack.pop() {
+        for &p in order.predecessors(x) {
+            if seen.insert(p) {
+                stack.push(p);
+            }
+        }
+    }
+    seen.into_iter().collect()
+}
+
+impl Validator<[usize]> for Needs<'_> {
+    type Label = usize;
+
+    fn mechanism(&mut self) -> Result<Mechanism<usize>, Undecided> {
+        let mut edges = Vec::new();
+        for (j, &b) in self.needed.iter().enumerate() {
+            let past = hb_past(self.order, b);
+            for (i, &a) in self.needed.iter().enumerate() {
+                if a != b && past.binary_search(&a).is_ok() {
+                    edges.push(Edge {
+                        from: i,
+                        to: j,
+                        order: Order::HappensBefore,
+                    });
+                }
+            }
+        }
+        Mechanism::new(self.needed.clone(), edges, Vec::new()).map_err(|e| Undecided {
+            reason: InconclusiveReason::EngineError,
+            detail: format!("{e:?}"),
+        })
+    }
+
+    fn story_cost(&self, kept: &[usize]) -> u64 {
+        (kept.len() as u64 + 1) * (self.order.walk_cost() + 1)
+    }
+
+    fn story(&mut self, kept: &[usize]) -> StoryReplay<usize> {
+        if !self.needed.iter().all(|n| kept.binary_search(n).is_ok()) {
+            return StoryReplay::Holds("a needed event is missing".to_owned());
+        }
+        let preds = kept
+            .iter()
+            .map(|&b| {
+                let past = hb_past(self.order, b);
+                kept.iter()
+                    .enumerate()
+                    .filter(|&(_, &a)| a != b && past.binary_search(&a).is_ok())
+                    .map(|(i, _)| i)
+                    .collect()
+            })
+            .collect();
+        StoryReplay::Fails(Story::new(kept.to_vec(), preds).expect("a causal order"))
+    }
+}
+
 /// The reference: every event with a path to a seed, by brute force over all pairs
 /// (Warshall).
 #[allow(clippy::needless_range_loop)]
@@ -111,7 +190,7 @@ fn closure_keeps_exactly_the_witnesses_past_on_random_orders() {
         };
         let mut calls = 0;
         let mut oracle = needs(&order, &needed, &mut calls);
-        let r = reduce::closure_pass(&order, &mut oracle, BUDGET);
+        let r = reduce::closure_pass(&order, &mut oracle, &mut v(&order, &needed), BUDGET);
         let core = r.core().expect("reduced");
         assert_eq!(core.events, brute_downset(&preds, &needed));
         assert!(order.is_down_closed(&core.events));
@@ -134,7 +213,14 @@ fn deletion_over_configurations_is_one_minimal_on_random_orders() {
         let whole: Vec<usize> = (0..n).collect();
         let r = {
             let mut oracle = needs(&order, &needed, &mut calls);
-            reduce::deletion_pass(&order, whole, Deletion::Configurations, &mut oracle, BUDGET)
+            reduce::deletion_pass(
+                &order,
+                whole,
+                Deletion::Configurations,
+                &mut oracle,
+                &mut v(&order, &needed),
+                BUDGET,
+            )
         };
         let core = r.core().expect("reduced").clone();
         assert_eq!(core.events, brute_downset(&preds, &needed));
@@ -183,6 +269,7 @@ fn deletion_over_atoms_finds_the_needed_events() {
         (0..40).collect(),
         Deletion::Atoms,
         &mut oracle,
+        &mut v(&order, &needed),
         BUDGET,
     );
     let core = r.core().expect("reduced");
@@ -209,6 +296,7 @@ fn deletion_over_multi_event_atoms_claims_only_atom_minimality() {
         (0..10).collect(),
         Deletion::Atoms,
         &mut oracle,
+        &mut v(&order, &[5]),
         BUDGET,
     );
     let core = r.core().expect("reduced");
@@ -241,6 +329,7 @@ fn an_undecided_removal_withholds_minimality() {
         (0..8).collect(),
         Deletion::Atoms,
         &mut oracle,
+        &mut v(&order, &[2, 6]),
         BUDGET,
     );
     let Reduction::Reduced {
@@ -278,6 +367,7 @@ fn a_witness_contract_breach_mid_pass_stops_the_reduction() {
         (0..8).collect(),
         Deletion::Atoms,
         &mut oracle,
+        &mut v(&order, &[7]),
         BUDGET,
     );
     let Reduction::Inconclusive {
@@ -290,7 +380,10 @@ fn a_witness_contract_breach_mid_pass_stops_the_reduction() {
         panic!("inconclusive: {r:?}");
     };
     assert_eq!(reason, InconclusiveReason::EngineError);
-    assert_eq!(best.expect("the start").events, (0..8).collect::<Vec<_>>());
+    assert_eq!(
+        best.expect("the start").subject().events,
+        (0..8).collect::<Vec<_>>()
+    );
     assert_eq!(
         transcript.last().map(|p| &p.end),
         Some(&PassEnd::OracleContract)
@@ -311,7 +404,13 @@ fn atoms_stand_or_fall_together() {
     let mut calls = 0;
     let needed = [4];
     let mut oracle = needs(&order, &needed, &mut calls);
-    let r = reduce::minimize(&order, Deletion::Configurations, &mut oracle, BUDGET);
+    let r = reduce::minimize(
+        &order,
+        Deletion::Configurations,
+        &mut oracle,
+        &mut v(&order, &needed),
+        BUDGET,
+    );
     assert_eq!(r.core().expect("reduced").events, vec![0, 1, 4]);
     assert_eq!(
         CausalOrder::with_atoms(vec![vec![]; 3], vec![vec![0, 1], vec![1, 2]]),
@@ -337,7 +436,13 @@ fn a_closure_that_does_not_replay_is_typed_and_kept_out() {
             Replayed::Holds
         }
     };
-    let r = reduce::minimize(&order, Deletion::Configurations, &mut oracle, BUDGET);
+    let r = reduce::minimize(
+        &order,
+        Deletion::Configurations,
+        &mut oracle,
+        &mut v(&order, &[0, 2]),
+        BUDGET,
+    );
     let Reduction::Reduced {
         core, transcript, ..
     } = r
@@ -373,6 +478,7 @@ fn an_exhausted_budget_is_typed_and_charged_first() {
         (0..64).collect(),
         Deletion::Atoms,
         &mut oracle,
+        &mut v(&order, &[63]),
         Budget::new(3, 1 << 30),
     );
     let Reduction::Inconclusive {
@@ -388,6 +494,7 @@ fn an_exhausted_budget_is_typed_and_charged_first() {
     assert_eq!(spent.replays, 3);
     assert_eq!(calls, 3);
     let best = best.expect("a validated set");
+    let best = best.subject();
     assert!(best.events.contains(&63));
     assert!(!best.guarantees.contains(&Guarantee::OneMinimal));
     // Work units run out too, before a candidate is built.
@@ -397,6 +504,7 @@ fn an_exhausted_budget_is_typed_and_charged_first() {
         (0..64).collect(),
         Deletion::Atoms,
         &mut oracle,
+        &mut v(&order, &[0]),
         Budget::new(1_000, 10),
     );
     assert!(matches!(r, Reduction::Inconclusive { .. }), "{r:?}");
@@ -409,19 +517,19 @@ fn refusals_are_typed() {
     let empty = CausalOrder::from_predecessors(Vec::new()).expect("an order");
     let mut fails = |_: &[usize]| Replayed::Fails { witnesses: vec![0] };
     assert_eq!(
-        reduce::closure_pass(&empty, &mut fails, BUDGET),
+        reduce::closure_pass(&empty, &mut fails, &mut v(&empty, &[0]), BUDGET),
         Reduction::Refused(Refusal::EmptyTrace)
     );
     let order = CausalOrder::from_predecessors(vec![vec![], vec![0]]).expect("an order");
     let mut holds = |_: &[usize]| Replayed::Holds;
     assert_eq!(
-        reduce::closure_pass(&order, &mut holds, BUDGET),
+        reduce::closure_pass(&order, &mut holds, &mut v(&order, &[0]), BUDGET),
         Reduction::Refused(Refusal::InputHolds)
     );
     let mut refuses =
         |_: &[usize]| Replayed::NotReplayable(NotReplayable::Nonconforming("no".into()));
     assert!(matches!(
-        reduce::closure_pass(&order, &mut refuses, BUDGET),
+        reduce::closure_pass(&order, &mut refuses, &mut v(&order, &[0]), BUDGET),
         Reduction::Refused(Refusal::InputNotReplayable(_))
     ));
     assert_eq!(
@@ -430,27 +538,42 @@ fn refusals_are_typed() {
             vec![1],
             Deletion::Configurations,
             &mut fails,
+            &mut v(&order, &[0]),
             BUDGET
         ),
         Reduction::Refused(Refusal::NotAConfiguration)
     );
     assert_eq!(
-        reduce::deletion_pass(&order, Vec::new(), Deletion::Atoms, &mut fails, BUDGET),
+        reduce::deletion_pass(
+            &order,
+            Vec::new(),
+            Deletion::Atoms,
+            &mut fails,
+            &mut v(&order, &[0]),
+            BUDGET
+        ),
         Reduction::Refused(Refusal::EmptyStart)
     );
     let atoms = CausalOrder::with_atoms(vec![vec![]; 3], vec![vec![0, 2]]).expect("an order");
     assert_eq!(
-        reduce::deletion_pass(&atoms, vec![0, 1], Deletion::Atoms, &mut fails, BUDGET),
+        reduce::deletion_pass(
+            &atoms,
+            vec![0, 1],
+            Deletion::Atoms,
+            &mut fails,
+            &mut v(&atoms, &[0]),
+            BUDGET
+        ),
         Reduction::Refused(Refusal::NotAConfiguration)
     );
     let mut outside = |_: &[usize]| Replayed::Fails { witnesses: vec![7] };
     assert_eq!(
-        reduce::closure_pass(&order, &mut outside, BUDGET),
+        reduce::closure_pass(&order, &mut outside, &mut v(&order, &[0]), BUDGET),
         Reduction::Refused(Refusal::WitnessContract)
     );
     let mut none = |_: &[usize]| Replayed::Fails { witnesses: vec![] };
     assert_eq!(
-        reduce::closure_pass(&order, &mut none, BUDGET),
+        reduce::closure_pass(&order, &mut none, &mut v(&order, &[0]), BUDGET),
         Reduction::Refused(Refusal::WitnessContract)
     );
     assert_eq!(
@@ -474,7 +597,13 @@ fn identical_inputs_give_identical_reductions() {
             let order = CausalOrder::from_predecessors(preds.clone()).expect("an order");
             let mut calls = 0;
             let mut oracle = needs(&order, &needed, &mut calls);
-            reduce::minimize(&order, Deletion::Atoms, &mut oracle, BUDGET)
+            reduce::minimize(
+                &order,
+                Deletion::Atoms,
+                &mut oracle,
+                &mut v(&order, &needed),
+                BUDGET,
+            )
         };
         assert_eq!(run(), run());
     }
@@ -516,8 +645,12 @@ fn independent_event_swap_leaves_the_core_unchanged() {
                 let mut calls = 0;
                 let mut oracle = needs(&order, needed, &mut calls);
                 let r = match mode {
-                    None => reduce::closure_pass(&order, &mut oracle, BUDGET),
-                    Some(m) => reduce::minimize(&order, m, &mut oracle, BUDGET),
+                    None => {
+                        reduce::closure_pass(&order, &mut oracle, &mut v(&order, needed), BUDGET)
+                    }
+                    Some(m) => {
+                        reduce::minimize(&order, m, &mut oracle, &mut v(&order, needed), BUDGET)
+                    }
                 };
                 r.core().expect("reduced").events.clone()
             };
@@ -560,7 +693,7 @@ fn check_consistent(r: &Reduction) -> &Attempts {
             spent,
             ..
         } => (transcript, attempts, spent),
-        Reduction::Refused(_) => panic!("refused: {r:?}"),
+        Reduction::Rejected { .. } | Reduction::Refused(_) => panic!("not reduced: {r:?}"),
     };
     assert_eq!(attempts.omitted, 0);
     let fresh = attempts
@@ -627,7 +760,7 @@ fn the_transcript_records_every_attempt_in_order() {
         for mode in [Deletion::Configurations, Deletion::Atoms] {
             let mut calls = 0;
             let mut oracle = needs(&order, &needed, &mut calls);
-            let r = reduce::minimize(&order, mode, &mut oracle, BUDGET);
+            let r = reduce::minimize(&order, mode, &mut oracle, &mut v(&order, &needed), BUDGET);
             let attempts = check_consistent(&r);
             assert_eq!(attempts.entries[0].trial, Trial::Start);
             assert_eq!(attempts.entries[0].pass, None);
@@ -703,7 +836,7 @@ fn the_transcript_licenses_the_minimality_claim() {
         for mode in [Deletion::Configurations, Deletion::Atoms] {
             let mut calls = 0;
             let mut oracle = needs(&order, &needed, &mut calls);
-            let r = reduce::minimize(&order, mode, &mut oracle, BUDGET);
+            let r = reduce::minimize(&order, mode, &mut oracle, &mut v(&order, &needed), BUDGET);
             let attempts = check_consistent(&r);
             let core = r.core().expect("reduced");
             assert!(core.guarantees.iter().any(|g| matches!(
@@ -752,6 +885,7 @@ fn a_one_event_core_records_its_vacuous_removal() {
         (0..5).collect(),
         Deletion::Atoms,
         &mut oracle,
+        &mut v(&order, &[3]),
         BUDGET,
     );
     let core = r.core().expect("reduced");
@@ -785,6 +919,7 @@ fn a_long_reason_is_cut_not_dropped() {
         (0..6).collect(),
         Deletion::Atoms,
         &mut oracle,
+        &mut v(&order, &[5]),
         BUDGET,
     );
     let attempts = check_consistent(&r);
@@ -823,6 +958,7 @@ fn a_full_transcript_is_counted_and_withholds_minimality() {
         (0..40).collect(),
         Deletion::Atoms,
         &mut oracle.clone(),
+        &mut v(&order, &needed),
         BUDGET,
     );
     for bound in [
@@ -844,6 +980,7 @@ fn a_full_transcript_is_counted_and_withholds_minimality() {
             (0..40).collect(),
             Deletion::Atoms,
             &mut oracle.clone(),
+            &mut v(&order, &needed),
             BUDGET.with_transcript(bound),
         );
         let attempts = r.attempts().expect("a transcript");
@@ -893,6 +1030,7 @@ fn the_transcript_keeps_verdicts_and_reasons() {
         (0..8).collect(),
         Deletion::Atoms,
         &mut oracle,
+        &mut v(&order, &[2, 6]),
         BUDGET,
     );
     let attempts = check_consistent(&r);

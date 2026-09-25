@@ -3,6 +3,7 @@
 //! is checked against a closed-form answer. The register instantiation is
 //! `continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs`.
 
+use continuum_debugger::mechanism::{Mechanism, Story, StoryReplay, Undecided, Validator};
 use continuum_debugger::reduce::{Budget, TranscriptBound};
 use continuum_debugger::scenario::{
     Candidate, ConfigVerdict, Dimension, DimensionEnd, Preserved, Ran, Scenario, ScenarioGuarantee,
@@ -143,11 +144,36 @@ impl Scenario for Toy {
     }
 }
 
+/// The toy's mechanism check (bn-5kmuf): its failure has one step, and a configuration's
+/// replay shows it exactly when the configuration fails. It runs nothing the engine
+/// counts in `runs`.
+impl Validator<Config> for Toy {
+    type Label = &'static str;
+
+    fn mechanism(&mut self) -> Result<Mechanism<&'static str>, Undecided> {
+        Ok(Mechanism::new(vec!["fails"], Vec::new(), Vec::new()).expect("a mechanism"))
+    }
+
+    fn story_cost(&self, _config: &Config) -> u64 {
+        1
+    }
+
+    fn story(&mut self, config: &Config) -> StoryReplay<&'static str> {
+        if (self.undecided)(*config) {
+            StoryReplay::Inconclusive(InconclusiveReason::ResourceExhausted, "sampled".to_owned())
+        } else if (self.fails)(*config) {
+            StoryReplay::Fails(Story::new(vec!["fails"], vec![Vec::new()]).expect("a story"))
+        } else {
+            StoryReplay::Holds("does not fail".to_owned())
+        }
+    }
+}
+
 fn reduced(r: &ScenarioReduction<Config>) -> (Config, &[ScenarioGuarantee]) {
     match r {
         ScenarioReduction::Reduced {
             config, guarantees, ..
-        } => (*config, guarantees),
+        } => (**config, guarantees),
         other => panic!("reduced: {other:?}"),
     }
 }
@@ -309,7 +335,7 @@ fn a_candidate_that_is_not_smaller_is_a_contract_breach() {
         panic!("inconclusive: {r:?}");
     };
     assert_eq!(*reason, InconclusiveReason::EngineError);
-    assert_eq!(*best, Some([2, 2, 2]));
+    assert_eq!(best.as_ref().map(|b| *b.subject()), Some([2, 2, 2]));
     assert_eq!(
         attempts.entries.last().map(|a| a.verdict),
         Some(ConfigVerdict::NotSmaller)
@@ -350,7 +376,7 @@ fn an_exhausted_budget_is_inconclusive_and_charged_before_work() {
         panic!("inconclusive: {r:?}");
     };
     assert_eq!(*reason, InconclusiveReason::ResourceExhausted);
-    assert_eq!(*best, Some([2, 0, 0]));
+    assert_eq!(best.as_ref().map(|b| *b.subject()), Some([2, 0, 0]));
     assert_eq!(toy.runs, [[3, 0, 0], [2, 0, 0]], "no unpaid run");
     let mut toy = Toy::new(|c| c[0] >= 1);
     let r = reduce_scenario(&mut toy, [3, 0, 0], Budget::new(0, 1 << 20));
@@ -418,5 +444,5 @@ fn a_measure_that_drifts_after_a_run_is_a_contract_breach() {
         panic!("inconclusive: {r:?}");
     };
     assert_eq!(*reason, InconclusiveReason::EngineError);
-    assert_eq!(*best, Some([3, 3, 3]));
+    assert_eq!(best.as_ref().map(|b| *b.subject()), Some([3, 3, 3]));
 }

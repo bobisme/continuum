@@ -45,6 +45,18 @@
 //! [`minimize`] runs closure then deletion, the order research/26's pipeline gives
 //! (slice, then minimize while preserving failure).
 //!
+//! # Every result is checked (bn-5kmuf)
+//!
+//! Each entry point takes a [`crate::mechanism::Validator`]: a replay apart from the
+//! oracle, and the original failure's mechanism. The input is checked before any pass,
+//! and each pass's result when it differs from its input. A core is returned only as a
+//! [`crate::mechanism::Validated`] one ([`Reduction::Reduced`]); a result the check
+//! rejects is [`Reduction::Rejected`] with its typed reason, and a check that cannot
+//! decide makes the reduction [`Reduction::Inconclusive`] (INV-008). The checks are
+//! charged to the budget's validation allowance ([`Budget::with_validation`]), apart
+//! from the passes' replays, so the passes' candidates and spending do not depend on
+//! them.
+//!
 //! # Replay, never assumption
 //!
 //! Every kept set was replayed and failed. The input is replayed first; an input that
@@ -109,6 +121,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use continuum_value::assurance::InconclusiveReason;
+
+use crate::mechanism::{
+    self, Allowance, CheckEntry, Checked, Mechanism, Outcome, Stage, Undecided, Validated,
+    Validator,
+};
 
 /// A trace's causal order: each event's immediate predecessors, and its atoms.
 ///
@@ -451,6 +468,7 @@ pub struct Budget {
     replays: u64,
     work: u64,
     transcript: TranscriptBound,
+    validation: Allowance,
 }
 
 /// The most bytes of an oracle's rendering one transcript entry keeps.
@@ -574,14 +592,29 @@ pub enum Exhausted {
 
 impl Budget {
     /// At most `replays` replays and `work` work units, with the transcript bound
-    /// [`TranscriptBound::DEFAULT`].
+    /// [`TranscriptBound::DEFAULT`] and the validation allowance [`Allowance::DEFAULT`].
     #[must_use]
     pub const fn new(replays: u64, work: u64) -> Self {
         Self {
             replays,
             work,
             transcript: TranscriptBound::DEFAULT,
+            validation: Allowance::DEFAULT,
         }
+    }
+
+    /// This budget with the validation allowance `replays` and `work`: what the
+    /// mechanism checks may spend ([`crate::mechanism`]), apart from the passes. A check
+    /// the allowance cannot pay for is an INV-008 inconclusive, never a pass.
+    #[must_use]
+    pub const fn with_validation(mut self, replays: u64, work: u64) -> Self {
+        self.validation = Allowance { replays, work };
+        self
+    }
+
+    /// The validation allowance in force.
+    pub(crate) const fn validation(&self) -> Allowance {
+        self.validation
     }
 
     /// This budget with the transcript bound `bound`.
@@ -718,46 +751,76 @@ pub enum Refusal {
     /// The oracle reported a failure with no witness, or a witness outside the replayed
     /// configuration: it broke [`Replayed::Fails`]'s contract.
     WitnessContract,
+    /// The validator rejects the input itself: its replay does not show the mechanism
+    /// derived from it, so no core could be checked against that mechanism.
+    MechanismNotInInput(mechanism::Rejection),
 }
 
 /// A reduction's result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reduction {
-    /// The reduction finished. The core's guarantees say what was checked: a closure
-    /// that did not reproduce the failure keeps its input (the transcript says so), and
-    /// a deletion with undecided removals claims no minimality.
+    /// The reduction finished, and the core preserves the failure's mechanism
+    /// ([`crate::mechanism`]): the only way a reduction returns a core. The core's
+    /// guarantees say what else was checked: a closure that did not reproduce the failure
+    /// keeps its input (the transcript says so), and a deletion with undecided removals
+    /// claims no minimality.
     Reduced {
-        /// The core.
-        core: Core,
+        /// The core, validated.
+        core: Validated<Core>,
         /// Each pass, in order.
         transcript: Vec<PassRecord>,
         /// Each attempt, in order: the per-removal transcript.
         attempts: Attempts,
-        /// What it spent.
+        /// What the passes spent. Each check's spending is in `checks`.
         spent: Spent,
+        /// Each mechanism check, in order: the input, then each pass that changed its
+        /// input.
+        checks: Vec<CheckEntry>,
     },
-    /// The reduction stopped early. Not a success, and no minimality is claimed.
-    Inconclusive {
-        /// [`InconclusiveReason::ResourceExhausted`] when the budget ran out;
-        /// [`InconclusiveReason::EngineError`] when the oracle broke its contract.
-        reason: InconclusiveReason,
-        /// The smallest replay-validated configuration reached, if any replay failed.
-        best: Option<Core>,
+    /// The passes finished and their result reproduces the verdict, but the validator
+    /// rejects it: the right verdict through the wrong mechanism, or no run at all. Not a
+    /// core, and not a success.
+    Rejected {
+        /// The passes' result, which is not a core.
+        candidate: Core,
+        /// Why the validator rejects it.
+        why: mechanism::Rejection,
         /// Each pass, in order.
         transcript: Vec<PassRecord>,
         /// Each attempt, in order: the per-removal transcript.
         attempts: Attempts,
-        /// What it spent.
+        /// What the passes spent.
         spent: Spent,
+        /// Each mechanism check, in order.
+        checks: Vec<CheckEntry>,
+    },
+    /// The reduction stopped early, or the validator could not decide its result
+    /// (INV-008). Not a success, and no minimality is claimed.
+    Inconclusive {
+        /// [`InconclusiveReason::ResourceExhausted`] when the budget or the validation
+        /// allowance ran out; [`InconclusiveReason::EngineError`] when the oracle broke
+        /// its contract; the validator's reason when it could not decide.
+        reason: InconclusiveReason,
+        /// The smallest replay-validated configuration reached, if any replay failed,
+        /// with its mechanism check.
+        best: Option<Checked<Core>>,
+        /// Each pass, in order.
+        transcript: Vec<PassRecord>,
+        /// Each attempt, in order: the per-removal transcript.
+        attempts: Attempts,
+        /// What the passes spent.
+        spent: Spent,
+        /// Each mechanism check, in order.
+        checks: Vec<CheckEntry>,
     },
     /// The reduction did not start.
     Refused(Refusal),
 }
 
 impl Reduction {
-    /// The finished core, if the reduction finished.
+    /// The finished, validated core, if the reduction finished with one.
     #[must_use]
-    pub const fn core(&self) -> Option<&Core> {
+    pub const fn core(&self) -> Option<&Validated<Core>> {
         match self {
             Self::Reduced { core, .. } => Some(core),
             _ => None,
@@ -768,16 +831,49 @@ impl Reduction {
     #[must_use]
     pub const fn attempts(&self) -> Option<&Attempts> {
         match self {
-            Self::Reduced { attempts, .. } | Self::Inconclusive { attempts, .. } => Some(attempts),
+            Self::Reduced { attempts, .. }
+            | Self::Rejected { attempts, .. }
+            | Self::Inconclusive { attempts, .. } => Some(attempts),
+            Self::Refused(_) => None,
+        }
+    }
+
+    /// The pass records, unless the reduction did not start.
+    #[must_use]
+    pub fn transcript(&self) -> Option<&[PassRecord]> {
+        match self {
+            Self::Reduced { transcript, .. }
+            | Self::Rejected { transcript, .. }
+            | Self::Inconclusive { transcript, .. } => Some(transcript),
+            Self::Refused(_) => None,
+        }
+    }
+
+    /// The mechanism checks, unless the reduction did not start.
+    #[must_use]
+    pub fn checks(&self) -> Option<&[CheckEntry]> {
+        match self {
+            Self::Reduced { checks, .. }
+            | Self::Rejected { checks, .. }
+            | Self::Inconclusive { checks, .. } => Some(checks),
             Self::Refused(_) => None,
         }
     }
 }
 
 /// The running state of one reduction.
-struct Run<'a, R: Replay> {
+struct Run<'a, R: Replay, V: Validator<[usize]>> {
     order: &'a CausalOrder,
     oracle: &'a mut R,
+    validator: &'a mut V,
+    /// The original failure's mechanism, derived once.
+    mechanism: Result<Mechanism<V::Label>, Undecided>,
+    /// The validation allowance left.
+    allowance: Allowance,
+    /// Each check, in order.
+    checks: Vec<CheckEntry>,
+    /// The last set checked, and its outcome: a result equal to it is not checked twice.
+    last_check: Option<(Vec<usize>, Outcome)>,
     budget: Budget,
     spent: Spent,
     transcript: Vec<PassRecord>,
@@ -881,7 +977,24 @@ fn witness_cost(kept: &[usize], witnesses: &[usize]) -> u64 {
         .saturating_mul(log)
 }
 
-impl<R: Replay> Run<'_, R> {
+impl<R: Replay, V: Validator<[usize]>> Run<'_, R, V> {
+    /// Check `set` with the validator, as `stage`, and record the check. A set equal to
+    /// the last one checked keeps that outcome and is not checked or recorded again.
+    fn check(&mut self, set: &[usize], stage: Stage) -> Outcome {
+        if let Some((last, outcome)) = &self.last_check {
+            if last.as_slice() == set {
+                return outcome.clone();
+            }
+        }
+        let outcome = mechanism::check(self.validator, &self.mechanism, set, &mut self.allowance);
+        self.checks.push(CheckEntry {
+            stage,
+            outcome: outcome.clone(),
+        });
+        self.last_check = Some((set.to_vec(), outcome.clone()));
+        outcome
+    }
+
     /// Replay `kept`, tried as `ctx` says, charged first; the witnesses' validation is
     /// charged before it runs too. A failure whose witnesses break the contract is
     /// [`Step::Contract`], never a rejected candidate: the oracle said it fails. The
@@ -1315,12 +1428,15 @@ fn split(set: &[usize], n: usize) -> Vec<Vec<usize>> {
     out
 }
 
-fn stopped<R: Replay>(
-    mut run: Run<'_, R>,
+fn stopped<R: Replay, V: Validator<[usize]>>(
+    mut run: Run<'_, R, V>,
     stop: Stop,
     best: Option<(Vec<usize>, Vec<usize>)>,
 ) -> Reduction {
-    let best = best.map(|(set, w)| run.core(set, w, None));
+    let best = best.map(|(set, w)| {
+        let outcome = run.check(&set, Stage::Best);
+        outcome.attach(run.core(set, w, None))
+    });
     Reduction::Inconclusive {
         reason: match stop {
             Stop::Exhausted(_) => InconclusiveReason::ResourceExhausted,
@@ -1330,6 +1446,57 @@ fn stopped<R: Replay>(
         attempts: run.finish_attempts(),
         transcript: run.transcript,
         spent: run.spent,
+        checks: run.checks,
+    }
+}
+
+/// The finished reduction of `set`: its core, checked. The check of the last pass that
+/// changed its input is reused, since `set` is that pass's result; the input's check
+/// covers a reduction whose passes changed nothing.
+fn finished<R: Replay, V: Validator<[usize]>>(
+    mut run: Run<'_, R, V>,
+    set: Vec<usize>,
+    witnesses: Vec<usize>,
+    minimal: Option<Deletion>,
+    stage: Stage,
+) -> Reduction {
+    let outcome = run.check(&set, stage);
+    let core = run.core(set, witnesses, minimal);
+    let attempts = run.finish_attempts();
+    match outcome.attach(core) {
+        Checked::Preserved(core) => Reduction::Reduced {
+            core,
+            transcript: run.transcript,
+            attempts,
+            spent: run.spent,
+            checks: run.checks,
+        },
+        Checked::Rejected { subject, why, .. } => Reduction::Rejected {
+            candidate: subject,
+            why,
+            transcript: run.transcript,
+            attempts,
+            spent: run.spent,
+            checks: run.checks,
+        },
+        Checked::Undecided {
+            subject,
+            reason,
+            detail,
+            spent,
+        } => Reduction::Inconclusive {
+            reason,
+            best: Some(Checked::Undecided {
+                subject,
+                reason,
+                detail,
+                spent,
+            }),
+            transcript: run.transcript,
+            attempts,
+            spent: run.spent,
+            checks: run.checks,
+        },
     }
 }
 
@@ -1345,10 +1512,11 @@ enum Plan {
     Both(Deletion),
 }
 
-fn reduce<R: Replay>(
+fn reduce<R: Replay, V: Validator<[usize]>>(
     order: &CausalOrder,
     start: Vec<usize>,
     oracle: &mut R,
+    validator: &mut V,
     budget: Budget,
     plan: Plan,
 ) -> Reduction {
@@ -1358,9 +1526,15 @@ fn reduce<R: Replay>(
     if start.is_empty() {
         return Reduction::Refused(Refusal::EmptyStart);
     }
+    let mechanism = validator.mechanism();
     let mut run = Run {
         order,
         oracle,
+        validator,
+        mechanism,
+        allowance: budget.validation(),
+        checks: Vec::new(),
+        last_check: None,
         budget,
         spent: Spent::default(),
         transcript: Vec::new(),
@@ -1395,67 +1569,127 @@ fn reduce<R: Replay>(
         Ok(Err(refusal)) => return Reduction::Refused(refusal),
         Ok(Ok(w)) => w,
     };
+    // The input must show the mechanism derived from it: otherwise no core can be
+    // checked against it. A check that cannot decide stops the reduction (INV-008).
+    match run.check(&start, Stage::Input) {
+        Outcome::Preserved(_) => {}
+        Outcome::Rejected(why, _) => return Reduction::Refused(Refusal::MechanismNotInInput(why)),
+        Outcome::Undecided(reason, ..) => {
+            return Reduction::Inconclusive {
+                reason,
+                best: None,
+                attempts: run.finish_attempts(),
+                transcript: run.transcript,
+                spent: run.spent,
+                checks: run.checks,
+            };
+        }
+    }
     let (set, witnesses) = if matches!(plan, Plan::Deletion(_)) {
         (start, witnesses)
     } else {
         match run.closure(start, witnesses) {
-            Ok((set, w, _)) => (set, w),
+            Ok((set, w, _)) => {
+                // The closure's result, checked when the pass changed its input. A check
+                // that cannot decide stops the reduction (INV-008); a rejected closure
+                // still goes to deletion, whose result is checked again.
+                if let Outcome::Undecided(reason, ..) = run.check(&set, Stage::Pass(Pass::Closure))
+                {
+                    let best = Some(
+                        run.last_check
+                            .clone()
+                            .expect("just checked")
+                            .1
+                            .attach(run.core(set, w, None)),
+                    );
+                    return Reduction::Inconclusive {
+                        reason,
+                        best,
+                        attempts: run.finish_attempts(),
+                        transcript: run.transcript,
+                        spent: run.spent,
+                        checks: run.checks,
+                    };
+                }
+                (set, w)
+            }
             Err((stop, set, w)) => return stopped(run, stop, Some((set, w))),
         }
     };
     let mode = match plan {
-        Plan::Closure => {
-            let core = run.core(set, witnesses, None);
-            return Reduction::Reduced {
-                core,
-                attempts: run.finish_attempts(),
-                transcript: run.transcript,
-                spent: run.spent,
-            };
-        }
+        Plan::Closure => return finished(run, set, witnesses, None, Stage::Pass(Pass::Closure)),
         Plan::Deletion(mode) | Plan::Both(mode) => mode,
     };
     match run.deletion(mode, set, witnesses) {
-        Ok((set, w, decided)) => {
-            let core = run.core(set, w, decided.then_some(mode));
-            Reduction::Reduced {
-                core,
-                attempts: run.finish_attempts(),
-                transcript: run.transcript,
-                spent: run.spent,
-            }
-        }
+        Ok((set, w, decided)) => finished(
+            run,
+            set,
+            w,
+            decided.then_some(mode),
+            Stage::Pass(Pass::Deletion(mode)),
+        ),
         Err((stop, set, w)) => stopped(run, stop, Some((set, w))),
     }
 }
 
 /// The causal-closure pass alone, over the whole trace: replay it, keep the
-/// happens-before downset of its witnesses (closed under atoms), and replay that.
+/// happens-before downset of its witnesses (closed under atoms), and replay that. The
+/// input and the result are checked by `validator` ([`crate::mechanism`]).
 #[must_use]
-pub fn closure_pass<R: Replay>(order: &CausalOrder, oracle: &mut R, budget: Budget) -> Reduction {
-    reduce(order, whole(order), oracle, budget, Plan::Closure)
+pub fn closure_pass<R: Replay, V: Validator<[usize]>>(
+    order: &CausalOrder,
+    oracle: &mut R,
+    validator: &mut V,
+    budget: Budget,
+) -> Reduction {
+    reduce(
+        order,
+        whole(order),
+        oracle,
+        validator,
+        budget,
+        Plan::Closure,
+    )
 }
 
 /// The deletion pass alone, over the configuration `start` (the whole trace when it is
-/// every index), with candidates from `mode`.
+/// every index), with candidates from `mode`. The input and the result are checked by
+/// `validator` ([`crate::mechanism`]).
 #[must_use]
-pub fn deletion_pass<R: Replay>(
+pub fn deletion_pass<R: Replay, V: Validator<[usize]>>(
     order: &CausalOrder,
     start: Vec<usize>,
     mode: Deletion,
     oracle: &mut R,
+    validator: &mut V,
     budget: Budget,
 ) -> Reduction {
-    reduce(order, start, oracle, budget, Plan::Deletion(mode))
+    reduce(
+        order,
+        start,
+        oracle,
+        validator,
+        budget,
+        Plan::Deletion(mode),
+    )
 }
 
-/// Closure, then deletion with candidates from `mode`, over the whole trace.
+/// Closure, then deletion with candidates from `mode`, over the whole trace. The input
+/// and each pass's result are checked by `validator` ([`crate::mechanism`]).
 #[must_use]
-pub fn minimize<R: Replay>(
+pub fn minimize<R: Replay, V: Validator<[usize]>>(
     order: &CausalOrder,
     mode: Deletion,
     oracle: &mut R,
+    validator: &mut V,
     budget: Budget,
 ) -> Reduction {
-    reduce(order, whole(order), oracle, budget, Plan::Both(mode))
+    reduce(
+        order,
+        whole(order),
+        oracle,
+        validator,
+        budget,
+        Plan::Both(mode),
+    )
 }

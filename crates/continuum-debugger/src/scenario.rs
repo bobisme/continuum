@@ -56,12 +56,26 @@
 //!
 //! # Verdicts
 //!
-//! [`Ran`] is what running a configuration showed: the failure reproduced with its
-//! mechanism ([`Ran::Fails`]); a decided non-failure ([`Ran::Holds`], with how it was
-//! decided); a configuration that is no run of the program ([`Ran::NotARun`]); or an
-//! INV-008 [`Ran::Inconclusive`], for example a bounded schedule search that found no
-//! failure. Only `Fails` keeps a candidate. An inconclusive candidate is not a
+//! [`Ran`] is what running a configuration showed: the failure reproduced, in the run
+//! the scenario proposes ([`Ran::Fails`]); a decided non-failure ([`Ran::Holds`], with
+//! how it was decided); a configuration that is no run of the program
+//! ([`Ran::NotARun`]); or an INV-008 [`Ran::Inconclusive`], for example a bounded
+//! schedule search that found no failure. An inconclusive candidate is not a
 //! non-failure: a pass whose last candidates include one claims no minimality.
+//!
+//! # Mechanism preservation (bn-5kmuf)
+//!
+//! `Fails` is not enough to keep a candidate. The scenario is its own
+//! [`crate::mechanism::Validator`], and the engine checks the proposed run against the
+//! original failure's mechanism, renamed to the candidate's names. Only a run the check
+//! preserves is kept. A run that reproduces the failure through another mechanism is
+//! recorded as [`ConfigVerdict::MechanismLost`] with its typed reason and never kept; it
+//! decides the candidate only when the scenario tried every run of it
+//! ([`Scenario::search_exhausted`]), and otherwise withholds minimality. A check that
+//! cannot decide is an INV-008 inconclusive. The input is checked before any pass: an
+//! input whose run does not show the mechanism is refused
+//! ([`ScenarioRefusal::MechanismNotInInput`]). So the reduced configuration is returned
+//! only as a [`crate::mechanism::Validated`] one.
 //!
 //! # Budget, charged before work (INV-008)
 //!
@@ -97,6 +111,10 @@ use std::collections::BTreeMap;
 
 use continuum_value::assurance::InconclusiveReason;
 
+use crate::mechanism::{
+    self, Allowance, CheckEntry, Checked, Mechanism, Outcome, Rejection, Stage, Undecided,
+    Validated, Validator,
+};
 use crate::reduce::{Budget, Exhausted, REASON_CAP, Spent, TranscriptBound};
 
 /// A dimension of the configuration.
@@ -213,8 +231,18 @@ pub trait Scenario {
     /// An upper bound on the work of [`Self::run`] on `config`: charged before it runs.
     fn run_cost(&self, config: &Self::Config) -> u64;
 
-    /// Run the program under `config` and check the preserved failure.
+    /// Run the program under `config` and check the preserved failure. A `Fails` names
+    /// the run the scenario proposes; the engine then checks that run against the
+    /// original failure's mechanism ([`crate::mechanism`]) and keeps the candidate only
+    /// when the check preserves it.
     fn run(&mut self, config: &Self::Config) -> Ran;
+
+    /// Whether the run [`Self::run`] proposed for `config` was chosen after every run of
+    /// `config` was tried: a mechanism rejection of it then decides the candidate. The
+    /// default, `false`, makes such a rejection undecided, which withholds minimality.
+    fn search_exhausted(&self, _config: &Self::Config) -> bool {
+        false
+    }
 }
 
 /// What the reduction concluded of one candidate.
@@ -233,6 +261,37 @@ pub enum ConfigVerdict {
     /// Not smaller along its dimension, or larger along another: the scenario broke its
     /// contract, and the reduction stopped.
     NotSmaller,
+    /// The failure reproduces, but the validator rejects the run: the right verdict
+    /// through the wrong mechanism (bn-5kmuf). Not kept. `decided` when the scenario tried
+    /// every run of the candidate ([`Scenario::search_exhausted`]).
+    MechanismLost {
+        /// Why the validator rejects it.
+        why: LostKind,
+        /// Whether the rejection decides the candidate.
+        decided: bool,
+    },
+}
+
+/// A [`Rejection`] without its rendering, for the transcript's verdict; the rendering is
+/// the entry's reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LostKind {
+    /// The validator's replay says the run is no run of the program.
+    NotARun,
+    /// The run does not reproduce the failure on the validator's replay.
+    FailureLost,
+    /// A different mechanism.
+    Mechanism(mechanism::Mismatch),
+}
+
+impl LostKind {
+    fn of(r: &Rejection) -> Self {
+        match r {
+            Rejection::NotARun(_) => Self::NotARun,
+            Rejection::FailureLost(_) => Self::FailureLost,
+            Rejection::Mechanism(m) => Self::Mechanism(*m),
+        }
+    }
 }
 
 impl ConfigVerdict {
@@ -240,7 +299,13 @@ impl ConfigVerdict {
     /// within the scope: what a minimality claim rests on.
     #[must_use]
     pub const fn decided_non_failure(self) -> bool {
-        matches!(self, Self::Holds | Self::NotARun | Self::OutOfScope)
+        matches!(
+            self,
+            Self::Holds
+                | Self::NotARun
+                | Self::OutOfScope
+                | Self::MechanismLost { decided: true, .. }
+        )
     }
 }
 
@@ -291,14 +356,19 @@ pub enum ScenarioGuarantee {
     /// to the failure.
     Reproduces,
     /// RFC 0028's `OwnerMinimal`, over the scenario's owner candidates: no in-scope
-    /// candidate of the owner pass still fails. What an owner candidate removes (a task,
+    /// candidate of the owner pass still fails through the original failure's mechanism
+    /// (bn-5kmuf). A candidate that fails only through another mechanism
+    /// ([`ConfigVerdict::MechanismLost`], decided) does not refute it: the class is
+    /// minimality among mechanism-preserving configurations. What an owner candidate removes (a task,
     /// an incarnation, a node) is the scenario's to say, and its evidence must say it.
     OwnerMinimal,
     /// RFC 0028's `FaultMinimal`, over the scenario's fault candidates: no in-scope
-    /// candidate of the fault pass (a fault dropped or placed earlier) still fails.
+    /// candidate of the fault pass (a fault dropped or placed earlier) still fails
+    /// through the original failure's mechanism.
     FaultMinimal,
     /// RFC 0028's `ValueMinimal`, over the scenario's value candidates: no in-scope
-    /// one-step reduction of the value domain still fails.
+    /// one-step reduction of the value domain still fails through the original failure's
+    /// mechanism, renamed.
     ValueMinimal,
 }
 
@@ -340,10 +410,12 @@ pub struct DimensionRecord {
     pub not_a_run: u64,
     /// Candidates outside the scope.
     pub out_of_scope: u64,
-    /// Candidates the scenario could not decide.
+    /// Candidates the scenario could not decide, or whose mechanism check could not.
     pub inconclusive: u64,
     /// Candidates judged from the memo.
     pub memo: u64,
+    /// Candidates whose failure reproduced through another mechanism: never kept.
+    pub mechanism_lost: u64,
     /// How it ended.
     pub end: DimensionEnd,
 }
@@ -357,15 +429,20 @@ pub enum ScenarioRefusal {
     InputNotARun(String),
     /// The input configuration's run is inconclusive.
     InputInconclusive(InconclusiveReason, String),
+    /// The validator rejects the input itself: its failing run does not show the
+    /// mechanism derived from the original failure ([`crate::mechanism`]).
+    MechanismNotInInput(Rejection),
 }
 
 /// A scenario reduction's result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScenarioReduction<C> {
-    /// The reduction reached a round that kept nothing.
+    /// The reduction reached a round that kept nothing, and the reduced configuration's
+    /// failing run preserves the original failure's mechanism ([`crate::mechanism`]):
+    /// the only way a reduction returns a configuration.
     Reduced {
-        /// The reduced configuration: the last version.
-        config: C,
+        /// The reduced configuration: the last version, validated.
+        config: Validated<C>,
         /// Every version, from the input: each one ran and failed.
         versions: Vec<C>,
         /// What was checked of it, ascending.
@@ -374,26 +451,54 @@ pub enum ScenarioReduction<C> {
         passes: Vec<DimensionRecord>,
         /// Each attempt, in order.
         attempts: ConfigAttempts,
-        /// What it spent.
+        /// What the passes spent. Each check's spending is in `checks`.
         spent: Spent,
+        /// Each mechanism check, in order: the input, then each candidate whose run
+        /// failed, kept or not.
+        checks: Vec<CheckEntry>,
     },
-    /// The reduction stopped early. Not a success, and no minimality is claimed.
+    /// The reduction reached a round that kept nothing, but the validator rejects the
+    /// reduced configuration's run: the right verdict through the wrong mechanism. Not a
+    /// success.
+    Rejected {
+        /// The reduced configuration, which is not validated.
+        config: C,
+        /// Why the validator rejects it.
+        why: Rejection,
+        /// Every version, from the input.
+        versions: Vec<C>,
+        /// Each pass, in order.
+        passes: Vec<DimensionRecord>,
+        /// Each attempt, in order.
+        attempts: ConfigAttempts,
+        /// What the passes spent.
+        spent: Spent,
+        /// Each mechanism check, in order.
+        checks: Vec<CheckEntry>,
+    },
+    /// The reduction stopped early, or the validator could not decide its result
+    /// (INV-008). Not a success, and no minimality is claimed.
     Inconclusive {
-        /// [`InconclusiveReason::ResourceExhausted`] when the budget ran out;
-        /// [`InconclusiveReason::EngineError`] when the scenario broke its contract.
+        /// [`InconclusiveReason::ResourceExhausted`] when the budget or the validation
+        /// allowance ran out; [`InconclusiveReason::EngineError`] when the scenario broke
+        /// its contract; the validator's reason when it could not decide.
         reason: InconclusiveReason,
-        /// The last configuration that ran and failed, if the input did.
-        best: Option<C>,
+        /// The last configuration that ran and failed, if the input did, with its
+        /// mechanism check.
+        best: Option<Checked<C>>,
         /// Every version kept before the stop.
         versions: Vec<C>,
         /// Each pass, in order.
         passes: Vec<DimensionRecord>,
         /// Each attempt, in order.
         attempts: ConfigAttempts,
-        /// What it spent.
+        /// What the passes spent.
         spent: Spent,
+        /// Each mechanism check, in order.
+        checks: Vec<CheckEntry>,
     },
-    /// The reduction did not start: the input does not fail. The start's run is in the
+    /// The reduction did not start: the input does not fail, or does not show the
+    /// mechanism. The start's run is in the
     /// transcript and its cost in `spent`.
     Refused {
         /// Why.
@@ -406,9 +511,9 @@ pub enum ScenarioReduction<C> {
 }
 
 impl<C> ScenarioReduction<C> {
-    /// The reduced configuration, if the reduction finished.
+    /// The reduced, validated configuration, if the reduction finished with one.
     #[must_use]
-    pub const fn config(&self) -> Option<&C> {
+    pub const fn config(&self) -> Option<&Validated<C>> {
         match self {
             Self::Reduced { config, .. } => Some(config),
             _ => None,
@@ -420,15 +525,35 @@ impl<C> ScenarioReduction<C> {
     pub const fn attempts(&self) -> Option<&ConfigAttempts> {
         match self {
             Self::Reduced { attempts, .. }
+            | Self::Rejected { attempts, .. }
             | Self::Inconclusive { attempts, .. }
             | Self::Refused { attempts, .. } => Some(attempts),
+        }
+    }
+
+    /// The mechanism checks, unless the reduction was refused.
+    #[must_use]
+    pub fn checks(&self) -> Option<&[CheckEntry]> {
+        match self {
+            Self::Reduced { checks, .. }
+            | Self::Rejected { checks, .. }
+            | Self::Inconclusive { checks, .. } => Some(checks),
+            Self::Refused { .. } => None,
         }
     }
 }
 
 /// The running state.
-struct State<'a, S: Scenario> {
+struct State<'a, S: Scenario + Validator<<S as Scenario>::Config>> {
     scenario: &'a mut S,
+    /// The original failure's mechanism, derived once.
+    mechanism: Result<Mechanism<<S as Validator<S::Config>>::Label>, Undecided>,
+    /// The validation allowance left.
+    allowance: Allowance,
+    /// Each check, in order.
+    checks: Vec<CheckEntry>,
+    /// Each configuration checked, and its outcome: none is checked twice.
+    checked: BTreeMap<S::Config, Outcome>,
     budget: Budget,
     spent: Spent,
     attempts: ConfigAttempts,
@@ -495,6 +620,7 @@ struct Counts {
     out_of_scope: u64,
     inconclusive: u64,
     memo: u64,
+    mechanism_lost: u64,
 }
 
 /// What one transcript entry says, before the bound admits it.
@@ -513,7 +639,33 @@ struct At {
     round: u64,
 }
 
-impl<S: Scenario> State<'_, S> {
+impl<S: Scenario + Validator<<S as Scenario>::Config>> State<'_, S> {
+    /// Check `config` with the validator, as `stage`, and record the check. A
+    /// configuration checked before keeps that outcome and is not checked again.
+    fn check(&mut self, config: &S::Config, stage: Stage) -> Outcome {
+        if let Some(outcome) = self.checked.get(config) {
+            return outcome.clone();
+        }
+        let outcome = mechanism::check(
+            &mut *self.scenario,
+            &self.mechanism,
+            config,
+            &mut self.allowance,
+        );
+        self.checks.push(CheckEntry {
+            stage,
+            outcome: outcome.clone(),
+        });
+        self.checked.insert(config.clone(), outcome.clone());
+        outcome
+    }
+
+    /// [`Self::check`] of the last version.
+    fn check_last(&mut self, stage: Stage) -> Outcome {
+        let config = self.versions.last().expect("a version").clone();
+        self.check(&config, stage)
+    }
+
     fn version(&self) -> u64 {
         u64::try_from(self.versions.len().saturating_sub(1)).unwrap_or(u64::MAX)
     }
@@ -584,7 +736,37 @@ impl<S: Scenario> State<'_, S> {
             return Err(e);
         }
         let ran = self.scenario.run(config);
-        let verdict = verdict_of(&ran);
+        let mut verdict = verdict_of(&ran);
+        let mut rendering = reason_of(&ran).to_owned();
+        // A candidate's failing run is kept only when it preserves the original
+        // failure's mechanism (bn-5kmuf). The start is checked by the caller.
+        if let (Ran::Fails, Some(dimension)) = (&ran, at.dimension) {
+            let stage = Stage::Dimension {
+                round: at.round,
+                dimension,
+            };
+            match self.check(config, stage) {
+                Outcome::Preserved(_) => {}
+                Outcome::Rejected(why, _) => {
+                    verdict = ConfigVerdict::MechanismLost {
+                        why: LostKind::of(&why),
+                        decided: self.scenario.search_exhausted(config),
+                    };
+                    rendering =
+                        format!("the failure reproduces through another mechanism: {why:?}");
+                }
+                Outcome::Undecided(InconclusiveReason::ResourceExhausted, ..) => {
+                    // The check could not be paid for: the reduction stops, as when the
+                    // budget runs out, rather than spend runs it can never keep.
+                    self.attempts.omitted = self.attempts.omitted.saturating_add(1);
+                    return Err(Exhausted::Work);
+                }
+                Outcome::Undecided(reason, detail, _) => {
+                    verdict = ConfigVerdict::Inconclusive(reason);
+                    rendering = format!("the mechanism check could not decide: {detail}");
+                }
+            }
+        }
         self.note(
             index,
             at,
@@ -592,12 +774,20 @@ impl<S: Scenario> State<'_, S> {
                 label,
                 measure,
                 verdict,
-                reason: reason_of(&ran),
+                reason: &rendering,
                 memo_of: None,
             },
         );
         self.memo.insert(config.clone(), (index, verdict));
-        Ok(ran)
+        // The scenario's own answer, unless the check changed it: the start's refusal
+        // keeps its kind (holds, no run, inconclusive).
+        Ok(match verdict {
+            ConfigVerdict::MechanismLost { .. } => Ran::Holds(rendering),
+            ConfigVerdict::Inconclusive(reason) if matches!(ran, Ran::Fails) => {
+                Ran::Inconclusive(reason, rendering)
+            }
+            _ => ran,
+        })
     }
 
     /// The work one memo lookup or insert costs: its comparisons.
@@ -628,6 +818,7 @@ impl<S: Scenario> State<'_, S> {
             out_of_scope: c.out_of_scope,
             inconclusive: c.inconclusive,
             memo: c.memo,
+            mechanism_lost: c.mechanism_lost,
             end,
         });
     }
@@ -737,9 +928,11 @@ impl<S: Scenario> State<'_, S> {
                     verdict
                 } else {
                     match self.run(&cand.config, at, &cand.label, m) {
-                        Ok(ran) => {
+                        Ok(_) => {
                             c.runs += 1;
-                            verdict_of(&ran)
+                            self.memo
+                                .get(&cand.config)
+                                .map_or(ConfigVerdict::Holds, |e| e.1)
                         }
                         Err(e) => {
                             self.record(round, d, before, &c, DimensionEnd::Exhausted(e));
@@ -757,6 +950,10 @@ impl<S: Scenario> State<'_, S> {
                     ConfigVerdict::Inconclusive(_) => {
                         c.inconclusive += 1;
                         decided = false;
+                    }
+                    ConfigVerdict::MechanismLost { decided: d, .. } => {
+                        c.mechanism_lost += 1;
+                        decided &= d;
                     }
                     // Neither is ever memoized: an out-of-scope candidate is not run, and a
                     // candidate that is not smaller stops the reduction before its run.
@@ -780,14 +977,21 @@ impl<S: Scenario> State<'_, S> {
 }
 
 /// Reduce the failing configuration `start` along the owner, fault and value
-/// dimensions of `scenario`, within `budget`. See the module documentation.
-pub fn reduce_scenario<S: Scenario>(
+/// dimensions of `scenario`, within `budget`. See the module documentation. The scenario
+/// is its own [`Validator`]: the input's failing run and the result of every pass that
+/// kept a candidate are checked against the original failure's mechanism.
+pub fn reduce_scenario<S: Scenario + Validator<<S as Scenario>::Config>>(
     scenario: &mut S,
     start: S::Config,
     budget: Budget,
 ) -> ScenarioReduction<S::Config> {
+    let mechanism = scenario.mechanism();
     let mut st = State {
         scenario,
+        mechanism,
+        allowance: budget.validation(),
+        checks: Vec::new(),
+        checked: BTreeMap::new(),
         budget,
         spent: Spent::default(),
         attempts: ConfigAttempts::default(),
@@ -819,6 +1023,29 @@ pub fn reduce_scenario<S: Scenario>(
             spent: st.spent,
         };
     }
+    // The input's failing run must show the mechanism: otherwise no result can be
+    // checked against it. A check that cannot decide stops the reduction (INV-008).
+    match st.check_last(Stage::Input) {
+        Outcome::Preserved(_) => {}
+        Outcome::Rejected(why, _) => {
+            return ScenarioReduction::Refused {
+                why: ScenarioRefusal::MechanismNotInInput(why),
+                attempts: st.attempts,
+                spent: st.spent,
+            };
+        }
+        Outcome::Undecided(reason, ..) => {
+            return ScenarioReduction::Inconclusive {
+                reason,
+                best: None,
+                versions: Vec::new(),
+                passes: st.passes,
+                attempts: st.attempts,
+                spent: st.spent,
+                checks: st.checks,
+            };
+        }
+    }
     let scopes: Vec<Result<(), String>> = Dimension::ALL
         .iter()
         .map(|&d| match st.scenario.declare(d) {
@@ -847,6 +1074,13 @@ pub fn reduce_scenario<S: Scenario>(
                 Ok((kept, all_decided)) => {
                     kept_in_round |= kept;
                     decided[d.index()] = all_decided;
+                    if kept {
+                        // The pass's result, checked.
+                        st.check_last(Stage::Dimension {
+                            round,
+                            dimension: d,
+                        });
+                    }
                 }
                 Err(stop) => return stopped(st, stop, true),
             }
@@ -860,34 +1094,77 @@ pub fn reduce_scenario<S: Scenario>(
                 }
             }
             guarantees.sort_unstable();
+            // The last version was checked when its pass kept it, or as the input, so
+            // this reuses that check.
+            let outcome = st.check_last(Stage::Result);
             let config = st.versions.last().expect("a version").clone();
-            return ScenarioReduction::Reduced {
-                config,
-                versions: st.versions,
-                guarantees,
-                passes: st.passes,
-                attempts: st.attempts,
-                spent: st.spent,
+            return match outcome.attach(config) {
+                Checked::Preserved(config) => ScenarioReduction::Reduced {
+                    config,
+                    versions: st.versions,
+                    guarantees,
+                    passes: st.passes,
+                    attempts: st.attempts,
+                    spent: st.spent,
+                    checks: st.checks,
+                },
+                Checked::Rejected {
+                    subject: config,
+                    why,
+                    ..
+                } => ScenarioReduction::Rejected {
+                    config,
+                    why,
+                    versions: st.versions,
+                    passes: st.passes,
+                    attempts: st.attempts,
+                    spent: st.spent,
+                    checks: st.checks,
+                },
+                Checked::Undecided {
+                    subject,
+                    reason,
+                    detail,
+                    spent,
+                } => ScenarioReduction::Inconclusive {
+                    reason,
+                    best: Some(Checked::Undecided {
+                        subject,
+                        reason,
+                        detail,
+                        spent,
+                    }),
+                    versions: st.versions,
+                    passes: st.passes,
+                    attempts: st.attempts,
+                    spent: st.spent,
+                    checks: st.checks,
+                },
             };
         }
         round = round.saturating_add(1);
     }
 }
 
-fn stopped<S: Scenario>(
-    st: State<'_, S>,
+fn stopped<S: Scenario + Validator<<S as Scenario>::Config>>(
+    mut st: State<'_, S>,
     stop: Stop,
     started: bool,
 ) -> ScenarioReduction<S::Config> {
+    let best = started.then(|| {
+        let outcome = st.check_last(Stage::Best);
+        outcome.attach(st.versions.last().expect("a version").clone())
+    });
     ScenarioReduction::Inconclusive {
         reason: match stop {
             Stop::Exhausted(_) => InconclusiveReason::ResourceExhausted,
             Stop::Contract => InconclusiveReason::EngineError,
         },
-        best: started.then(|| st.versions.last().expect("a version").clone()),
+        best,
         versions: if started { st.versions } else { Vec::new() },
         passes: st.passes,
         attempts: st.attempts,
         spent: st.spent,
+        checks: st.checks,
     }
 }

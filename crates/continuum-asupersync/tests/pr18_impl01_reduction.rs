@@ -126,6 +126,9 @@ fn transcript_lines(r: &Reduction) -> Vec<String> {
         Reduction::Reduced {
             transcript, spent, ..
         }
+        | Reduction::Rejected {
+            transcript, spent, ..
+        }
         | Reduction::Inconclusive {
             transcript, spent, ..
         } => (transcript, spent),
@@ -165,7 +168,7 @@ fn core_section(id: &str, c: &Case, program: &ProgramReduction) -> String {
     let mut substrate_cores = Vec::new();
     for mode in [Deletion::Configurations, Deletion::Atoms] {
         let (r, _) = minimize(c, mode);
-        let core = r.core().expect("reduced");
+        let core = result_events(&r).expect("finished");
         substrate_cores.push((mode, core.events.clone()));
         let _ = writeln!(s, "reduction with deletion over {mode:?}:");
         render_core(&mut s, c, &r);
@@ -273,7 +276,7 @@ fn by_actor(c: &Case, o: &Operations, events: &[usize]) -> String {
 
 /// A reduction's pass transcript, core, witnesses and story.
 fn render_core(s: &mut String, c: &Case, r: &Reduction) {
-    let core = r.core().expect("reduced");
+    let core = result_events(r).expect("finished");
     for line in transcript_lines(r) {
         let _ = writeln!(s, "  {line}");
     }
@@ -363,12 +366,20 @@ fn corpus_facts() -> &'static CorpusFacts {
             let Replayed::Fails { witnesses } = oracle.replay(&whole) else {
                 panic!("{}: the whole journal replays to its failure", c.label);
             };
-            let closed = reduce::closure_pass(&order, &mut oracle, BUDGET);
-            let Reduction::Reduced {
-                core, transcript, ..
-            } = &closed
-            else {
-                panic!("{}: closure finished: {closed:?}", c.label);
+            let mut validator = ProgramValidator::new(c, operations(c));
+            let closed = reduce::closure_pass(&order, &mut oracle, &mut validator, BUDGET);
+            let (core, transcript) = match &closed {
+                Reduction::Reduced {
+                    core, transcript, ..
+                } => (core.subject(), transcript),
+                // The substrate closure is judged by the program's validator (bn-5kmuf);
+                // its events are measured here whatever the validator said.
+                Reduction::Rejected {
+                    candidate,
+                    transcript,
+                    ..
+                } => (candidate, transcript),
+                _ => panic!("{}: closure finished: {closed:?}", c.label),
             };
             if matches!(transcript[0].end, PassEnd::ClosureNotReplayPreserving(_)) {
                 eprintln!("{}: {:?}", c.label, transcript[0].end);
@@ -407,7 +418,7 @@ fn corpus_facts() -> &'static CorpusFacts {
             {
                 let (full, replays) = minimize(c, mode);
                 f.replays += replays;
-                let core2 = full.core().expect("reduced");
+                let core2 = result_events(&full).expect("finished");
                 assert!(
                     matches!(fresh.replay(&core2.events), Replayed::Fails { .. }),
                     "{}: the {mode:?} deletion core fails",
@@ -567,10 +578,10 @@ fn determinism_section() -> String {
     let (b, rb) = minimize(&again, Deletion::Configurations);
     assert_eq!(a, b, "identical inputs give identical reductions");
     assert_eq!(ra, rb);
-    let ca = core_journal(c, &a.core().expect("core").events)
+    let ca = core_journal(c, &result_events(&a).expect("core").events)
         .encode()
         .expect("encodes");
-    let cb = core_journal(&again, &b.core().expect("core").events)
+    let cb = core_journal(&again, &result_events(&b).expect("core").events)
         .encode()
         .expect("encodes");
     assert_eq!(ca, cb, "byte-identical cores");
@@ -653,11 +664,13 @@ fn symmetry_section() -> String {
         assert_ne!(swapped, c.built.roles);
         let mut o1 = RegisterOracle::new(&c.journal, &c.built.roles, c.target);
         let mut o2 = RegisterOracle::new(&c.journal, &swapped, c.target);
-        let a = reduce::minimize(&order, Deletion::Configurations, &mut o1, BUDGET);
-        let b = reduce::minimize(&order, Deletion::Configurations, &mut o2, BUDGET);
-        assert_eq!(a, b, "{}: the value swap moves nothing", c.label);
         let mut swapped_case = c.clone();
-        swapped_case.built.roles = swapped;
+        swapped_case.built.roles = swapped.clone();
+        let mut v1 = ProgramValidator::new(c, operations(c));
+        let a = reduce::minimize(&order, Deletion::Configurations, &mut o1, &mut v1, BUDGET);
+        let mut v2 = ProgramValidator::new(&swapped_case, operations(&swapped_case));
+        let b = reduce::minimize(&order, Deletion::Configurations, &mut o2, &mut v2, BUDGET);
+        assert_eq!(a, b, "{}: the value swap moves nothing", c.label);
         let pa = minimize_program(c, Deletion::Atoms);
         let pb = minimize_program(&swapped_case, Deletion::Atoms);
         assert_eq!(
@@ -669,7 +682,7 @@ fn symmetry_section() -> String {
             s,
             "M01 {}: roles with v0 and v1 swapped give the identical reduction, core {} events; under the program replay too, core {} events",
             c.label,
-            a.core().expect("core").events.len(),
+            result_events(&a).expect("core").events.len(),
             pa.reduction.core().expect("core").events.len()
         );
     }
@@ -772,7 +785,7 @@ fn failing_prefix(core: &reduce::Core) -> usize {
 fn m01_agreement_failure_reduces_to_a_causal_core_with_its_mechanism() {
     let c = agreement_witness();
     let (r, _) = minimize(c, Deletion::Configurations);
-    let core = r.core().expect("reduced");
+    let core = result_events(&r).expect("finished");
     assert!(core.events.len() < failing_prefix(core));
     assert!(core.events.len() < c.journal.len());
     assert_eq!(
@@ -802,7 +815,7 @@ fn m01_agreement_failure_reduces_to_a_causal_core_with_its_mechanism() {
 fn m01_acked_not_durable_failure_reduces_to_a_causal_core() {
     let c = acked_witness();
     let (r, _) = minimize(c, Deletion::Configurations);
-    let core = r.core().expect("reduced");
+    let core = result_events(&r).expect("finished");
     assert!(core.events.len() < failing_prefix(core));
     assert!(core.guarantees.contains(&Guarantee::CausallyClosed));
     let st = story(c, &core.events);
@@ -827,7 +840,7 @@ fn m01_acked_not_durable_failure_reduces_to_a_causal_core() {
 fn deletion_over_atoms_loses_the_mechanism_under_a_substrate_replay() {
     let c = agreement_witness();
     let (r, _) = minimize(c, Deletion::Atoms);
-    let core = r.core().expect("reduced");
+    let core = result_events(&r).expect("finished");
     assert!(!core.guarantees.contains(&Guarantee::CausallyClosed));
     let st = story(c, &core.events);
     assert!(st.iter().all(|s| s.starts_with("Ack(")), "{st:?}");
@@ -960,7 +973,7 @@ fn the_substrate_cores_are_not_runs_of_the_program() {
         };
         for mode in [Deletion::Configurations, Deletion::Atoms] {
             let (r, _) = minimize(c, mode);
-            let events = &r.core().expect("reduced").events;
+            let events = &result_events(&r).expect("finished").events;
             let verdict = oracle.replay(events);
             assert!(
                 matches!(
@@ -1183,7 +1196,14 @@ fn an_unreplayable_candidate_is_refused_not_kept() {
     let order = order_of(c);
     assert!(!order.is_down_closed(&kept));
     assert_eq!(
-        reduce::deletion_pass(&order, kept, Deletion::Configurations, &mut oracle, BUDGET),
+        reduce::deletion_pass(
+            &order,
+            kept,
+            Deletion::Configurations,
+            &mut oracle,
+            &mut NoMechanism,
+            BUDGET
+        ),
         Reduction::Refused(reduce::Refusal::NotAConfiguration)
     );
 }
@@ -1205,7 +1225,13 @@ fn a_run_that_does_not_fail_is_refused() {
     for target in [Target::Agreement, Target::AckedNotDurable] {
         let mut oracle = RegisterOracle::new(&journal, &built.roles, target);
         assert_eq!(
-            reduce::minimize(&order, Deletion::Configurations, &mut oracle, BUDGET),
+            reduce::minimize(
+                &order,
+                Deletion::Configurations,
+                &mut oracle,
+                &mut NoMechanism,
+                BUDGET
+            ),
             Reduction::Refused(reduce::Refusal::InputHolds)
         );
     }
@@ -1222,6 +1248,7 @@ fn an_exhausted_budget_is_inconclusive_with_the_best_core() {
         &order,
         Deletion::Configurations,
         &mut oracle,
+        &mut ProgramValidator::new(c, operations(c)),
         Budget::new(5, 1 << 26),
     );
     let Reduction::Inconclusive {
@@ -1240,6 +1267,7 @@ fn an_exhausted_budget_is_inconclusive_with_the_best_core() {
     );
     assert_eq!(spent.replays, 5);
     let best = best.expect("the closure core");
+    let best = best.subject();
     assert!(!best.guarantees.contains(&Guarantee::CausallyMinimal));
     assert!(matches!(
         oracle.replay(&best.events),
@@ -1255,6 +1283,7 @@ fn an_exhausted_budget_is_inconclusive_with_the_best_core() {
         &order,
         Deletion::Configurations,
         &mut oracle,
+        &mut ProgramValidator::new(c, operations(c)),
         Budget::new(0, 1 << 26),
     );
     assert!(matches!(r, Reduction::Inconclusive { best: None, .. }));

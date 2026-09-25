@@ -5,16 +5,16 @@
 [pr18-impl02-01-m01-agreement-scenario]
 run: M01 scenario plan 0 log 146, target abstract_register::Agreement; the original run has 137 events
 start configuration: epochs 1, every owner spawned; a: e0 v0 crash-submitted->v1 | b: e0 v0 clean | c: e0 v1 clean
-  round 0 pass Owner: measure [11, 18, 6] -> [11, 18, 6]; 3 offered, 3 run, 0 kept, 3 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo; Done
-  round 0 pass Fault: measure [11, 18, 6] -> [11, 18, 6]; 3 offered, 3 run, 0 kept, 3 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo; Done
-  round 0 pass Value: measure [11, 18, 6] -> [11, 18, 6]; 2 offered, 0 run, 0 kept, 0 held, 0 not a run, 2 out of scope, 0 inconclusive, 0 memo; Done
+  round 0 pass Owner: measure [11, 18, 6] -> [11, 18, 6]; 3 offered, 3 run, 0 kept, 3 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo, 0 mechanism lost; Done
+  round 0 pass Fault: measure [11, 18, 6] -> [11, 18, 6]; 3 offered, 3 run, 0 kept, 3 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo, 0 mechanism lost; Done
+  round 0 pass Value: measure [11, 18, 6] -> [11, 18, 6]; 2 offered, 0 run, 0 kept, 0 held, 0 not a run, 2 out of scope, 0 inconclusive, 0 memo, 0 mechanism lost; Done
   spent: 7 runs, 37617713 work units
   version 0: epochs 1, every owner spawned; a: e0 v0 crash-submitted->v1 | b: e0 v0 clean | c: e0 v1 clean
 reduced configuration: epochs 1, every owner spawned; a: e0 v0 crash-submitted->v1 | b: e0 v0 clean | c: e0 v1 clean
   scenario guarantees [Reproduces, OwnerMinimal, FaultMinimal, ValueMinimal]; licensed by the transcript alone: Ok([Owner, Fault, Value]); decided without a schedule: 6
   its run (Guided): 137 events, digest 4959b3f8e8f8cfd91b4117f8245f55cf59554ff4006f6304b694c0899dfe3fa0; log [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 3, 4, 3, 1, 3, 2, 3, 2, 0, 0, 1, 2, 0, 0, 1, 0, 2, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 event reduction of the reduced run (bn-2z08o's closure and deletion over atoms under the program replay): closure 137 -> 93, deletion 93 -> 93, 184 replays, guarantees [ReplayPreserving, CausallyClosed, AtomMinimal]
-  core: 93 events: 67.9% of the original run, 67.9% of the reduced run; mechanism kept: true; campaign checker on the core's re-execution reports abstract_register::Agreement: true; atom minimality from the transcript alone: Ok(40)
+  core: 93 events: 67.9% of the original run, 67.9% of the reduced run; mechanism check (bn-5kmuf): preserved, the original failure's mechanism embedded at story positions [5, 2, 3, 7, 10] of 11; campaign checker on the core's re-execution reports abstract_register::Agreement: true; atom minimality from the transcript alone: Ok(40)
   causal story: Reserve(n=b,epoch=0) Reserve(n=a,epoch=0) Submit(n=a,epoch=0,value=v0) Submit(n=b,epoch=0,value=v0) Reserve(n=c,epoch=0) Ack(epoch=0,value=v0) Submit(n=c,epoch=0,value=v1) Lose(n=a,epoch=0,value=v0) Reserve(n=a,epoch=0) Submit(n=a,epoch=0,value=v1) Ack(epoch=0,value=v1)
   core digest 05d5de685074f4a5d92383551a2e6d187ec401405e6e37485c02ed4a499f56ad
     0 lifecycle region-opened r1 parent=r0
@@ -114,12 +114,12 @@ event reduction of the reduced run (bn-2z08o's closure and deletion over atoms u
 [pr18-impl02-02-m01-acked-not-durable-scenario]
 run: M01 sweep-one-epoch plan 81 log 5, target RuntimeToAbstract/AckedNotDurable; the original run has 97 events
 start configuration: epochs 1, every owner spawned; a: e0 v0 clean | b: e0 v0 clean | c: e0 v0 clean
-  round 0 pass Owner: measure [8, 0, 5] -> [6, 0, 5]; 3 offered, 3 run, 1 kept, 2 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo; Done
-  round 0 pass Fault: measure [6, 0, 5] -> [6, 0, 5]; 0 offered, 0 run, 0 kept, 0 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo; Done
-  round 0 pass Value: measure [6, 0, 5] -> [6, 0, 5]; 0 offered, 0 run, 0 kept, 0 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo; Done
-  round 1 pass Owner: measure [6, 0, 5] -> [6, 0, 5]; 2 offered, 0 run, 0 kept, 2 held, 0 not a run, 0 out of scope, 0 inconclusive, 2 memo; Done
-  round 1 pass Fault: measure [6, 0, 5] -> [6, 0, 5]; 0 offered, 0 run, 0 kept, 0 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo; Done
-  round 1 pass Value: measure [6, 0, 5] -> [6, 0, 5]; 0 offered, 0 run, 0 kept, 0 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo; Done
+  round 0 pass Owner: measure [8, 0, 5] -> [6, 0, 5]; 3 offered, 3 run, 1 kept, 2 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo, 0 mechanism lost; Done
+  round 0 pass Fault: measure [6, 0, 5] -> [6, 0, 5]; 0 offered, 0 run, 0 kept, 0 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo, 0 mechanism lost; Done
+  round 0 pass Value: measure [6, 0, 5] -> [6, 0, 5]; 0 offered, 0 run, 0 kept, 0 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo, 0 mechanism lost; Done
+  round 1 pass Owner: measure [6, 0, 5] -> [6, 0, 5]; 2 offered, 0 run, 0 kept, 2 held, 0 not a run, 0 out of scope, 0 inconclusive, 2 memo, 0 mechanism lost; Done
+  round 1 pass Fault: measure [6, 0, 5] -> [6, 0, 5]; 0 offered, 0 run, 0 kept, 0 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo, 0 mechanism lost; Done
+  round 1 pass Value: measure [6, 0, 5] -> [6, 0, 5]; 0 offered, 0 run, 0 kept, 0 held, 0 not a run, 0 out of scope, 0 inconclusive, 0 memo, 0 mechanism lost; Done
   spent: 4 runs, 41201694 work units
   version 0: epochs 1, every owner spawned; a: e0 v0 clean | b: e0 v0 clean | c: e0 v0 clean
   version 1: epochs 1, only used owners spawned; a: e0 v0 clean | b: e0 v0 clean | c: e0 idle
@@ -127,7 +127,7 @@ reduced configuration: epochs 1, only used owners spawned; a: e0 v0 clean | b: e
   scenario guarantees [Reproduces, OwnerMinimal, FaultMinimal, ValueMinimal]; licensed by the transcript alone: Ok([Owner, Fault, Value]); decided without a schedule: 2
   its run (Guided): 73 events, digest b88b7756031bc2c985ba2aa8a5d837fdd93237ff5cd0da0f5332d2aa47371b77; log [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 1, 1, 2, 2, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 event reduction of the reduced run (bn-2z08o's closure and deletion over atoms under the program replay): closure 73 -> 42, deletion 42 -> 42, 94 replays, guarantees [ReplayPreserving, CausallyClosed, AtomMinimal]
-  core: 42 events: 43.3% of the original run, 57.5% of the reduced run; mechanism kept: true; campaign checker on the core's re-execution reports RuntimeToAbstract/AckedNotDurable: true; atom minimality from the transcript alone: Ok(20)
+  core: 42 events: 43.3% of the original run, 57.5% of the reduced run; mechanism check (bn-5kmuf): preserved, the original failure's mechanism embedded at story positions [4, 2, 3] of 5; campaign checker on the core's re-execution reports RuntimeToAbstract/AckedNotDurable: true; atom minimality from the transcript alone: Ok(20)
   causal story: Reserve(n=b,epoch=0) Reserve(n=a,epoch=0) Submit(n=a,epoch=0,value=v0) Submit(n=b,epoch=0,value=v0) Ack(epoch=0,value=v0)
   core digest dbf518e4400fd4d5c5d39edf3f9eb7e5f44f0c5939f9a9d56843548b6030430b
     0 lifecycle region-opened r1 parent=r0
@@ -176,14 +176,16 @@ event reduction of the reduced run (bn-2z08o's closure and deletion over atoms u
 [pr18-impl02-03-corpus]
 corpus: every failing run of M01's scenario plan (400 runs), targets ["abstract_register::Agreement=42", "RuntimeToAbstract/AckedNotDurable=358"]
 the start configuration's guided run is the original log on 400 of 400 runs
-scenario passes changed the configuration on 358 runs; 1326 candidate evaluations decided without a schedule; 2442 configuration evaluations charged; guarantees {Reproduces: 400, OwnerMinimal: 400, FaultMinimal: 400, ValueMinimal: 400}; minimality licensed by the transcript alone on 400; OwnerMinimal covers idle slots and pruned owners, and the model keeps its three nodes
+scenario passes changed the configuration on 358 runs; 1374 candidate evaluations decided without a schedule; 2514 configuration evaluations charged; guarantees {Reproduces: 400, OwnerMinimal: 400, FaultMinimal: 400, ValueMinimal: 400}; minimality licensed by the transcript alone on 400; OwnerMinimal covers idle slots and pruned owners, and the model keeps its three nodes
   reduced to epochs 1, every owner spawned; a: e0 v0 crash-submitted->v1 | b: e0 v0 clean | c: e0 v1 clean [abstract_register::Agreement]: 42 runs
-  reduced to epochs 1, only used owners spawned; a: e0 v0 clean | b: e0 v0 clean | c: e0 idle [RuntimeToAbstract/AckedNotDurable]: 358 runs
-composed cores: 400 of 400 keep the mechanism; the campaign's checker reports the target on 400 re-executed cores; 400 are atom-minimal
-core as a share of the original run: median 31.5%, min 28.5%, max 69.2%; of the reduced run it was cut from: median 59.2%, min 55.7%, max 69.2%; bn-2z08o's cores of the same runs without the scenario passes: median 39.2%, max 69.2%
+  reduced to epochs 1, only used owners spawned; a: e0 v0 clean | b: e0 v0 clean | c: e0 idle [RuntimeToAbstract/AckedNotDurable]: 334 runs
+  reduced to epochs 1, only used owners spawned; a: e0 v1 clean | b: e0 idle | c: e0 v1 clean [RuntimeToAbstract/AckedNotDurable]: 24 runs
+composed cores: 400 of 400 validated against the original failure's mechanism (bn-5kmuf); the campaign's checker reports the target on 400 re-executed cores; 400 are atom-minimal
+candidates whose failure reproduced through another mechanism, rejected by the mechanism check and never kept: 24 on 24 runs
+core as a share of the original run: median 31.5%, min 27.3%, max 69.2%; of the reduced run it was cut from: median 59.2%, min 55.7%, max 69.2%; bn-2z08o's cores of the same runs without the scenario passes: median 39.2%, max 69.2%
 median length: original run 140, reduced run 76, core 45
 PR-18 exit, research/26 quote-id=causal-minimization-core-ratio (the replay-preserving causal core <= 10% of trace length at the corpus median): NOT MET; the composed core is cut from the reduced run, so it is measured against both traces: 31.5% of the original run and 59.2% of the reduced run at the median; the corpus is M01's scenario plan, durability/cancellation, the only research/26 experiment class this campaign produces
-research/26 kill signal (minimization cost dominates verification), in binding executions: one failure's minimization costs a median of 151 and at most 256; M01's campaign ran 2925 executions to verify, 400 of them on the scenario plan; minimizing every one of the 400 failing runs costs 62839 (21.5x the campaign)
+research/26 kill signal (minimization cost dominates verification), in binding executions: one failure's minimization costs a median of 151 and at most 256; M01's campaign ran 2925 executions to verify, 400 of them on the scenario plan; minimizing every one of the 400 failing runs costs 64092 (21.9x the campaign)
 
 [pr18-impl02-04-scope]
 M01 scenario plan 0 log 146: 2 candidates out of scope, never run: [v0 renamed v1: one value fewer] abstract_register::Agreement is a statement about two distinct values of one epoch: a one-value domain makes it vacuous, which changes what is checked (INV-013); [v1 renamed v0: one value fewer] abstract_register::Agreement is a statement about two distinct values of one epoch: a one-value domain makes it vacuous, which changes what is checked (INV-013)
@@ -193,4 +195,4 @@ M01 sweep-one-epoch plan 81 log 5 with a question that names v0: the value pass 
 both witnesses composed twice: identical scenario reductions, transcripts, reduced runs (137 and 73 events) and event reductions
 
 [pr18-impl02-06-static-decisions]
-the 11 distinct configurations the witnesses' and the corpus's reductions decided without a schedule, each run on its schedules (4 on every admissible schedule, the others on 24 sampled; 192 runs): the campaign's checker reports the target on none
+the 15 distinct configurations the witnesses' and the corpus's reductions decided without a schedule, each run on its schedules (7 on every admissible schedule, the others on 24 sampled; 234 runs): the campaign's checker reports the target on none

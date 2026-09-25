@@ -1,0 +1,56 @@
+[change]
+bone = "bn-5kmuf"
+author = "continuum-dev"
+summary = "PR 18 replay validation: continuum-debugger gains a mechanism module that defines a failure's causal mechanism (labelled steps, happens-before and replay-order edges, and guards that state an absence, derived from the original failure's witnesses) and checks that a result's own replay embeds it, with typed rejections and INV-008 inconclusives. Every public reduction entry point (closure_pass, deletion_pass, minimize, reduce_scenario) now takes a validator, checks the input and each pass's result, and returns a core only as Validated, which only the check constructs; the scenario keeps a candidate only when the check preserves its failing run, which corrects bn-25z9o's any-chain acceptance on 31 corpus runs. Every derived mechanism is bound to its acknowledgement's epoch (cr-2lnu3c th-2q3qcy): each step and guard label carries that epoch, a label of another epoch neither satisfies a step nor ends or breaks a guard, because the durable register keeps one slot per replica and epoch, and a label with no epoch or a dropped one never matches"
+
+[semantic]
+covers = [
+  "crates/continuum-debugger/src/",
+]
+reference_tests = [
+  "crates/continuum-debugger/tests/pr18_mechanism.rs::malformed_mechanisms_are_refused",
+  "crates/continuum-debugger/tests/pr18_mechanism.rs::every_mismatch_is_typed",
+  "crates/continuum-debugger/tests/pr18_mechanism.rs::an_exhausted_allowance_is_typed",
+  "crates/continuum-debugger/tests/pr18_mechanism.rs::every_reduce_entry_point_goes_through_the_check",
+  "crates/continuum-debugger/tests/pr18_mechanism.rs::a_scenario_candidate_through_another_mechanism_is_never_kept",
+  "crates/continuum-debugger/tests/pr18_mechanism.rs::a_start_refusal_keeps_its_kind",
+  "crates/continuum-debugger/tests/pr18_mechanism.rs::an_exhausted_validation_allowance_stops_the_scenario_reduction",
+  "crates/continuum-asupersync/tests/pr18_impl03_mechanism.rs::a_dropped_epoch_is_never_matched",
+  "crates/continuum-asupersync/tests/pr18_impl03_mechanism.rs::cross_epoch_labels_never_satisfy_a_step_or_clear_a_guard",
+  "crates/continuum-asupersync/tests/pr18_impl03_mechanism.rs::the_ack_before_sync_core_keeps_its_mechanism",
+  "crates/continuum-asupersync/tests/pr18_impl03_mechanism.rs::substrate_cores_are_rejected_as_no_run",
+  "crates/continuum-asupersync/tests/pr18_impl03_mechanism.rs::the_bn_25z9o_regressions_are_rejected_with_their_reasons",
+  "crates/continuum-asupersync/tests/pr18_impl03_mechanism.rs::seeded_wrong_mechanisms_are_rejected",
+  "crates/continuum-asupersync/tests/pr18_impl03_mechanism.rs::every_entry_point_returns_only_validated_cores",
+  "crates/continuum-asupersync/tests/pr18_impl03_mechanism.rs::an_undecided_check_is_inconclusive_never_a_core",
+  "crates/continuum-asupersync/tests/pr18_impl03_mechanism.rs::the_evidence_matches_its_golden",
+  "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::the_evidence_matches_its_golden",
+  "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::the_transcripts_match_their_golden",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::the_evidence_matches_its_golden",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-asupersync/tests/pr18_impl03_mechanism.rs::symmetry_renaming_renames_the_mechanism_and_keeps_the_check", relation = "symmetry renaming" },
+  { test = "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::symmetry_renaming_of_values_renames_the_scenario_reduction", relation = "symmetry renaming" },
+  { test = "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::symmetry_renaming_of_values_leaves_the_core_unchanged", relation = "symmetry renaming" },
+]
+differential_tests = [
+  { test = "crates/continuum-asupersync/tests/pr18_impl03_mechanism.rs::every_corpus_core_is_validated", oracle = "continuum-asupersync", subject = "continuum-debugger" },
+  { test = "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::composed_cores_keep_the_mechanism_over_the_corpus", oracle = "continuum-asupersync", subject = "continuum-debugger" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers causal minimization or causal cores; the causal-minimization frontier row (plan 24.5, research/26, quote-id causal-minimization-core-ratio) is a register threshold this change measures again and does not meet: the composed M01 corpus median stays 31.5 percent of the original run, minimum 27.3 percent (was 28.5), maximum 69.2 percent, provisional per the register owner's 2026-09-25 ruling on bn-2nh6"
+
+[semantic.schemas]
+updated = []
+reason = "no JSON schema document and no wire shape changes. OwnerMinimal, FaultMinimal and ValueMinimal now mean minimal among mechanism-preserving configurations: a candidate that fails only through another mechanism is recorded as MechanismLost and, when the scenario tried every run of it, does not refute the class; the token set is unchanged. The mechanism check is an in-process library with no production caller; failure.minimize stays unserved (bn-3ncgl), and crashpack.minimization and the context-pack guarantee enum are untouched (no new guarantee token; RFC 0028 F6 and F8 remain open)"
+
+[semantic.migration]
+verdict = "Revalidate"
+note = "continuum-debugger's closure_pass, deletion_pass, minimize and reduce_scenario gain a validator argument (source-breaking for every caller, all in tests, all updated); Reduction::Reduced holds a Validated core, Reduction gains Rejected, Inconclusive's best is a Checked core, the scenario gains ConfigVerdict::MechanismLost, ScenarioReduction::Rejected, DimensionRecord::mechanism_lost and Scenario::search_exhausted, and Budget gains a validation allowance with a default. The passes' candidates and spending do not change (the checks draw on the separate allowance): the bn-3km4z and bn-2z08o goldens are byte-identical and the bn-25z9o transcripts too. The bn-25z9o corpus evidence is re-validated and corrected: 27 of 400 runs change (24 by configuration, 3 by schedule), the median stays 31.5 percent. continuum-asupersync's src is unchanged"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-2lnu3c"
+verdict = "approved"
