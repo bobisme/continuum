@@ -365,6 +365,18 @@ impl RegisteredIntent {
     pub const fn new(contract: IntentContract, standing: IntentStanding) -> Self {
         Self { contract, standing }
     }
+
+    /// The contract.
+    #[must_use]
+    pub const fn contract(&self) -> &IntentContract {
+        &self.contract
+    }
+
+    /// Its standing.
+    #[must_use]
+    pub const fn standing(&self) -> IntentStanding {
+        self.standing
+    }
 }
 
 /// The daemon's intent registry (RFC 0037). A contract another deployment registered is

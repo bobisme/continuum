@@ -20,8 +20,15 @@ publish = false
 # - `continuum-workspace`: the candidate is a workspace snapshot sealed from base +
 #   changes (RFC 0032), so it is built by that crate's Merkle `Snapshot` and ordering
 #   contract. A second snapshot notion here would give one workspace two identities.
+#
+# One edge for PR-20 / IMPL-04 (bn-1b69):
+#
+# - `continuum-semantic-diff`: gate 3 decides on the RFC 0031 `diff_*` artifact, and
+#   that crate's `assemble` is the one classification authority. A second classifier
+#   here would give one revision pair two verdicts.
 [dependencies]
 continuum-intent = { path = "../continuum-intent" }
+continuum-semantic-diff = { path = "../continuum-semantic-diff" }
 continuum-value = { path = "../continuum-value" }
 continuum-workspace = { path = "../continuum-workspace" }
 
@@ -29,6 +36,7 @@ continuum-workspace = { path = "../continuum-workspace" }
 # inherit the library's dependencies (`continuum-semantic-diff/Cargo.toml`'s precedent).
 [dev-dependencies]
 continuum-intent = { path = "../continuum-intent" }
+continuum-semantic-diff = { path = "../continuum-semantic-diff" }
 continuum-value = { path = "../continuum-value" }
 continuum-workspace = { path = "../continuum-workspace" }
 # Test-only, PR-22 / IMPL-06 (bn-yzu1): the differential test reads the storage pack's

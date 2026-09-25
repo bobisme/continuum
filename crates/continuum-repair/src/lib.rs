@@ -46,6 +46,7 @@
 //! | [`patch`] | patch identity (PR-20 / IMPL-02, bn-195b): declared changes, the candidate sealed from base + changes, gate 2's comparison |
 //! | [`replay`] | exact replay (PR-20 / IMPL-03, bn-2pla): gate 1 replays the crashpack's recorded run on the base and requires the exact failure; gate 4 replays it on the candidate under the original choices; both are recorded with evidence as the next version |
 //! | [`receipt`] | the promotion-receipt skeleton (PR 22): intent identity, before/after snapshots, `gate_profile` and the `NotYetEnforced` list, composed from referenced artifacts and verified against them |
+//! | [`diff`] | semantic and intent diff (PR-20 / IMPL-04, bn-1b69): the RFC 0031 `diff_*` artifact between base and candidate, computed from the stores; a repair or a privileged intent revision; gate 3's status; claimed diffs refused unless byte-equal |
 //!
 //! # What is here: PR-22 / IMPL-01, IMPL-02, IMPL-07 and IMPL-08, the receipt skeleton (bn-1ebx, bn-cps6, bn-1cec)
 //!
@@ -74,8 +75,10 @@
 //! - **IMPL-05, evidence accumulation.** No operation here attaches evidence or spends
 //!   from the cost ledger.
 //! - **IMPL-04, semantic and intent diff.** A `model` or `rust` change that weakens a
-//!   property is detected only by the RFC 0031 diff behind gate 3. `semantic_diff` is
-//!   never emitted here.
+//!   property is not a change to protected intent while the candidate stays bound to
+//!   the base intent; [`diff`] (bn-1b69) computes the RFC 0031 diff behind gate 3, which
+//!   catches a candidate bound to a changed intent. Writing `semantic_diff` into a
+//!   version and recording gate 3 belong to the evaluation path that records a version.
 //! - **IMPL-06, policy verdict.** `policy_verdict` and `receipt` are never emitted,
 //!   and the status derivation is only the three rules this crate can reach
 //!   ([`transaction::derive_status`]: `draft`, `applied`, `evaluating`).
@@ -114,6 +117,7 @@
 //!   would need new bytes, which "nothing is rewritten" forbids. IMPL-06 must decide
 //!   whether `superseded` is a projection kept outside the published artifact.
 
+pub mod diff;
 pub mod handle;
 pub mod hypothesis;
 pub mod patch;

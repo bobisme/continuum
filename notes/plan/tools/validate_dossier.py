@@ -81,6 +81,15 @@ EXTERNAL_SCHEMA_PAIRS = {
     "schemas/run-config.schema.json": (
         "crates/continuum-cml-elab/tests/configs/ring.run-config.json",
     ),
+    # The diff artifacts `continuum-repair`'s PR-20 / IMPL-04 suite computes for a
+    # repair transaction (bn-1b69): the ack-after-sync repair (no intent change,
+    # `allow`) and a candidate rebound to a weakened property (`block`).
+    # `tests/pr20_impl04_semantic_intent_diff.rs` asserts the library renders exactly
+    # these bytes; this gate checks them against the schema.
+    "schemas/semantic-diff.schema.json": (
+        "crates/continuum-repair/tests/fixtures/pr20-impl04-ack-after-sync-diff.json",
+        "crates/continuum-repair/tests/fixtures/pr20-impl04-weakened-property-diff.json",
+    ),
     # The transaction versions `continuum-repair`'s PR-20 / IMPL-01 suite emits
     # (bn-2d70): `repair.begin`'s draft and `repair.apply`'s applied version.
     # `tests/pr20_impl01_hypothesis_evidence.rs` asserts the library renders

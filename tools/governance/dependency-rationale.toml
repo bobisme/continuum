@@ -208,6 +208,14 @@ used_by = ["continuum-cli", "continuumd"]
 rationale = "The Context Pack itself (plan §6, RFC 0028), which continuumd's `context` family projects onto the wire rather than restates: the closed five-member OmissionReason and eleven-member ExpansionRelation vocabularies, the INV-007 omission record whose two schema conditionals are unrepresentable rather than validated, the closed accounting under which a candidate with no disposition cannot be published at all, the content-derived ExpansionHandle that makes `context.expand` idempotent by construction rather than by the ledger, and the child-document derivation an expansion answers with. A second copy of any of those in continuumd would be the second spelling ADR-0013 forbids, and it would be free to disagree with the artifact about what the pack says. Classed engine rather than trusted-checking-base: a pack is an explanation, `publishing a pack MUST NOT change any claim status` (INV-015, plan §11.7), the crate is linked by no certificate checker, and RFC 0028 requires every pack guarantee to be re-checked by a checker independent of the compiler that claimed it (C6, `Validation`) — so a defect here yields a wrong or incomplete explanation the way an engine defect yields a wrong answer, never a promoted claim. What that class does not discount, and is recorded here for the reviewer: the omission manifest is a transparency claim a consumer has no second reading of, which is why the manifest is derived from one ledger and reconciled independently inside that crate rather than assembled beside the selection. PR 13's human CLI takes it dev-only, for the reason its other four fixture edges exist: `tests/context_expand.rs` registers a real Context Pack with a real daemon and drives `context expand` over a `LocalPair` boundary, and a fixture that spelled its own pack vocabulary would be testing the renderer against a shape no daemon produces."
 
 [[dependency]]
+name = "continuum-semantic-diff"
+origin = "workspace"
+tcb_class = "trusted-checking-base"
+kinds = ["dev", "normal"]
+used_by = ["continuum-repair"]
+rationale = "RFC 0031's one diff artifact and its classification: the fifteen-field intent classification, the fail-closed closure, the impact set, and the policy verdict computed against the base contract's own verbs. continuum-repair (bn-1b69, PR-20 / IMPL-04) calls `artifact::assemble` unchanged to compute a repair transaction's `diff_*` artifact between its base and its candidate, because RFC 0032 decides gate 3 on that artifact's recomputed decision and a second classifier in the repair crate would give one revision pair two verdicts (ADR-0013). Classed trusted-checking-base for the reason continuum-intent is: a defect in the classification makes a forbidden intent weakening look like a repair, and nothing downstream re-derives it."
+
+[[dependency]]
 name = "continuum-cml-syntax"
 origin = "workspace"
 tcb_class = "engine"

@@ -1,0 +1,65 @@
+[change]
+bone = "bn-1b69"
+author = "continuum-dev"
+summary = "continuum-repair: PR-20 / IMPL-04 semantic and intent diff. diff::compute builds a repair transaction's one RFC 0031 diff_* artifact between base and candidate from the stores (snapshot bindings, intent registry, evidence scope) with continuum-semantic-diff's assembler unchanged; a candidate that changes protected intent or rebinds to another intent is a privileged intent revision (gate 3 failed), an undiffable input is a typed INV-008 inconclusive, and a claimed diff or handle that is not the computed one is refused. Program-side changes are not classified (no classifier exists), so the diff is assembled under continuum-semantic-diff's new ProgramLayer::Unclassified: no scoped evidence is reused and a repair's gate 3 is inconclusive (Unsupported), so gate 3 cannot pass today for any candidate that changes the workspace. The program layer is bound into the diff_ identity by a versioned domain-separation tag (semantic-diff/program-layer/{classified,unclassified}/v1), and gate_status_of_cached is the only path from stored bytes to a gate status: it recomputes from the stores and refuses a layer mismatch typed"
+
+[semantic]
+covers = [
+  "crates/continuum-repair/src/",
+  "crates/continuum-semantic-diff/src/",
+]
+reference_tests = [
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_pos_01_the_ack_after_sync_repair_yields_its_diff_and_no_intent_change",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_pos_02_the_retained_repair_diff_is_the_computed_bytes",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_pos_03_the_handle_is_the_content_identity_of_the_artifact",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_01_a_weakened_property_is_a_privileged_intent_revision",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_02_a_strengthened_assumption_is_a_privileged_intent_revision",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_03_a_shrunk_bound_is_a_privileged_intent_revision",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_04_a_hidden_event_is_a_privileged_intent_revision",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_05_a_removed_fault_is_a_privileged_intent_revision",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_06_a_downgraded_assurance_is_a_privileged_intent_revision",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_07_the_retained_weakened_diff_is_the_computed_bytes",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_08_a_rebinding_the_verbs_would_allow_is_still_not_a_repair",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_09_an_undecided_relation_fails_closed_to_a_revision",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_10_a_forged_diff_is_refused",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_11_the_hypothesis_does_not_reach_the_diff",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_bnd_01_a_draft_has_no_diff_and_gate_3_stays_pending",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_bnd_02_every_undiffable_input_is_a_typed_inconclusive",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_bnd_03_an_unclassifiable_scope_is_inconclusive_not_a_partial_diff",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_bnd_04_an_empty_evidence_scope_is_an_answer_and_a_silent_one_is_not",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_bnd_05_a_base_intent_without_current_protection_is_inconclusive",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_bnd_06_the_requested_assurance_is_never_below_the_gate_3_floor",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_12_a_loosened_evidence_class_set_is_a_privileged_intent_revision",
+  "crates/continuum-repair/src/diff.rs::classify_needs_no_change_and_allow_besides_the_binding",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_13_scoped_evidence_is_never_reused_while_the_program_side_is_unclassified",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_14_an_empty_program_section_is_never_read_as_no_change",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_15_equal_bytes_under_the_two_layers_have_distinct_handles",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_16_a_classified_claim_for_an_unclassified_recompute_is_refused",
+  "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_neg_17_a_cached_artifact_cannot_yield_gate_3_passed",
+  "crates/continuum-semantic-diff/src/impact.rs::an_unclassified_program_layer_licenses_no_reuse",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_met_01_evidence_insertion_order_does_not_move_a_byte", relation = "set/map insertion order" },
+  { test = "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_met_02_contracts_read_back_from_their_bytes_give_the_same_diff", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuum-repair/tests/pr20_impl04_semantic_intent_diff.rs::pr20_impl04_dif_01_the_transaction_diff_is_the_assembler_output", oracle = "continuum-semantic-diff", subject = "continuum-repair" },
+]
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes, and none is invented: semantic-diff.schema.json has no field that can say the program-side layer was not classified (semantic_changes items carry a closed seven-axis kind and every object is closed), so that fact is typed on the Rust side (DiffArtifact::program_layer) and shows on the wire only as an empty semantic_changes and an impact with nothing reused; a typed wire marker is raised as a schema follow-up. The impact arrays carry bare artifact ids with no cause token, so the wire cannot name ProgramLayerUnclassified either; the layer reaches the bytes only through the tagged diff_id. Also: the diff is an instance of the existing semantic-diff.schema.json, and the two retained artifacts are validated against it by validate_dossier.py; the repair-transaction artifact's bytes do not move, because writing its semantic_diff field belongs to the evaluation path"
+unaffected = { semantic-diff = "artifact.rs gains assemble_under and a typed program_layer that is not rendered; the wire bytes of every artifact are unchanged, and an unclassified program layer moves impact entries only between the existing reused and unknown arrays", promotion-receipt = "receipt.rs gains two read accessors on RegisteredIntent; no receipt field, byte or refusal changes" }
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-repair gains the diff module and two read accessors on receipt::RegisteredIntent; no existing continuum-repair type, artifact byte or refusal changes. continuum-semantic-diff gains additive API: ProgramLayer, UnknownCause::ProgramLayerUnclassified, compute_impact_under, assemble_under and DiffArtifact::program_layer; compute_impact and assemble keep their signatures and outputs (ProgramLayer::Classified), so existing callers and artifacts are unchanged. A caller that matches UnknownCause exhaustively must add the new variant; none exists in the workspace."
+
+[semantic.claim_impact]
+claims = ["C020", "C033"]
+reason = "Gate 3 cannot pass today for any candidate that changes the workspace, because no program-side classifier exists; that is stated, not hidden. C020 (agent repairs do not weaken properties or assumptions silently) is the claim this bears on: a repair transaction's candidate is now classified by the same RFC 0031 classifier C020's hidden-mutant evaluation runs, and any intent change or rebinding is a privileged intent revision rather than a repair. The evidence is library-grain: no production path calls diff::compute yet (repair.evaluate and the daemon's stores are unwired), so no row changes state or wording. C033 is the TARGET the repair path eventually serves; nothing here moves it."
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-3psesg"
+verdict = "approved"

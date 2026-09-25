@@ -181,7 +181,7 @@ use continuum_intent::cpnf::CPNF_VERSION;
 use continuum_intent::optimization::ObjectiveRole;
 
 use crate::fairness::FairnessUnit;
-use crate::impact::{EvidenceRecord, ImpactError, ImpactSet, compute_impact};
+use crate::impact::{EvidenceRecord, ImpactError, ImpactSet, ProgramLayer, compute_impact_under};
 use crate::{assumptions, assurance, bounds, equality, fairness, faults, observers, properties};
 
 /// The classifier version recorded in the artifact's `classifier` section (RFC
@@ -493,9 +493,19 @@ pub struct DiffArtifact {
     semantic_changes: Vec<SemanticChange>,
     impact: ImpactSet,
     verdict: Verdict,
+    program: ProgramLayer,
 }
 
 impl DiffArtifact {
+    /// Whether the program-side layer was classified. Under
+    /// [`ProgramLayer::Unclassified`] the empty `semantic_changes` section is not
+    /// evidence of absence, and no impact entry is `reused`. The schema has no field
+    /// for this fact, so it is typed here and not rendered.
+    #[must_use]
+    pub const fn program_layer(&self) -> ProgramLayer {
+        self.program
+    }
+
     /// The wire `intent_changes[]` records, in wire order. Empty exactly when
     /// the `unchanged` shortcut fired or every classified unit was `unchanged`.
     #[must_use]
@@ -633,6 +643,23 @@ impl DiffArtifact {
 ///   partial `intent_changes` set").
 /// - [`AssembleError::Impact`] — a malformed or duplicated evidence identity.
 pub fn assemble(request: &DiffRequest<'_>) -> Result<DiffArtifact, AssembleError> {
+    assemble_under(request, ProgramLayer::Classified)
+}
+
+/// [`assemble`] with the program-side layer's completeness stated.
+///
+/// Under [`ProgramLayer::Unclassified`] the impact set is computed by
+/// [`compute_impact_under`], so no in-scope artifact is `reused`. The intent
+/// classification and the policy verdict do not change: RFC 0031 keeps program-side
+/// changes out of the intent policy.
+///
+/// # Errors
+///
+/// As [`assemble`].
+pub fn assemble_under(
+    request: &DiffRequest<'_>,
+    program: ProgramLayer,
+) -> Result<DiffArtifact, AssembleError> {
     let (intent_changes, verdict_records) = classify(request)?;
 
     let verdict = request
@@ -653,8 +680,13 @@ pub fn assemble(request: &DiffRequest<'_>) -> Result<DiffArtifact, AssembleError
         .semantic_changes
         .iter()
         .any(|change| change.kind == SemanticAxis::Correspondence);
-    let impact = compute_impact(&changed_fields, correspondence_changed, &request.evidence)
-        .map_err(AssembleError::Impact)?;
+    let impact = compute_impact_under(
+        &changed_fields,
+        correspondence_changed,
+        program,
+        &request.evidence,
+    )
+    .map_err(AssembleError::Impact)?;
 
     let mut semantic_changes = request.semantic_changes.clone();
     semantic_changes.sort();
@@ -670,6 +702,7 @@ pub fn assemble(request: &DiffRequest<'_>) -> Result<DiffArtifact, AssembleError
         semantic_changes,
         impact,
         verdict,
+        program,
     })
 }
 

@@ -344,6 +344,24 @@ pub enum UnknownCause {
     /// An `Exact`/`Validated` edge claims independence without the witness RFC
     /// 0030 requires of a strong class; the claim is ill-formed and fails closed.
     UnwitnessedIndependence(DependencyReason),
+    /// The program-side layer (RFC 0031's seven `semantic_changes` axes) was not
+    /// classified, so an empty `semantic_changes` is not evidence that the program
+    /// did not change, and no artifact's independence from the program change is
+    /// known. Every in-scope artifact is at least `unknown`; none is `reused`.
+    ProgramLayerUnclassified,
+}
+
+/// Whether the program-side layer of a diff was classified.
+///
+/// RFC 0031: "A layer that was not requested MUST leave its artifact section empty
+/// and MUST NOT be reported as evidence of absence." An empty `semantic_changes`
+/// section therefore means "no program change" only under [`Self::Classified`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ProgramLayer {
+    /// The program-side changes were classified; `semantic_changes` is complete.
+    Classified,
+    /// No program-side classification ran. Reuse cannot be licensed.
+    Unclassified,
 }
 
 /// Why an artifact landed in `reused`.
@@ -516,6 +534,29 @@ pub fn compute_impact(
     correspondence_changed: bool,
     evidence: &[EvidenceRecord],
 ) -> Result<ImpactSet, ImpactError> {
+    compute_impact_under(
+        changed_fields,
+        correspondence_changed,
+        ProgramLayer::Classified,
+        evidence,
+    )
+}
+
+/// [`compute_impact`] with the program-side layer's completeness stated.
+///
+/// Under [`ProgramLayer::Unclassified`] every artifact's disposition is joined with
+/// [`UnknownCause::ProgramLayerUnclassified`], so an artifact lands in `invalidated`
+/// or `unknown` and never in `reused`.
+///
+/// # Errors
+///
+/// As [`compute_impact`].
+pub fn compute_impact_under(
+    changed_fields: &BTreeSet<PolicyField>,
+    correspondence_changed: bool,
+    program: ProgramLayer,
+    evidence: &[EvidenceRecord],
+) -> Result<ImpactSet, ImpactError> {
     let triggered_reasons: BTreeSet<DependencyReason> = changed_fields
         .iter()
         .filter_map(|field| field_reason(*field))
@@ -554,6 +595,13 @@ pub fn compute_impact(
             disposition = disposition.join(Disposition::Unknown(UnknownCause::FieldWithoutReason(
                 field,
             )));
+        }
+
+        // 4. The program-side trigger: an unclassified program change licenses no
+        // reuse.
+        if program == ProgramLayer::Unclassified {
+            disposition =
+                disposition.join(Disposition::Unknown(UnknownCause::ProgramLayerUnclassified));
         }
 
         if dispositions
@@ -887,5 +935,35 @@ mod tests {
         assert_eq!(invalidated, ["ev_both"]);
         assert!(reused.is_empty());
         assert!(unknown.is_empty());
+    }
+
+    #[test]
+    fn an_unclassified_program_layer_licenses_no_reuse() {
+        let evidence = vec![
+            record("ev_no_edges", Vec::new()),
+            record(
+                "ev_witnessed",
+                vec![edge(
+                    DependencyReason::ReliesOnAssumptionFairnessBound,
+                    ReuseEdgeClass::Exact,
+                    Independence::Independent { witnessed: true },
+                )],
+            ),
+        ];
+        let changed = BTreeSet::new();
+        let classified = compute_impact_under(&changed, false, ProgramLayer::Classified, &evidence)
+            .expect("computes");
+        assert_eq!(classified.reused().count(), 2);
+        assert_eq!(
+            classified,
+            compute_impact(&changed, false, &evidence).expect("computes")
+        );
+        let unclassified =
+            compute_impact_under(&changed, false, ProgramLayer::Unclassified, &evidence)
+                .expect("computes");
+        assert_partition(&unclassified, &["ev_no_edges", "ev_witnessed"]);
+        assert_eq!(unclassified.reused().count(), 0);
+        assert!(unclassified.iter().all(|(_, disposition)| disposition
+            == Disposition::Unknown(UnknownCause::ProgramLayerUnclassified)));
     }
 }
