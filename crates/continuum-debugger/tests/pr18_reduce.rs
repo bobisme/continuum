@@ -6,8 +6,8 @@
 use std::collections::BTreeSet;
 
 use continuum_debugger::reduce::{
-    self, Budget, CausalOrder, Deletion, Guarantee, NotReplayable, OrderError, Pass, PassEnd,
-    Reduction, Refusal, Replayed,
+    self, Attempts, Budget, CausalOrder, Deletion, Guarantee, NotReplayable, OrderError, Pass,
+    PassEnd, Reduction, Refusal, Replayed, TranscriptBound, Trial, Verdict,
 };
 use continuum_value::assurance::InconclusiveReason;
 
@@ -535,4 +535,375 @@ fn independent_event_swap_leaves_the_core_unchanged() {
             assert_eq!(original, back, "{mode:?}");
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// the per-removal transcript (RFC 0028, bn-2z08o)
+// ---------------------------------------------------------------------------
+
+/// The transcript's own consistency: every attempt is recorded in order with dense
+/// indices, the fresh ones are exactly the replays, each pass's verdict counts are its
+/// record's, each memo entry names an earlier fresh attempt with the same verdict and
+/// size, each entry's removed events and candidate size add up to the set it was tried
+/// against, and the version advances exactly at each kept candidate.
+fn check_consistent(r: &Reduction) -> &Attempts {
+    let (transcript, attempts, spent) = match r {
+        Reduction::Reduced {
+            transcript,
+            attempts,
+            spent,
+            ..
+        }
+        | Reduction::Inconclusive {
+            transcript,
+            attempts,
+            spent,
+            ..
+        } => (transcript, attempts, spent),
+        Reduction::Refused(_) => panic!("refused: {r:?}"),
+    };
+    assert_eq!(attempts.omitted, 0);
+    let fresh = attempts
+        .entries
+        .iter()
+        .filter(|a| a.memo_of.is_none() && a.verdict != Verdict::Vacuous)
+        .count();
+    assert_eq!(fresh as u64, spent.replays);
+    let mut version = 0;
+    for (k, a) in attempts.entries.iter().enumerate() {
+        assert_eq!(a.index, k as u64);
+        assert_eq!(a.version, version, "#{k}");
+        assert_eq!(a.removed.len() + a.size, a.from, "#{k}");
+        assert!(a.removed.windows(2).all(|w| w[0] < w[1]));
+        if let Some(m) = a.memo_of {
+            let orig = &attempts.entries[usize::try_from(m).expect("small")];
+            assert!(m < a.index && orig.memo_of.is_none() && orig.verdict != Verdict::Vacuous);
+            assert_eq!((orig.verdict, orig.size), (a.verdict, a.size));
+            assert!(a.reason.is_empty());
+        }
+        if a.verdict == Verdict::Vacuous {
+            assert_eq!(a.size, 0);
+        }
+        if a.verdict == Verdict::Fails && a.trial != Trial::Start {
+            version += 1;
+        }
+    }
+    assert_eq!(attempts.version, version);
+    for p in transcript {
+        let of = |v: fn(&Verdict) -> bool| {
+            attempts
+                .entries
+                .iter()
+                .filter(|a| a.pass == Some(p.pass) && a.memo_of.is_none() && v(&a.verdict))
+                .count() as u64
+        };
+        assert_eq!(of(|v| *v == Verdict::Holds), p.held);
+        assert_eq!(of(|v| *v == Verdict::Nonconforming), p.nonconforming);
+        assert_eq!(
+            of(|v| matches!(v, Verdict::Inconclusive(_))),
+            p.inconclusive
+        );
+    }
+    attempts
+}
+
+/// The transcript records every attempt, consistently, over seeded random orders, in
+/// both deletion modes.
+#[test]
+fn the_transcript_records_every_attempt_in_order() {
+    let mut rng = SplitMix(2808);
+    for _ in 0..200 {
+        let n = 1 + rng.below(30) as usize;
+        let preds = random_order(&mut rng, n);
+        let order = CausalOrder::from_predecessors(preds).expect("an order");
+        let needed: Vec<usize> = {
+            let mut v: Vec<usize> = (0..1 + rng.below(3))
+                .map(|_| rng.below(n as u64) as usize)
+                .collect();
+            v.sort_unstable();
+            v.dedup();
+            v
+        };
+        for mode in [Deletion::Configurations, Deletion::Atoms] {
+            let mut calls = 0;
+            let mut oracle = needs(&order, &needed, &mut calls);
+            let r = reduce::minimize(&order, mode, &mut oracle, BUDGET);
+            let attempts = check_consistent(&r);
+            assert_eq!(attempts.entries[0].trial, Trial::Start);
+            assert_eq!(attempts.entries[0].pass, None);
+        }
+    }
+}
+
+/// RFC 0028's checker, apart from the reducer: rebuild every version's set from the
+/// transcript's start and the removals of its kept candidates (checking each entry's
+/// size against the set it names), check that the final set is the core and that each
+/// memo entry's candidate is its original's, then return, for the final set, every
+/// recorded removal that did not fail and was decided.
+fn rebuild(attempts: &Attempts, core: &reduce::Core) -> BTreeSet<Vec<usize>> {
+    let mut sets: Vec<Vec<usize>> = vec![attempts.start.clone()];
+    let mut candidates: std::collections::BTreeMap<u64, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for a in &attempts.entries {
+        let v = usize::try_from(a.version).expect("small");
+        assert_eq!(
+            v + 1,
+            sets.len(),
+            "#{}: tried against the latest set",
+            a.index
+        );
+        let set = &sets[v];
+        assert_eq!(a.from, set.len(), "#{}", a.index);
+        assert!(a.removed.iter().all(|e| set.binary_search(e).is_ok()));
+        let candidate: Vec<usize> = set
+            .iter()
+            .copied()
+            .filter(|e| a.removed.binary_search(e).is_err())
+            .collect();
+        assert_eq!(candidate.len(), a.size, "#{}", a.index);
+        if let Some(m) = a.memo_of {
+            assert_eq!(candidates.get(&m), Some(&candidate), "#{} memo", a.index);
+        }
+        candidates.insert(a.index, candidate.clone());
+        if a.verdict == Verdict::Fails && a.trial != Trial::Start {
+            sets.push(candidate);
+        }
+    }
+    assert_eq!(sets.len() as u64, attempts.version + 1);
+    assert_eq!(sets.last(), Some(&core.events), "the final set is the core");
+    attempts
+        .entries
+        .iter()
+        .filter(|a| {
+            a.version == attempts.version
+                && a.trial == Trial::Remove
+                && matches!(
+                    a.verdict,
+                    Verdict::Holds | Verdict::Nonconforming | Verdict::Vacuous
+                )
+        })
+        .map(|a| a.removed.clone())
+        .collect()
+}
+
+/// The transcript licenses the minimality claim on its own (RFC 0028's checkers): the
+/// sets are rebuilt from the transcript, and for every kept event of a minimal core the
+/// removal of exactly its unit (the event over atoms; it with its causal future over
+/// configurations) against the core is recorded, decided, and did not fail. Checked over
+/// seeded random orders, one-event cores and removals that empty the core included.
+#[test]
+fn the_transcript_licenses_the_minimality_claim() {
+    let mut rng = SplitMix(2809);
+    let mut checked = 0;
+    for _ in 0..200 {
+        let n = 1 + rng.below(30) as usize;
+        let preds = random_order(&mut rng, n);
+        let order = CausalOrder::from_predecessors(preds.clone()).expect("an order");
+        let needed = vec![rng.below(n as u64) as usize, rng.below(n as u64) as usize];
+        for mode in [Deletion::Configurations, Deletion::Atoms] {
+            let mut calls = 0;
+            let mut oracle = needs(&order, &needed, &mut calls);
+            let r = reduce::minimize(&order, mode, &mut oracle, BUDGET);
+            let attempts = check_consistent(&r);
+            let core = r.core().expect("reduced");
+            assert!(core.guarantees.iter().any(|g| matches!(
+                g,
+                Guarantee::CausallyMinimal | Guarantee::OneMinimal | Guarantee::AtomMinimal
+            )));
+            let removals = rebuild(attempts, core);
+            for &e in &core.events {
+                let unit: Vec<usize> = match mode {
+                    Deletion::Atoms => vec![e],
+                    Deletion::Configurations => {
+                        let future = brute_future(&preds, e);
+                        core.events
+                            .iter()
+                            .copied()
+                            .filter(|x| future.contains(x))
+                            .collect()
+                    }
+                };
+                assert!(
+                    removals.contains(&unit),
+                    "{mode:?}: no recorded removal of {unit:?} from {:?}",
+                    core.events
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 100, "{checked}");
+}
+
+/// A one-event core's only removal empties it: recorded as vacuous, so the transcript
+/// still licenses the claim.
+#[test]
+fn a_one_event_core_records_its_vacuous_removal() {
+    let order = CausalOrder::from_predecessors(vec![Vec::new(); 5]).expect("an order");
+    let mut oracle = |kept: &[usize]| {
+        if kept.contains(&3) {
+            Replayed::Fails { witnesses: vec![3] }
+        } else {
+            Replayed::Holds
+        }
+    };
+    let r = reduce::deletion_pass(
+        &order,
+        (0..5).collect(),
+        Deletion::Atoms,
+        &mut oracle,
+        BUDGET,
+    );
+    let core = r.core().expect("reduced");
+    assert_eq!(core.events, vec![3]);
+    assert!(core.guarantees.contains(&Guarantee::OneMinimal));
+    let attempts = check_consistent(&r);
+    assert!(rebuild(attempts, core).contains(&vec![3]));
+    assert!(
+        attempts
+            .entries
+            .iter()
+            .any(|a| a.verdict == Verdict::Vacuous)
+    );
+}
+
+/// An oracle's long rendering is cut to `REASON_CAP` bytes at a character boundary,
+/// with its full length kept: one long reason does not stop the transcript.
+#[test]
+fn a_long_reason_is_cut_not_dropped() {
+    let order = CausalOrder::from_predecessors(vec![Vec::new(); 6]).expect("an order");
+    let long = "é".repeat(4 * reduce::REASON_CAP);
+    let mut oracle = |kept: &[usize]| {
+        if kept.contains(&5) {
+            Replayed::Fails { witnesses: vec![5] }
+        } else {
+            Replayed::NotReplayable(NotReplayable::Nonconforming(long.clone()))
+        }
+    };
+    let r = reduce::deletion_pass(
+        &order,
+        (0..6).collect(),
+        Deletion::Atoms,
+        &mut oracle,
+        BUDGET,
+    );
+    let attempts = check_consistent(&r);
+    let a = attempts
+        .entries
+        .iter()
+        .find(|a| a.verdict == Verdict::Nonconforming && a.memo_of.is_none())
+        .expect("a refusal");
+    assert!(a.reason.len() <= reduce::REASON_CAP && !a.reason.is_empty());
+    assert_eq!(a.reason_bytes, long.len());
+    assert!(
+        r.core()
+            .expect("reduced")
+            .guarantees
+            .contains(&Guarantee::OneMinimal)
+    );
+}
+
+/// The transcript is bounded, and a bound that runs out is counted, never silent: the
+/// core is the same, but no minimality class is claimed without its transcript.
+#[test]
+fn a_full_transcript_is_counted_and_withholds_minimality() {
+    let order = CausalOrder::from_predecessors(vec![Vec::new(); 40]).expect("an order");
+    let needed = [3, 17, 31];
+    let oracle = |kept: &[usize]| {
+        if needed.iter().all(|n| kept.contains(n)) {
+            Replayed::Fails {
+                witnesses: vec![31],
+            }
+        } else {
+            Replayed::Holds
+        }
+    };
+    let full = reduce::deletion_pass(
+        &order,
+        (0..40).collect(),
+        Deletion::Atoms,
+        &mut oracle.clone(),
+        BUDGET,
+    );
+    for bound in [
+        TranscriptBound {
+            entries: 3,
+            units: 1 << 20,
+        },
+        TranscriptBound {
+            entries: 1 << 20,
+            units: 50,
+        },
+        TranscriptBound {
+            entries: 0,
+            units: 0,
+        },
+    ] {
+        let r = reduce::deletion_pass(
+            &order,
+            (0..40).collect(),
+            Deletion::Atoms,
+            &mut oracle.clone(),
+            BUDGET.with_transcript(bound),
+        );
+        let attempts = r.attempts().expect("a transcript");
+        assert!(attempts.omitted > 0, "{bound:?}");
+        assert!(attempts.entries.len() as u64 <= bound.entries);
+        let units: u64 = attempts
+            .entries
+            .iter()
+            .map(|a| 1 + a.removed.len() as u64 + a.reason.len() as u64)
+            .sum();
+        assert!(units <= bound.units);
+        assert_eq!(
+            attempts.entries.len() as u64 + attempts.omitted,
+            full.attempts().expect("a transcript").entries.len() as u64
+        );
+        let core = r.core().expect("reduced");
+        assert_eq!(core.events, full.core().expect("reduced").events);
+        assert!(!core.guarantees.contains(&Guarantee::OneMinimal));
+    }
+    assert!(
+        full.core()
+            .expect("reduced")
+            .guarantees
+            .contains(&Guarantee::OneMinimal)
+    );
+}
+
+/// The transcript keeps the oracle's verdict and reason: a refusal's rendering, an
+/// inconclusive's reason, and a memo hit's link to the attempt that replayed it.
+#[test]
+fn the_transcript_keeps_verdicts_and_reasons() {
+    let order = CausalOrder::from_predecessors(vec![Vec::new(); 8]).expect("an order");
+    let mut oracle = |kept: &[usize]| {
+        if kept.len() == 8 || (kept.contains(&2) && kept.contains(&6)) {
+            Replayed::Fails { witnesses: vec![6] }
+        } else if kept.contains(&6) {
+            Replayed::NotReplayable(NotReplayable::Inconclusive(
+                InconclusiveReason::InsufficientTelemetry,
+                "no telemetry".into(),
+            ))
+        } else {
+            Replayed::NotReplayable(NotReplayable::Nonconforming("not a run".into()))
+        }
+    };
+    let r = reduce::deletion_pass(
+        &order,
+        (0..8).collect(),
+        Deletion::Atoms,
+        &mut oracle,
+        BUDGET,
+    );
+    let attempts = check_consistent(&r);
+    assert!(attempts.entries.iter().any(|a| a.verdict
+        == Verdict::Inconclusive(InconclusiveReason::InsufficientTelemetry)
+        && a.reason == "no telemetry"));
+    assert!(
+        attempts
+            .entries
+            .iter()
+            .any(|a| a.verdict == Verdict::Nonconforming && a.reason == "not a run")
+    );
+    assert!(attempts.entries.iter().any(|a| a.memo_of.is_some()));
 }

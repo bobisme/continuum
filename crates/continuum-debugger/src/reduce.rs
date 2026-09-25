@@ -38,8 +38,9 @@
 //!      replay alone decides. Smaller cores, but only as faithful as the oracle: a
 //!      replay that checks the substrate's semantics and not the program's accepts
 //!      subsets the program cannot produce, and may drop the mechanism (the register
-//!      instantiation shows it). Its cores record no causal closure unless the check
-//!      on the final set passes.
+//!      instantiation shows it; its program-level replay, which re-executes the
+//!      program truncated to the candidate, keeps it, bn-2z08o). Its cores record no
+//!      causal closure unless the check on the final set passes.
 //!
 //! [`minimize`] runs closure then deletion, the order research/26's pipeline gives
 //! (slice, then minimize while preserving failure).
@@ -70,8 +71,9 @@
 //! [`Guarantee`] names what was checked, not what was hoped: `ReplayPreserving` (the
 //! core itself was replayed and failed), `CausallyClosed` (checked with
 //! [`CausalOrder::is_down_closed`] on the final set, when the budget pays for the walk),
-//! and one minimality token when the deletion pass finished and every final single-unit
-//! removal was replayed, or memoized from an earlier replay, and did not fail:
+//! and one minimality token when the deletion pass finished, every final single-unit
+//! removal was replayed, or memoized from an earlier replay, and did not fail, and the
+//! transcript recorded every attempt (below):
 //! `CausallyMinimal` over configurations (RFC 0028's class), `OneMinimal` over atoms
 //! whose kept atoms are single events (docs/38's 1-minimal), `AtomMinimal` over atoms
 //! otherwise. A removal the oracle could not decide (an INV-008 inconclusive) is not a
@@ -80,6 +82,29 @@
 //! breaks its contract; the reduction stops, inconclusive with
 //! [`InconclusiveReason::EngineError`]. No cardinality minimality, and no explanation
 //! minimality (RFC 0028 correction 5), is claimed.
+//!
+//! # The per-removal transcript (RFC 0028, bn-2z08o)
+//!
+//! RFC 0028 names a checker for each minimality class: a single-item removal transcript
+//! for `OneMinimal`, a minimizer transcript over configurations for `CausallyMinimal`.
+//! Every reduction returns one ([`Attempts`]): each candidate the reduction tried, in
+//! the order it tried it, with the set it was tried against ([`Attempt::version`]),
+//! what it removed from that set, the oracle's verdict ([`Verdict`]) and its rendering
+//! ([`Attempt::reason`]). A candidate judged from the memo of an earlier identical
+//! candidate is an attempt too ([`Attempt::memo_of`] names that earlier attempt), since
+//! a final single-unit removal may rest on it. A removal that empties the set is
+//! recorded as [`Verdict::Vacuous`] without a replay. So a consumer can re-check a
+//! minimality claim from the transcript alone: it rebuilds each version's set from the
+//! start and the removals of the kept candidates, and every kept unit of the final set
+//! has a recorded removal against that set whose verdict is not a failure.
+//!
+//! The transcript is bounded ([`TranscriptBound`]: entries, and units of one per entry
+//! plus each removed event plus each byte of the reason, which is cut to
+//! [`REASON_CAP`] bytes with its full length kept). The bound is checked before an
+//! entry is built. Once an entry does not fit, the transcript stops recording and counts
+//! every later attempt in [`Attempts::omitted`]: never a silent drop. A minimality class
+//! is claimed only with a complete transcript (`omitted` zero), because RFC 0028 rejects
+//! "a minimality class with no transcript".
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -419,11 +444,114 @@ impl<F: FnMut(&[usize]) -> Replayed> Replay for F {
     }
 }
 
-/// A reduction budget: replays and work units. Charged before the work it pays for.
+/// A reduction budget: replays and work units, charged before the work they pay for,
+/// and the bound on the per-removal transcript.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Budget {
     replays: u64,
     work: u64,
+    transcript: TranscriptBound,
+}
+
+/// The most bytes of an oracle's rendering one transcript entry keeps.
+pub const REASON_CAP: usize = 256;
+
+/// The bound on a reduction's per-removal transcript ([`Attempts`]). A bound of zero
+/// entries records nothing: every attempt is counted as omitted, and no minimality
+/// class is claimed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TranscriptBound {
+    /// At most this many entries.
+    pub entries: u64,
+    /// At most this many units: one per entry, plus one per removed event, plus one per
+    /// byte of the oracle's rendering.
+    pub units: u64,
+}
+
+impl TranscriptBound {
+    /// The bound [`Budget::new`] grants: 16,384 entries and 4,194,304 units.
+    pub const DEFAULT: Self = Self {
+        entries: 1 << 14,
+        units: 1 << 22,
+    };
+}
+
+/// How one attempt tried its candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Trial {
+    /// The starting set itself, replayed before any pass.
+    Start,
+    /// The closure of the witnesses.
+    Closure,
+    /// Deletion: keep one chunk (with its causal past over configurations, with its
+    /// atoms over atoms) and remove the rest.
+    Keep,
+    /// Deletion: remove one chunk (with its causal future and atoms over
+    /// configurations, with its atoms over atoms).
+    Remove,
+}
+
+/// What the oracle said of one candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    /// The failure reproduced, with valid witnesses: the candidate was kept.
+    Fails,
+    /// The candidate is a run and the failure does not reproduce.
+    Holds,
+    /// The semantics refused the candidate: not a run.
+    Nonconforming,
+    /// The oracle could not decide (INV-008).
+    Inconclusive(InconclusiveReason),
+    /// The oracle said the candidate fails but broke the witness contract.
+    ContractBreach,
+    /// The candidate is empty: it holds no witness and cannot fail, so it was not
+    /// replayed. Recorded so that a final removal that empties the set is on record too.
+    Vacuous,
+}
+
+/// One entry of the per-removal transcript.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Attempt {
+    /// Its position among every attempt of the reduction, from zero.
+    pub index: u64,
+    /// The pass it belongs to; `None` for the start.
+    pub pass: Option<Pass>,
+    /// How it tried the candidate.
+    pub trial: Trial,
+    /// The set it was tried against: `0` for the start, one more after each kept
+    /// candidate.
+    pub version: u64,
+    /// That set's size.
+    pub from: usize,
+    /// The number of chunks deletion split that set into; `0` outside deletion.
+    pub granularity: usize,
+    /// The events the candidate removes from that set, ascending.
+    pub removed: Vec<usize>,
+    /// The candidate's size.
+    pub size: usize,
+    /// The verdict.
+    pub verdict: Verdict,
+    /// The oracle's rendering of a refusal, cut to at most [`REASON_CAP`] bytes at a
+    /// character boundary; empty otherwise and for a memo hit.
+    pub reason: String,
+    /// The rendering's full length in bytes, before the cut.
+    pub reason_bytes: usize,
+    /// For a candidate judged from the memo, the attempt that replayed it.
+    pub memo_of: Option<u64>,
+}
+
+/// A reduction's per-removal transcript, bounded by a [`TranscriptBound`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Attempts {
+    /// The recorded attempts, in order.
+    pub entries: Vec<Attempt>,
+    /// Attempts made after the bound ran out: counted, not recorded.
+    pub omitted: u64,
+    /// The version of the reduction's result set (its core, or its best set).
+    pub version: u64,
+    /// The starting set, version `0`, ascending: with the removals of the kept
+    /// candidates it rebuilds every version's set.
+    pub start: Vec<usize>,
 }
 
 /// What a reduction spent.
@@ -445,10 +573,22 @@ pub enum Exhausted {
 }
 
 impl Budget {
-    /// At most `replays` replays and `work` work units.
+    /// At most `replays` replays and `work` work units, with the transcript bound
+    /// [`TranscriptBound::DEFAULT`].
     #[must_use]
     pub const fn new(replays: u64, work: u64) -> Self {
-        Self { replays, work }
+        Self {
+            replays,
+            work,
+            transcript: TranscriptBound::DEFAULT,
+        }
+    }
+
+    /// This budget with the transcript bound `bound`.
+    #[must_use]
+    pub const fn with_transcript(mut self, bound: TranscriptBound) -> Self {
+        self.transcript = bound;
+        self
     }
 
     fn charge_replay(&mut self, spent: &mut Spent) -> Result<(), Exhausted> {
@@ -586,6 +726,8 @@ pub enum Reduction {
         core: Core,
         /// Each pass, in order.
         transcript: Vec<PassRecord>,
+        /// Each attempt, in order: the per-removal transcript.
+        attempts: Attempts,
         /// What it spent.
         spent: Spent,
     },
@@ -598,6 +740,8 @@ pub enum Reduction {
         best: Option<Core>,
         /// Each pass, in order.
         transcript: Vec<PassRecord>,
+        /// Each attempt, in order: the per-removal transcript.
+        attempts: Attempts,
         /// What it spent.
         spent: Spent,
     },
@@ -614,6 +758,15 @@ impl Reduction {
             _ => None,
         }
     }
+
+    /// The per-removal transcript, unless the reduction did not start.
+    #[must_use]
+    pub const fn attempts(&self) -> Option<&Attempts> {
+        match self {
+            Self::Reduced { attempts, .. } | Self::Inconclusive { attempts, .. } => Some(attempts),
+            Self::Refused(_) => None,
+        }
+    }
 }
 
 /// The running state of one reduction.
@@ -623,6 +776,64 @@ struct Run<'a, R: Replay> {
     budget: Budget,
     spent: Spent,
     transcript: Vec<PassRecord>,
+    attempts: Attempts,
+    /// Every attempt made, recorded or not.
+    tried: u64,
+    /// Entries and units left in the transcript bound.
+    room: TranscriptBound,
+    /// The transcript stopped recording: an entry did not fit.
+    full: bool,
+    /// The version of the current set.
+    version: u64,
+}
+
+/// Where an attempt stands: its pass and trial, the set it is tried against, and the
+/// granularity.
+#[derive(Clone, Copy)]
+struct Ctx<'s> {
+    pass: Option<Pass>,
+    trial: Trial,
+    from: &'s [usize],
+    granularity: usize,
+}
+
+/// The oracle's rendering of a replay that did not fail, or the empty string.
+fn rendering(replayed: &Replayed) -> &str {
+    match replayed {
+        Replayed::NotReplayable(
+            NotReplayable::Nonconforming(s) | NotReplayable::Inconclusive(_, s),
+        ) => s,
+        Replayed::Fails { .. } | Replayed::Holds => "",
+    }
+}
+
+/// The verdict of a candidate that was not kept.
+const fn verdict_of(replayed: &Replayed) -> Verdict {
+    match replayed {
+        Replayed::Fails { .. } => Verdict::ContractBreach,
+        Replayed::Holds => Verdict::Holds,
+        Replayed::NotReplayable(NotReplayable::Nonconforming(_)) => Verdict::Nonconforming,
+        Replayed::NotReplayable(NotReplayable::Inconclusive(reason, _)) => {
+            Verdict::Inconclusive(*reason)
+        }
+    }
+}
+
+/// `from` without `candidate`, both ascending: one merge.
+fn removed_from(from: &[usize], candidate: &[usize]) -> Vec<usize> {
+    let mut out = Vec::with_capacity(from.len().saturating_sub(candidate.len()));
+    let mut k = 0;
+    for &e in from {
+        while candidate.get(k).is_some_and(|&c| c < e) {
+            k += 1;
+        }
+        if candidate.get(k) == Some(&e) {
+            k += 1;
+        } else {
+            out.push(e);
+        }
+    }
+    out
 }
 
 /// Why a pass stopped before it finished.
@@ -666,15 +877,24 @@ fn witness_cost(kept: &[usize], witnesses: &[usize]) -> u64 {
 }
 
 impl<R: Replay> Run<'_, R> {
-    /// Replay `kept`, charged first; the witnesses' validation is charged before it
-    /// runs too. A failure whose witnesses break the contract is [`Step::Contract`],
-    /// never a rejected candidate: the oracle said it fails.
-    fn replay(&mut self, kept: &[usize]) -> Result<Step, Exhausted> {
+    /// Replay `kept`, tried as `ctx` says, charged first; the witnesses' validation is
+    /// charged before it runs too. A failure whose witnesses break the contract is
+    /// [`Step::Contract`], never a rejected candidate: the oracle said it fails. The
+    /// attempt goes into the transcript, except when the budget runs out before its
+    /// witnesses are validated: it is then counted as omitted.
+    fn replay(&mut self, kept: &[usize], ctx: Ctx<'_>) -> Result<Step, Exhausted> {
         self.budget.charge_replay(&mut self.spent)?;
-        Ok(match self.oracle.replay(kept) {
+        let index = self.tried;
+        self.tried = self.tried.saturating_add(1);
+        let step = match self.oracle.replay(kept) {
             Replayed::Fails { witnesses } => {
-                self.budget
-                    .charge_work(witness_cost(kept, &witnesses), &mut self.spent)?;
+                if let Err(e) = self
+                    .budget
+                    .charge_work(witness_cost(kept, &witnesses), &mut self.spent)
+                {
+                    self.attempts.omitted = self.attempts.omitted.saturating_add(1);
+                    return Err(e);
+                }
                 if valid_witnesses(kept, &witnesses) {
                     let mut w = witnesses;
                     w.sort_unstable();
@@ -692,19 +912,82 @@ impl<R: Replay> Run<'_, R> {
                 };
                 Step::Rejected(kind, Replayed::NotReplayable(why))
             }
-        })
+        };
+        let (verdict, reason) = match &step {
+            Step::Kept(_) => (Verdict::Fails, ""),
+            Step::Contract => (Verdict::ContractBreach, ""),
+            Step::Rejected(_, why) => (verdict_of(why), rendering(why)),
+        };
+        self.note(index, ctx, kept, verdict, reason, None);
+        Ok(step)
+    }
+
+    /// Record attempt `index` in the transcript, if the bound has room for it; checked
+    /// before the entry is built. Once an entry does not fit, nothing more is recorded
+    /// and every later attempt is counted as omitted.
+    fn note(
+        &mut self,
+        index: u64,
+        ctx: Ctx<'_>,
+        candidate: &[usize],
+        verdict: Verdict,
+        reason: &str,
+        memo_of: Option<u64>,
+    ) {
+        // The passes only try candidates inside the set they try them against, so the
+        // removed events are the difference in size; the merge that lists them walks
+        // `from` once, inside the work the candidate's construction was charged.
+        let predicted = ctx.from.len().saturating_sub(candidate.len());
+        let mut cut = reason.len().min(REASON_CAP);
+        while !reason.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let units = 1_u64
+            .saturating_add(u64::try_from(predicted).unwrap_or(u64::MAX))
+            .saturating_add(u64::try_from(cut).unwrap_or(u64::MAX));
+        if self.full || self.room.entries == 0 || self.room.units < units {
+            self.full = true;
+            self.attempts.omitted = self.attempts.omitted.saturating_add(1);
+            return;
+        }
+        let removed = removed_from(ctx.from, candidate);
+        if removed.len() != predicted {
+            // A candidate outside its set: the count above does not hold, so the entry is
+            // not recorded, and the transcript stops (fail closed).
+            self.full = true;
+            self.attempts.omitted = self.attempts.omitted.saturating_add(1);
+            return;
+        }
+        self.room.entries -= 1;
+        self.room.units -= units;
+        self.attempts.entries.push(Attempt {
+            index,
+            pass: ctx.pass,
+            trial: ctx.trial,
+            version: self.version,
+            from: ctx.from.len(),
+            granularity: ctx.granularity,
+            removed,
+            size: candidate.len(),
+            verdict,
+            reason: reason[..cut].to_owned(),
+            reason_bytes: reason.len(),
+            memo_of,
+        });
     }
 
     /// The core of `events`, with the guarantees checked on it. Causal closure is
     /// checked only when the budget still pays for the walk; otherwise it is not
     /// claimed. `minimal` names the deletion mode whose final removals were all
-    /// decided, if any.
+    /// decided, if any; its class is claimed only when the transcript recorded every
+    /// attempt, so the removals that license it are all on record.
     fn core(
         &mut self,
         events: Vec<usize>,
         witnesses: Vec<usize>,
         minimal: Option<Deletion>,
     ) -> Core {
+        let minimal = minimal.filter(|_| self.attempts.omitted == 0);
         let mut guarantees = vec![Guarantee::ReplayPreserving];
         let paid = self
             .budget
@@ -729,9 +1012,22 @@ impl<R: Replay> Run<'_, R> {
         }
     }
 
+    /// The transcript, with the version of the set the reduction ends on.
+    fn finish_attempts(&mut self) -> Attempts {
+        let mut attempts = std::mem::take(&mut self.attempts);
+        attempts.version = self.version;
+        attempts
+    }
+
     /// Replay the starting set; its witnesses, or the refusal.
     fn start(&mut self, set: &[usize]) -> Result<Result<Vec<usize>, Refusal>, Exhausted> {
-        Ok(match self.replay(set)? {
+        let ctx = Ctx {
+            pass: None,
+            trial: Trial::Start,
+            from: set,
+            granularity: 0,
+        };
+        Ok(match self.replay(set, ctx)? {
             Step::Kept(w) => Ok(w),
             Step::Contract => Err(Refusal::WitnessContract),
             Step::Rejected(_, Replayed::NotReplayable(why)) => {
@@ -786,7 +1082,14 @@ impl<R: Replay> Run<'_, R> {
             self.record(Pass::Closure, before, before, r0, [0; 3], PassEnd::Done);
             return Ok((set, witnesses, false));
         }
-        match self.replay(&closure) {
+        let ctx = Ctx {
+            pass: Some(Pass::Closure),
+            trial: Trial::Closure,
+            from: &set,
+            granularity: 0,
+        };
+        let step = self.replay(&closure, ctx);
+        match step {
             Err(e) => {
                 self.record(
                     Pass::Closure,
@@ -810,6 +1113,7 @@ impl<R: Replay> Run<'_, R> {
                 Err((Stop::Contract, set, witnesses))
             }
             Ok(Step::Kept(w)) => {
+                self.version = self.version.saturating_add(1);
                 self.record(
                     Pass::Closure,
                     before,
@@ -851,12 +1155,22 @@ impl<R: Replay> Run<'_, R> {
         // Candidates already replayed without failing, with how they fared: never
         // replayed twice. At most one entry per replay, each no longer than the trace,
         // and each lookup or insertion is inside the candidate's charge.
-        let mut rejected: BTreeMap<Vec<usize>, Rejection> = BTreeMap::new();
+        // Each entry also names the attempt that replayed it, for the transcript.
+        let mut rejected: BTreeMap<Vec<usize>, (Verdict, u64)> = BTreeMap::new();
         let mut n = 2_usize;
         let outcome: Result<u64, Stop> = loop {
             if current.len() < 2 {
                 // One event left: its only removal leaves the empty set, which holds no
-                // witness and so cannot fail.
+                // witness and so cannot fail. Recorded, not replayed.
+                let ctx = Ctx {
+                    pass: Some(Pass::Deletion(mode)),
+                    trial: Trial::Remove,
+                    from: &current,
+                    granularity: current.len(),
+                };
+                let index = self.tried;
+                self.tried = self.tried.saturating_add(1);
+                self.note(index, ctx, &[], Verdict::Vacuous, "", None);
                 break Ok(0);
             }
             let chunks = split(&current, n);
@@ -891,17 +1205,37 @@ impl<R: Replay> Run<'_, R> {
                         }
                         (Deletion::Atoms, false) => self.order.with_atoms_of(chunk),
                     };
-                    // An empty candidate holds no witness and cannot fail.
-                    if candidate.is_empty() || candidate.len() >= current.len() {
+                    if candidate.len() >= current.len() {
                         continue;
                     }
-                    if let Some(&seen) = rejected.get(&candidate) {
-                        if complement && seen == Rejection::Inconclusive {
+                    let ctx = Ctx {
+                        pass: Some(Pass::Deletion(mode)),
+                        trial: if complement {
+                            Trial::Remove
+                        } else {
+                            Trial::Keep
+                        },
+                        from: &current,
+                        granularity: chunks.len(),
+                    };
+                    if candidate.is_empty() {
+                        // It holds no witness and cannot fail: recorded, not replayed.
+                        let index = self.tried;
+                        self.tried = self.tried.saturating_add(1);
+                        self.note(index, ctx, &candidate, Verdict::Vacuous, "", None);
+                        continue;
+                    }
+                    if let Some(&(seen, of)) = rejected.get(&candidate) {
+                        if complement && matches!(seen, Verdict::Inconclusive(_)) {
                             undecided += 1;
                         }
+                        let index = self.tried;
+                        self.tried = self.tried.saturating_add(1);
+                        self.note(index, ctx, &candidate, seen, "", Some(of));
                         continue;
                     }
-                    match self.replay(&candidate) {
+                    let index = self.tried;
+                    match self.replay(&candidate, ctx) {
                         Err(e) => {
                             stopped = Some(Stop::Exhausted(e));
                             break 'phases;
@@ -913,11 +1247,12 @@ impl<R: Replay> Run<'_, R> {
                         Ok(Step::Kept(w)) => {
                             current = candidate;
                             witnesses = w;
+                            self.version = self.version.saturating_add(1);
                             n = if complement { (n - 1).max(2) } else { 2 };
                             progressed = true;
                             break 'phases;
                         }
-                        Ok(Step::Rejected(kind, _)) => {
+                        Ok(Step::Rejected(kind, why)) => {
                             match kind {
                                 Rejection::Holds => counts[0] += 1,
                                 Rejection::Nonconforming => counts[1] += 1,
@@ -928,7 +1263,7 @@ impl<R: Replay> Run<'_, R> {
                                     }
                                 }
                             }
-                            rejected.insert(candidate, kind);
+                            rejected.insert(candidate, (verdict_of(&why), index));
                         }
                     }
                 }
@@ -987,6 +1322,7 @@ fn stopped<R: Replay>(
             Stop::Contract => InconclusiveReason::EngineError,
         },
         best,
+        attempts: run.finish_attempts(),
         transcript: run.transcript,
         spent: run.spent,
     }
@@ -1023,6 +1359,11 @@ fn reduce<R: Replay>(
         budget,
         spent: Spent::default(),
         transcript: Vec::new(),
+        attempts: Attempts::default(),
+        tried: 0,
+        room: budget.transcript,
+        full: false,
+        version: 0,
     };
     // Validating the start is a sort and one walk: charged before either runs.
     let len = u64::try_from(start.len()).unwrap_or(u64::MAX);
@@ -1043,6 +1384,7 @@ fn reduce<R: Replay>(
     if !valid {
         return Reduction::Refused(Refusal::NotAConfiguration);
     }
+    run.attempts.start.clone_from(&start);
     let witnesses = match run.start(&start) {
         Err(e) => return stopped(run, Stop::Exhausted(e), None),
         Ok(Err(refusal)) => return Reduction::Refused(refusal),
@@ -1061,6 +1403,7 @@ fn reduce<R: Replay>(
             let core = run.core(set, witnesses, None);
             return Reduction::Reduced {
                 core,
+                attempts: run.finish_attempts(),
                 transcript: run.transcript,
                 spent: run.spent,
             };
@@ -1072,6 +1415,7 @@ fn reduce<R: Replay>(
             let core = run.core(set, w, decided.then_some(mode));
             Reduction::Reduced {
                 core,
+                attempts: run.finish_attempts(),
                 transcript: run.transcript,
                 spent: run.spent,
             }

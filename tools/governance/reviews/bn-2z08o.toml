@@ -1,0 +1,55 @@
+[change]
+bone = "bn-2z08o"
+author = "continuum-dev"
+summary = "PR 18 causal minimization, program-level replay and per-removal transcript: continuum-debugger's reduce module returns RFC 0028's per-removal minimizer transcript with every reduction (each attempt with the set it was tried against, the events it removed, the oracle's verdict and reason, and memo hits linked to the attempt that replayed them), bounded by entries and units checked before an entry is built, with omissions counted; a minimality class is claimed only with a complete transcript. The register instantiation gains a program-level replay oracle that re-executes the program truncated to the candidate's operations through the binding and requires it to emit exactly the candidate, so deletion over atoms keeps M01's mechanism"
+
+[semantic]
+covers = [
+  "crates/continuum-debugger/src/",
+]
+reference_tests = [
+  "crates/continuum-debugger/tests/pr18_reduce.rs::the_transcript_records_every_attempt_in_order",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::the_transcript_licenses_the_minimality_claim",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::a_full_transcript_is_counted_and_withholds_minimality",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::the_transcript_keeps_verdicts_and_reasons",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::a_one_event_core_records_its_vacuous_removal",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::a_long_reason_is_cut_not_dropped",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::deletion_over_configurations_is_one_minimal_on_random_orders",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::an_undecided_removal_withholds_minimality",
+  "crates/continuum-debugger/tests/pr18_reduce.rs::identical_inputs_give_identical_reductions",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::deletion_over_atoms_keeps_the_mechanism_under_the_program_replay",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::m01_acked_not_durable_keeps_the_mechanism_under_the_program_replay",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::the_substrate_cores_are_not_runs_of_the_program",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::the_program_replay_refuses_what_the_program_cannot_produce",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::a_program_replay_core_is_a_prefix_of_a_whole_run",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::the_mechanism_predicate_rejects_story_mutants",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::deletion_over_atoms_loses_the_mechanism_under_a_substrate_replay",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::identical_inputs_give_byte_identical_cores",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::the_evidence_matches_its_golden",
+  "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::the_transcripts_match_their_golden",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::symmetry_renaming_leaves_the_program_replay_and_its_transcript_unchanged", relation = "symmetry renaming" },
+  { test = "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::symmetry_renaming_of_values_leaves_the_core_unchanged", relation = "symmetry renaming" },
+  { test = "crates/continuum-debugger/tests/pr18_reduce.rs::independent_event_swap_leaves_the_core_unchanged", relation = "independent-event swap" },
+]
+differential_tests = [
+  { test = "crates/continuum-asupersync/tests/pr18_impl01_reduction.rs::program_replay_cores_keep_the_mechanism_over_the_corpus", oracle = "continuum-asupersync", subject = "continuum-debugger" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers causal minimization or causal cores; the causal-minimization frontier row (plan 24.5, research/26, quote-id causal-minimization-core-ratio) is a register threshold on the research/26 corpus, which this change neither meets nor claims: the M01 corpus median under the program replay is 39.2 percent of the trace"
+
+[semantic.schemas]
+updated = []
+reason = "no JSON schema document and no wire shape changes: the reduction and its transcript are an in-process library with no production caller; failure.minimize stays unserved (bn-3ncgl), and crashpack.minimization and context-pack guarantees are untouched (RFC 0028 F6 and F8 remain open)"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-debugger's Reduction::Reduced and Reduction::Inconclusive gain an attempts field, which is source-breaking for a caller that matches either variant exhaustively without `..` (the one such caller, in pr18_impl01_reduction.rs, is updated); Budget gains a transcript bound with a default, and Attempt, Attempts, Trial, Verdict, TranscriptBound and REASON_CAP are new; every existing core, pass record and spending is unchanged (the bn-3km4z golden lines are byte-identical), and a minimality class is withheld only when the transcript bound runs out, which the default bound does not on any existing reduction. continuum-asupersync's src is unchanged"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-1l61tg"
+verdict = "approved"
