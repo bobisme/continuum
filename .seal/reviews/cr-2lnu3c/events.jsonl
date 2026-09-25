@@ -9,3 +9,4 @@
 {"ts":"2026-09-25T18:28:27.351897438Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-2q3qcy","reason":"Fixed in d2d2faa0 and verified at target 02eb106f"}}
 {"ts":"2026-09-25T18:28:27.403665674Z","author":"continuum-security","event":"ReviewerVoted","data":{"review_id":"cr-2lnu3c","vote":"lgtm","reason":"Whole persisted range reviewed at 02eb106f. No unresolved security findings. The repaired epoch binding fails closed, and the debugger plus full PR18 mechanism suites pass.","target_commit":"02eb106f53b003847298f2be77570488d63e74c9"}}
 {"ts":"2026-09-25T18:28:27.445040698Z","author":"continuum-security","event":"ReviewApproved","data":{"review_id":"cr-2lnu3c","target_commit":"02eb106f53b003847298f2be77570488d63e74c9"}}
+{"ts":"2026-09-25T19:01:01.833022574Z","author":"continuum-dev","event":"ReviewMerged","data":{"review_id":"cr-2lnu3c","final_commit":"3151a2d96de162108d7cdb7df8e624f26419756f"}}
