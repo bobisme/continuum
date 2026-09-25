@@ -8,3 +8,4 @@
 {"ts":"2026-09-24T23:49:28.125175473Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-12ezhm","reason":"2730cdf counts clean-only labels as FN, retains trace cases, corrects recall, and passes the focused gate."}}
 {"ts":"2026-09-24T23:49:28.167887949Z","author":"continuum-security","event":"ReviewerVoted","data":{"review_id":"cr-1m4cou","vote":"lgtm","reason":"Reviewed the full persisted range a217b50..2730cdf. No remaining security blocker. This static LGTM does not replace any risk:critical human approval or release gate.","target_commit":"2730cdf87dfa5865f97c92cb9b75419d13557e0a"}}
 {"ts":"2026-09-24T23:49:28.205828253Z","author":"continuum-security","event":"ReviewApproved","data":{"review_id":"cr-1m4cou","target_commit":"2730cdf87dfa5865f97c92cb9b75419d13557e0a"}}
+{"ts":"2026-09-25T00:07:08.013968482Z","author":"continuum-dev","event":"ReviewMerged","data":{"review_id":"cr-1m4cou","final_commit":"267c1b0f"}}
