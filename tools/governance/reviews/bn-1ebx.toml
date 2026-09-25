@@ -1,0 +1,49 @@
+[change]
+bone = "bn-1ebx"
+author = "continuum-dev"
+summary = "PR-22 IMPL-01, IMPL-02, IMPL-07 and IMPL-08 (bn-1ebx, bn-cps6, bn-1cec), the promotion-receipt skeleton: continuum-repair composes intent, base_snapshot, result_snapshot, gate_profile and the not_yet_enforced gate entries from a repair transaction and three daemon store seams, never from caller text, and verifies a client-supplied receipt's same fields by re-deriving them from the transaction it names; every other receipt field is a typed seam and the whole-receipt verdict is never Verified"
+
+[semantic]
+covers = [
+  "crates/continuum-repair/src/receipt.rs",
+  "crates/continuum-repair/src/lib.rs",
+  "crates/continuum-repair/src/transaction.rs",
+]
+reference_tests = [
+  "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_impl01_positive_the_intent_is_the_protected_base_intent_and_its_content_identity",
+  "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_impl02_positive_before_is_the_base_and_after_is_the_sealed_candidate",
+  "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_impl07_positive_a_phase_b_skeleton_names_its_profile_and_lists_gates_9_and_10",
+  "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_positive_a_claim_matching_every_owned_field_is_refuted_by_the_pending_record",
+  "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_negative_a_client_supplied_receipt_for_an_unrecorded_transaction_verifies_nothing",
+  "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_impl01_negative_a_swapped_intent_id_fails_verification",
+  "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_impl02_negative_a_foreign_or_swapped_snapshot_fails_verification",
+  "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_impl07_negative_a_not_yet_enforced_gate_claimed_passed_fails",
+  "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_impl07_negative_a_profile_other_than_the_transactions_fails",
+  "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_impl07_negative_promotion_verification_reaches_the_record_with_gate_12_pending",
+  "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_impl07_boundary_every_profile_lists_exactly_its_unenforced_gates",
+  "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_boundary_the_closed_sets_and_fields_are_the_receipt_schemas",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_boundary_canonical_bytes_are_stable_and_survive_a_serialization_round_trip", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuum-repair/tests/pr22_receipt_skeleton_evidence.rs::pr22_impl01_differential_the_intent_identity_matches_continuum_intent_independently", oracle = "continuum-intent", subject = "continuum-repair" },
+]
+
+[semantic.claim_impact]
+claims = ["C020", "C033"]
+reason = "Both rows bear on agent repair. Neither row's state or wording changes: C020 stays OBSERVED on the intent classification and policy layer, and this skeleton adds a receipt field check, not the gate-3 classification path; C033 stays TARGET because no agent repair is evaluated or promoted yet and no receipt can list an enforced gate passed"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the crate renders receipt fragments that conform to the existing epoch-1 promotion-receipt schema, and validate_dossier.py checks the four retained fragments against that schema's own property and gates.items subschemas"
+unaffected = { promotion-receipt = "the crate emits fragments of this class and conforms to each field's subschema exactly; no field, enum, pattern, or conditional moves", repair-transaction = "read only: the receipt is derived from a transaction version, whose shape does not change" }
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-repair gains the receipt module; no existing type, artifact, wire shape, or IDL operation changes, no new dependency edge, and no daemon path calls the new code yet"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-gk46xi"
+verdict = "approved"

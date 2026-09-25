@@ -2726,8 +2726,8 @@
         "line": 500,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "intent identity"
+      "status": "satisfied",
+      "summary": "intent identity (delivered: bn-1ebx \u2014 crates/continuum-repair/src/receipt.rs: ReceiptSkeleton::compose reads intent from the transaction's frozen base triple, never from a caller, and resolves it through the IntentRegistry seam to a contract that declares that handle and stands accepted; the skeleton keeps the contract's ADR-0013 IntentIdentity bytes. verifyskeleton re-derives the field from the transaction a claimed receipt names and refuses a swapped intent IntentMismatch; an unregistered, proposal-only or misfiled intent composes nothing, typed. A published receipt stays verifiable after a later intent revision, and a superseded intent composes no new one. Retained artifact pr22-impl01-ack-after-sync-intent. Evidence crates/continuum-repair/tests/pr22receiptskeletonevidence.rs; the retained fragments under tests/fixtures/ are checked by validatedossier.py against the receipt schema's own subschemas, because a skeleton is not a whole receipt. Not here: daemon wiring of repair.promote and evidence.verify, so no production path calls the skeleton yet; the check that the named version is the promoted one, the PromotionRecord seam; the handle-to-content binding, a registry invariant. Open: the schema types three coverage fields number and the ID5 reader admits integers only, so a receipt with fractional coverage is refused OutsideId5Vocabulary)"
     },
     {
       "category": "pr-deliverable",
@@ -2738,8 +2738,8 @@
         "line": 500,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "before/after snapshots"
+      "status": "satisfied",
+      "summary": "before/after snapshots (delivered: bn-cps6 \u2014 crates/continuum-repair/src/receipt.rs: basesnapshot is the transaction's base and resultsnapshot its sealed candidate, each resolved through the SealedSnapshots seam and required to be bound to the base intent; a draft has no after, NoCandidate. verifyskeleton refuses a foreign, swapped or other-repair snapshot SnapshotMismatch and an unsealed or other-contract candidate as a typed compose refusal. Retained artifact pr22-impl02-ack-after-sync-snapshots. Evidence crates/continuum-repair/tests/pr22receiptskeletonevidence.rs; the retained fragments under tests/fixtures/ are checked by validatedossier.py against the receipt schema's own subschemas, because a skeleton is not a whole receipt. The after is the candidate PR-20 IMPL-02 seals from base + declared changes, bn-195b, so both handles in the retained fragment are content identities. Not here: the daemon wiring above)"
     },
     {
       "category": "pr-deliverable",
@@ -2798,8 +2798,8 @@
         "line": 500,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "gateprofile (the phase-staged profile the receipt was evaluated under, plan \u00a721)"
+      "status": "satisfied",
+      "summary": "gateprofile (the phase-staged profile the receipt was evaluated under, plan \u00a721) (delivered: bn-1cec \u2014 crates/continuum-repair/src/receipt.rs: the profile is copied from the transaction, where repair.begin froze it, and a claimed receipt naming any other profile fails ProfileMismatch, which does not disclose the transaction's profile, so a Phase B receipt cannot be presented as a Phase C or D one. Retained artifact pr22-impl07-ack-after-sync-gate-profile. Evidence crates/continuum-repair/tests/pr22receiptskeletonevidence.rs; the retained fragments under tests/fixtures/ are checked by validatedossier.py against the receipt schema's own subschemas, because a skeleton is not a whole receipt.)"
     },
     {
       "category": "pr-deliverable",
@@ -2810,8 +2810,8 @@
         "line": 500,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "NotYetEnforced list \u2014 gates not yet in the profile, never rendered as passed"
+      "status": "satisfied",
+      "summary": "NotYetEnforced list \u2014 gates not yet in the profile, never rendered as passed (delivered: bn-1cec \u2014 crates/continuum-repair/src/receipt.rs: NotYetEnforced::of derives the list from the profile through the PR-20 GateProfile::enforces table and nothing else; an UnenforcedGate renders the single token notyetenforced, carries the profile it is outside of, and has no public constructor; the module renders no passed entry at all. verifyskeleton refuses an unenforced gate claimed passed UnenforcedGateClaimedPassed, an enforced gate listed unenforced, and any gate whose claimed status is not the transaction's recorded status GateNotOnRecord, so no claim verifies until PR-20 evaluation records a gate passed. Gate 12 follows RFC 0032's order, cr-tz8fwi: verifyforpromotion checks the receipt against a record whose receiptgeneration is still pending and returns a typed ReceiptGenerationLicense, the seam PR-20 promote consumes to move gate 12 to passed; a record already showing gate 12 passed is refused ReceiptGenerationAlreadyPassed, and verifyskeleton checks a published receipt, whose record shows it passed. Retained artifact pr22-impl07-phase-b-not-yet-enforced. Evidence crates/continuum-repair/tests/pr22receiptskeletonevidence.rs; the retained fragments under tests/fixtures/ are checked by validatedossier.py against the receipt schema's own subschemas, because a skeleton is not a whole receipt.)"
     },
     {
       "category": "pr-deliverable",

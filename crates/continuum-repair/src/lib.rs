@@ -44,6 +44,18 @@
 //! | [`hypothesis`] | the untrusted hypothesis, the closed change kinds, the proposal |
 //! | [`transaction`] | the transaction skeleton: `begin` (draft v1) and `apply` (applied v2+), canonical bytes, content identity |
 //! | [`patch`] | patch identity (PR-20 / IMPL-02, bn-195b): declared changes, the candidate sealed from base + changes, gate 2's comparison |
+//! | [`receipt`] | the promotion-receipt skeleton (PR 22): intent identity, before/after snapshots, `gate_profile` and the `NotYetEnforced` list, composed from referenced artifacts and verified against them |
+//!
+//! # What is here: PR-22 / IMPL-01, IMPL-02, IMPL-07 and IMPL-08, the receipt skeleton (bn-1ebx, bn-cps6, bn-1cec)
+//!
+//! RFC 0032 is the normative home of the receipt's composition, and the receipt cites a
+//! repair transaction, so the receipt lives beside the transaction. [`receipt`] derives
+//! `intent`, `base_snapshot`, `result_snapshot`, `gate_profile` and the
+//! `not_yet_enforced` entries of `gates` from a [`transaction::RepairTransaction`] and
+//! three daemon stores, and verifies a client-supplied receipt's same fields by
+//! re-deriving them. Every other receipt field is a typed [`receipt::ReceiptSeam`] with
+//! its owner, and [`receipt::SkeletonVerification::receipt_verdict`] is never a full
+//! verification.
 //!
 //! # Seams left for the later PR-20 bones
 //!
@@ -100,4 +112,5 @@
 pub mod handle;
 pub mod hypothesis;
 pub mod patch;
+pub mod receipt;
 pub mod transaction;

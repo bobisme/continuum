@@ -697,6 +697,31 @@ impl<H: ContentHasher> RepairTransaction<H> {
         })
     }
 
+    /// Test-only: this version with `statuses` recorded, resealed under its new identity.
+    /// In production only evaluation (PR-20, not landed) writes a gate outcome; the
+    /// receipt module's unit tests need a record with in-profile gates `passed` to reach
+    /// its success path.
+    #[cfg(test)]
+    pub(crate) fn with_recorded_gates(&self, statuses: [GateStatus; 12]) -> Self {
+        let mut gates = self.gates;
+        for (gate, status) in gates.iter_mut().zip(statuses) {
+            gate.status = status;
+        }
+        Self::seal(Unsealed {
+            version: self.version,
+            supersedes: self.supersedes.clone(),
+            base_snapshot: self.base_snapshot.clone(),
+            base_intent: self.base_intent.clone(),
+            failure: self.failure.clone(),
+            hypothesis: self.hypothesis.clone(),
+            changes: self.changes.clone(),
+            candidate_snapshot: self.candidate_snapshot.clone(),
+            gate_profile: self.gate_profile,
+            gates,
+            cost_ledger: self.cost_ledger,
+        })
+    }
+
     fn seal(parts: Unsealed) -> Self {
         let identity = RepairIdentity(preimage(&parts).to_canonical_bytes());
         let repair_id = identity.mint::<H>();

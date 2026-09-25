@@ -91,6 +91,27 @@ EXTERNAL_SCHEMA_PAIRS = {
     ),
 }
 
+# Receipt fragments `continuum-repair`'s PR-22 skeleton suite emits (bn-1ebx, bn-cps6,
+# bn-1cec). A skeleton is not a whole receipt: the schema requires fields that other
+# PR-22 bones own, so no fragment is checked against a derived schema. Each is checked
+# against the schema's own subschemas, with the schema's `$defs` in scope:
+#
+# - `properties`: the fragment is an object, every key is a declared top-level property,
+#   and each value validates against that property's subschema;
+# - `gates.items`: the fragment is an array, each entry validates against the subschema
+#   of one `gates[]` entry, and each is `not_yet_enforced` (the NotYetEnforced list).
+#
+# `tests/pr22_receipt_skeleton_evidence.rs` asserts the library renders exactly these
+# bytes.
+EXTERNAL_SCHEMA_FRAGMENTS = {
+    "schemas/promotion-receipt.schema.json": (
+        ("crates/continuum-repair/tests/fixtures/pr22-impl01-ack-after-sync-intent.json", "properties"),
+        ("crates/continuum-repair/tests/fixtures/pr22-impl02-ack-after-sync-snapshots.json", "properties"),
+        ("crates/continuum-repair/tests/fixtures/pr22-impl07-ack-after-sync-gate-profile.json", "properties"),
+        ("crates/continuum-repair/tests/fixtures/pr22-impl07-phase-b-not-yet-enforced.json", "gates.items"),
+    ),
+}
+
 # The normative protocol artifacts `rule conformance.registry_agreement` binds
 # to one another: the IDL declares the operations, plan §10.2 registers them,
 # and the RFC 0027 table carries one authority row per registered operation.
@@ -169,9 +190,65 @@ def check_schemas() -> dict[str, Any]:
         if errors:
             formatted = "\n".join(f"{instance_rel}:{list(e.path)}: {e.message}" for e in errors)
             raise AssertionError(formatted)
+    fragments = check_schema_fragments()
     return {"pairs": len(pairs), "external_instances": sum(
         len(instances) for instances in EXTERNAL_SCHEMA_PAIRS.values()
-    )}
+    ), "external_fragments": fragments}
+
+
+def check_schema_fragments() -> int:
+    count = 0
+    for schema_rel, fragments in EXTERNAL_SCHEMA_FRAGMENTS.items():
+        schema = json.loads((ROOT / schema_rel).read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(schema)
+
+        def subschema(body: dict[str, Any]) -> dict[str, Any]:
+            return {"$schema": schema["$schema"], "$defs": schema.get("$defs", {}), **body}
+
+        for instance_rel, mode in fragments:
+            instance_path = PROJECT_ROOT / instance_rel
+            assert instance_path.exists(), (
+                f"{instance_rel}: schema fragment is registered against {schema_rel} but "
+                "does not exist; a moved or deleted fragment loses its conformance check silently"
+            )
+            instance = json.loads(instance_path.read_text(encoding="utf-8"))
+            checks: list[tuple[list[Any], Any, dict[str, Any]]] = []
+            if mode == "properties":
+                assert isinstance(instance, dict) and instance, (
+                    f"{instance_rel}: a `properties` fragment is a non-empty object"
+                )
+                for key, value in instance.items():
+                    assert key in schema["properties"], (
+                        f"{instance_rel}: `{key}` is not a property {schema_rel} declares"
+                    )
+                    checks.append(([key], value, subschema(schema["properties"][key])))
+            elif mode == "gates.items":
+                assert isinstance(instance, list) and instance, (
+                    f"{instance_rel}: a `gates.items` fragment is a non-empty array"
+                )
+                items = schema["properties"]["gates"]["items"]
+                for index, entry in enumerate(instance):
+                    checks.append(([index], entry, subschema(items)))
+                    # These fragments are the NotYetEnforced list: an entry listed
+                    # `passed` is schema-valid and exactly what the list must never say.
+                    assert isinstance(entry, dict) and entry.get("status") == "not_yet_enforced", (
+                        f"{instance_rel}:[{index}]: a NotYetEnforced entry is never rendered passed"
+                    )
+            else:
+                raise AssertionError(f"{instance_rel}: unknown fragment mode {mode!r}")
+            for path, value, body in checks:
+                errors = list(Draft202012Validator(body).iter_errors(value))
+                if errors:
+                    formatted = "\n".join(
+                        f"{instance_rel}:{path + list(e.path)}: {e.message}" for e in errors
+                    )
+                    raise AssertionError(formatted)
+            count += 1
+    registered = sum(len(fragments) for fragments in EXTERNAL_SCHEMA_FRAGMENTS.values())
+    assert registered == 4 and count == registered, (
+        f"{count} of {registered} schema fragments checked; the PR-22 skeleton registers four"
+    )
+    return count
 
 
 def check_toml() -> dict[str, Any]:
