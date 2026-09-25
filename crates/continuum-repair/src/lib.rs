@@ -1,3 +1,5 @@
+// side bn-19gw blob: e3ec8a7bdbed2a0cabc3e641942d8507ebfd4484
+
 //! `continuum-repair` — repair transactions (plan §8, PR 20).
 //!
 //! # Responsibility
@@ -46,16 +48,17 @@
 //! | [`patch`] | patch identity (PR-20 / IMPL-02, bn-195b): declared changes, the candidate sealed from base + changes, gate 2's comparison |
 //! | [`replay`] | exact replay (PR-20 / IMPL-03, bn-2pla): gate 1 replays the crashpack's recorded run on the base and requires the exact failure; gate 4 replays it on the candidate under the original choices; both are recorded with evidence as the next version |
 //! | [`policy`] | the policy verdict (PR-20 / IMPL-06, bn-b6u4): a pure function from a version's recorded gates under its profile to a typed verdict bound to its `rt_` identity (promote-eligible, blocked, inconclusive with typed reasons, privileged intent revision required); the only issuer of a `ContinueAndDisclose` authorization, which issues none |
-//! | [`receipt`] | the promotion-receipt skeleton (PR 22): intent identity, before/after snapshots, `gate_profile` and the `NotYetEnforced` list, composed from referenced artifacts and verified against them |
+//! | [`receipt`] | the promotion-receipt skeleton (PR 22): intent identity, before/after snapshots, the semantic diff recomputed for the version (IMPL-03, bn-19gw), `gate_profile` and the `NotYetEnforced` list, composed from referenced artifacts and verified against them |
 //! | [`diff`] | semantic and intent diff (PR-20 / IMPL-04, bn-1b69): the RFC 0031 `diff_*` artifact between base and candidate, computed from the stores; a repair or a privileged intent revision; gate 3's status; claimed diffs refused unless byte-equal |
 //!
 //! # What is here: PR-22 / IMPL-01, IMPL-02, IMPL-07 and IMPL-08, the receipt skeleton (bn-1ebx, bn-cps6, bn-1cec)
 //!
 //! RFC 0032 is the normative home of the receipt's composition, and the receipt cites a
 //! repair transaction, so the receipt lives beside the transaction. [`receipt`] derives
-//! `intent`, `base_snapshot`, `result_snapshot`, `gate_profile` and the
-//! `not_yet_enforced` entries of `gates` from a [`transaction::RepairTransaction`] and
-//! three daemon stores, and verifies a client-supplied receipt's same fields by
+//! `intent`, `base_snapshot`, `result_snapshot`, `semantic_diff` and `intent_diff`
+//! (PR-22 / IMPL-03, bn-19gw: the [`diff`] recomputed for the named version), `gate_profile`
+//! and the `not_yet_enforced` entries of `gates` from a [`transaction::RepairTransaction`]
+//! and the daemon stores, and verifies a client-supplied receipt's same fields by
 //! re-deriving them. Every other receipt field is a typed [`receipt::ReceiptSeam`] with
 //! its owner, and [`receipt::SkeletonVerification::receipt_verdict`] is never a full
 //! verification.

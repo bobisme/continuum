@@ -32,6 +32,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use continuum_intent::canonical_json::Json;
 use continuum_intent::contract::{IntentContract, IntentId};
+use continuum_repair::diff::{DiffScope, ImpactScope, ScopeAnswer};
 use continuum_repair::handle::{CrashpackId, RepairId, SnapshotId};
 use continuum_repair::hypothesis::{ChangeKind, Hypothesis, Proposal};
 use continuum_repair::patch::{DeclaredChange, FileEdit};
@@ -210,6 +211,14 @@ impl CandidateEvidence for World {
     }
 }
 
+/// The skeleton suite's diff scope: the daemon holds no evidence naming either side.
+/// The IMPL-03 suite varies it.
+impl ImpactScope for World {
+    fn evidence(&self, _: DiffScope<'_>) -> ScopeAnswer {
+        ScopeAnswer::Complete(Vec::new())
+    }
+}
+
 impl TransactionStore<Blake3Hasher> for World {
     fn transaction(&self, repair: &RepairId) -> Resolution<Tx> {
         self.transactions
@@ -256,7 +265,7 @@ fn applied() -> Tx {
 fn skeleton() -> ReceiptSkeleton {
     let tx = applied();
     let world = World::register(&[&tx]);
-    ReceiptSkeleton::compose(&tx, &world, &world, &world)
+    ReceiptSkeleton::compose(&tx, &world, &world, &world, &world)
         .expect("the ack-after-sync skeleton composes")
 }
 
@@ -308,14 +317,27 @@ fn claim_for(tx: &Tx) -> BTreeMap<String, Json> {
         ),
         ("gate_profile".to_owned(), s(profile.token())),
         ("gates".to_owned(), Json::Array(gates)),
+        ("semantic_diff".to_owned(), s(&diff_for(tx))),
+        ("intent_diff".to_owned(), s(&diff_for(tx))),
         ("unknowns".to_owned(), unknowns_for(tx)),
     ])
+}
+
+/// The recomputed diff handle of `tx` under the skeleton suite's stores.
+fn diff_for(tx: &Tx) -> String {
+    let world = World::register(&[tx]);
+    ReceiptSkeleton::compose(tx, &world, &world, &world, &world)
+        .expect("the claim's transaction composes")
+        .semantic_diff()
+        .handle()
+        .expect("the diff is computed")
+        .to_owned()
 }
 
 /// The derived `unknowns` of `tx` under the skeleton suite's evidence.
 fn unknowns_for(tx: &Tx) -> Json {
     let world = World::register(&[tx]);
-    ReceiptSkeleton::compose(tx, &world, &world, &world)
+    ReceiptSkeleton::compose(tx, &world, &world, &world, &world)
         .expect("the claim's transaction composes")
         .unknowns()
         .entries_json()
@@ -337,7 +359,7 @@ fn set_gate(claim: &mut BTreeMap<String, Json>, gate: GateName, status: &str) {
 fn verify_claim(claim: BTreeMap<String, Json>, world: &World) -> Result<(), VerifyRefusal> {
     let bytes = Json::Object(claim).to_canonical_bytes();
     let parsed = ClaimedReceipt::parse(&bytes)?;
-    verify_skeleton(&parsed, world, world, world, world).map(|_| ())
+    verify_skeleton(&parsed, world, world, world, world, world).map(|_| ())
 }
 
 // --- positive ----------------------------------------------------------------------
@@ -433,7 +455,7 @@ fn pr22_positive_a_claim_matching_every_owned_field_is_refuted_by_the_pending_re
         verify_claim(claim_for(&tx), &world),
         Err(VerifyRefusal::GateNotOnRecord(GateName::BaseReplay))
     );
-    assert_eq!(ReceiptSeam::ALL.len(), 7);
+    assert_eq!(ReceiptSeam::ALL.len(), 6);
     assert!(ReceiptSeam::ALL.contains(&ReceiptSeam::PromotionRecord));
 }
 
@@ -454,7 +476,7 @@ fn pr22_impl07_negative_promotion_verification_reaches_the_record_with_gate_12_p
     let bytes = Json::Object(claim_for(&tx)).to_canonical_bytes();
     let claim = ClaimedReceipt::parse(&bytes).unwrap();
     assert_eq!(
-        verify_for_promotion(&claim, &world, &world, &world, &world),
+        verify_for_promotion(&claim, &world, &world, &world, &world, &world),
         Err(VerifyRefusal::GateNotOnRecord(GateName::BaseReplay))
     );
 }
@@ -471,7 +493,7 @@ fn pr22_impl01_positive_a_published_receipt_survives_a_later_intent_revision() {
         Err(VerifyRefusal::GateNotOnRecord(GateName::BaseReplay))
     );
     assert_eq!(
-        ReceiptSkeleton::compose(&tx, &world, &world, &world),
+        ReceiptSkeleton::compose(&tx, &world, &world, &world, &world),
         Err(ComposeRefusal::IntentSuperseded)
     );
 }
@@ -510,7 +532,7 @@ fn pr22_negative_a_client_supplied_receipt_for_an_unrecorded_transaction_verifie
     let example = ClaimedReceipt::parse(rounded.as_bytes()).expect("the example is well formed");
     assert_eq!(example.repair_transaction().as_str(), "rt_demo1");
     assert_eq!(
-        verify_skeleton(&example, &world, &world, &world, &world),
+        verify_skeleton(&example, &world, &world, &world, &world, &world),
         Err(VerifyRefusal::TransactionUnknown)
     );
 }
@@ -559,13 +581,19 @@ fn pr22_impl01_negative_an_unregistered_unprotected_or_inconsistent_intent_compo
     let mut unregistered = World::register(&[&tx]);
     unregistered.intents.clear();
     assert_eq!(
-        ReceiptSkeleton::compose(&tx, &unregistered, &unregistered, &unregistered),
+        ReceiptSkeleton::compose(
+            &tx,
+            &unregistered,
+            &unregistered,
+            &unregistered,
+            &unregistered
+        ),
         Err(ComposeRefusal::IntentUnregistered)
     );
 
     let proposed = World::register(&[&tx]).with_standing(IntentStanding::Proposed);
     assert_eq!(
-        ReceiptSkeleton::compose(&tx, &proposed, &proposed, &proposed),
+        ReceiptSkeleton::compose(&tx, &proposed, &proposed, &proposed, &proposed),
         Err(ComposeRefusal::IntentNotProtected)
     );
     assert_eq!(
@@ -585,7 +613,13 @@ fn pr22_impl01_negative_an_unregistered_unprotected_or_inconsistent_intent_compo
         Resolution::Found(RegisteredIntent::new(other, IntentStanding::Accepted)),
     );
     assert_eq!(
-        ReceiptSkeleton::compose(&tx, &inconsistent, &inconsistent, &inconsistent),
+        ReceiptSkeleton::compose(
+            &tx,
+            &inconsistent,
+            &inconsistent,
+            &inconsistent,
+            &inconsistent
+        ),
         Err(ComposeRefusal::RegistryInconsistent)
     );
 
@@ -595,7 +629,7 @@ fn pr22_impl01_negative_an_unregistered_unprotected_or_inconsistent_intent_compo
         Resolution::Unavailable,
     );
     assert_eq!(
-        ReceiptSkeleton::compose(&tx, &unavailable, &unavailable, &unavailable),
+        ReceiptSkeleton::compose(&tx, &unavailable, &unavailable, &unavailable, &unavailable),
         Err(ComposeRefusal::StoreUnavailable(Store::IntentRegistry))
     );
 }
@@ -640,7 +674,7 @@ fn pr22_impl02_negative_a_missing_unsealed_or_foreign_candidate_composes_nothing
     let draft = draft(GateProfile::PhaseB);
     let world = World::register(&[&draft]);
     assert_eq!(
-        ReceiptSkeleton::compose(&draft, &world, &world, &world),
+        ReceiptSkeleton::compose(&draft, &world, &world, &world, &world),
         Err(ComposeRefusal::NoCandidate)
     );
 
@@ -650,7 +684,7 @@ fn pr22_impl02_negative_a_missing_unsealed_or_foreign_candidate_composes_nothing
     let mut world = World::register(&[&unsealed]);
     world.snapshots.remove(&candidate());
     assert_eq!(
-        ReceiptSkeleton::compose(&unsealed, &world, &world, &world),
+        ReceiptSkeleton::compose(&unsealed, &world, &world, &world, &world),
         Err(ComposeRefusal::SnapshotUnresolved(SnapshotRole::After))
     );
     assert_eq!(
@@ -668,7 +702,7 @@ fn pr22_impl02_negative_a_missing_unsealed_or_foreign_candidate_composes_nothing
         Resolution::Found(IntentId::new(FOREIGN_INTENT).unwrap()),
     );
     assert_eq!(
-        ReceiptSkeleton::compose(&foreign, &world, &world, &world),
+        ReceiptSkeleton::compose(&foreign, &world, &world, &world, &world),
         Err(ComposeRefusal::SnapshotBoundElsewhere(SnapshotRole::After))
     );
 
@@ -688,7 +722,13 @@ fn pr22_impl02_negative_a_missing_unsealed_or_foreign_candidate_composes_nothing
     let mut base_unbound = World::register(&[&tx]);
     base_unbound.snapshots.remove(&base());
     assert_eq!(
-        ReceiptSkeleton::compose(&tx, &base_unbound, &base_unbound, &base_unbound),
+        ReceiptSkeleton::compose(
+            &tx,
+            &base_unbound,
+            &base_unbound,
+            &base_unbound,
+            &base_unbound
+        ),
         Err(ComposeRefusal::SnapshotUnresolved(SnapshotRole::Before))
     );
 
@@ -697,7 +737,7 @@ fn pr22_impl02_negative_a_missing_unsealed_or_foreign_candidate_composes_nothing
         .snapshots
         .insert(candidate(), Resolution::Unavailable);
     assert_eq!(
-        ReceiptSkeleton::compose(&tx, &unavailable, &unavailable, &unavailable),
+        ReceiptSkeleton::compose(&tx, &unavailable, &unavailable, &unavailable, &unavailable),
         Err(ComposeRefusal::StoreUnavailable(Store::Snapshots))
     );
 }
@@ -908,6 +948,7 @@ fn pr22_boundary_canonical_bytes_are_stable_and_survive_a_serialization_round_tr
         first.intent_fields(),
         first.snapshot_fields(),
         first.profile_fields(),
+        first.diff_fields(),
         first.not_yet_enforced().entries_json(),
     ] {
         let bytes = json.to_canonical_bytes();
@@ -929,15 +970,17 @@ fn pr22_boundary_canonical_bytes_are_stable_and_survive_a_serialization_round_tr
             "base_snapshot",
             "gate_profile",
             "intent",
+            "intent_diff",
             "repair_transaction",
             "result_snapshot",
+            "semantic_diff",
             "unknowns"
         ]
     );
 
     let other_tx = applied_to(GateProfile::PhaseB, Repair::Other);
     let world = World::register(&[&other_tx]);
-    let other = ReceiptSkeleton::compose(&other_tx, &world, &world, &world).unwrap();
+    let other = ReceiptSkeleton::compose(&other_tx, &world, &world, &world, &world).unwrap();
     assert_ne!(other, first);
     assert_ne!(other.repair_transaction(), first.repair_transaction());
     assert_ne!(other.snapshots().after(), first.snapshots().after());
@@ -1025,7 +1068,7 @@ fn pr22_impl07_boundary_every_profile_lists_exactly_its_unenforced_gates() {
     let phase_b = skeleton();
     let tx = applied_to(GateProfile::PhaseD, Repair::AckAfterSync);
     let world = World::register(&[&tx]);
-    let phase_d = ReceiptSkeleton::compose(&tx, &world, &world, &world).unwrap();
+    let phase_d = ReceiptSkeleton::compose(&tx, &world, &world, &world, &world).unwrap();
     assert_ne!(phase_b.profile_fields(), phase_d.profile_fields());
     assert_eq!(phase_b.not_yet_enforced().gates().len(), 2);
     assert!(phase_d.not_yet_enforced().gates().is_empty());

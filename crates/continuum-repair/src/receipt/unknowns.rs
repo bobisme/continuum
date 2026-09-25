@@ -22,9 +22,11 @@
 //! certificate_none_verified
 //! certificate_unverified:<certificate handle>:<unverified reason>
 //! unsupported_pack_case:<pack>:<case>
+//! semantic_diff_unclassified:program_layer
+//! semantic_diff_undiffable:<undiffable cause>
 //! ```
 //!
-//! No field can hold `:`: gate and reason tokens are closed sets, a certificate handle
+//! No field can hold `:`: gate, reason and cause tokens are closed sets, a certificate handle
 //! matches the schema's handle pattern, and a pack or case token is `[a-z0-9./-]`.
 //!
 //! Canonical order is byte-lexicographic order of the rendered entries, so an independent
@@ -42,6 +44,8 @@
 //! | no certificate verified model-bound | `certificate_none_verified` |
 //! | a certificate not verified model-bound | `certificate_unverified` |
 //! | a declared unsupported case of an effect pack the candidate uses | `unsupported_pack_case` |
+//! | the semantic diff computed with its program-side layer not classified (PR-22 / IMPL-03) | `semantic_diff_unclassified` |
+//! | no semantic diff computable from the stored inputs (PR-22 / IMPL-03) | `semantic_diff_undiffable` |
 //!
 //! Gate 12 `pending` is the receipt step itself, not an unknown carried into promotion;
 //! a gate recorded `passed` or `failed` is decided. A record whose status disagrees with
@@ -53,6 +57,7 @@ use std::collections::BTreeMap;
 
 use continuum_intent::canonical_json::Json;
 
+use super::semantic_diff::{DiffGap, UndiffableCause};
 use super::status::{
     CertificateNode, CertificateStatus, EvidenceDefect, EvidenceKind, RebuildAbsence,
     RebuildStatus, RefinementAbsence, RefinementCertificateStatus, RefinementStatus,
@@ -69,9 +74,10 @@ pub const MAX_PACK_TOKEN_BYTES: usize = 64;
 
 /// An upper bound on the canonical bytes of the largest derived `unknowns` array: every
 /// entry at its longest, each with two quotes and a comma. Twelve gate entries, two
-/// coverage entries and `certificate_none_verified` are bounded by 64 bytes each.
+/// coverage entries, `certificate_none_verified` and the one semantic-diff entry are
+/// bounded by 64 bytes each.
 pub const MAX_UNKNOWNS_BYTES: usize = 2
-    + 15 * 64
+    + 16 * 64
     + super::status::MAX_CANDIDATE_CERTIFICATES
         * ("certificate_unverified:".len()
             + super::status::MAX_CERTIFICATE_HANDLE_BYTES
@@ -169,6 +175,10 @@ pub enum UnknownKind {
     CertificateUnverified,
     /// A declared unsupported case of an effect pack.
     UnsupportedPackCase,
+    /// The semantic diff's program-side layer is not classified.
+    SemanticDiffUnclassified,
+    /// No semantic diff could be computed.
+    SemanticDiffUndiffable,
 }
 
 impl UnknownKind {
@@ -184,6 +194,8 @@ impl UnknownKind {
             Self::NoVerifiedCertificate => "certificate_none_verified",
             Self::CertificateUnverified => "certificate_unverified",
             Self::UnsupportedPackCase => "unsupported_pack_case",
+            Self::SemanticDiffUnclassified => "semantic_diff_unclassified",
+            Self::SemanticDiffUndiffable => "semantic_diff_undiffable",
         }
     }
 }
@@ -213,7 +225,15 @@ pub enum Unknown {
     },
     /// A declared unsupported case of an effect pack.
     UnsupportedPackCase(PackCase),
+    /// The semantic diff was computed with its program-side layer not classified: no
+    /// program change was classified, so no semantic preservation is established.
+    SemanticDiffUnclassified,
+    /// No semantic diff could be computed from the stored inputs.
+    SemanticDiffUndiffable(UndiffableCause),
 }
+
+/// The only field of `semantic_diff_unclassified`: which layer is not classified.
+const PROGRAM_LAYER: &str = "program_layer";
 
 fn gate_from_token(token: &str) -> Option<GateName> {
     GateName::ALL.into_iter().find(|gate| gate.token() == token)
@@ -232,6 +252,8 @@ impl Unknown {
             Self::NoVerifiedCertificate => UnknownKind::NoVerifiedCertificate,
             Self::CertificateUnverified { .. } => UnknownKind::CertificateUnverified,
             Self::UnsupportedPackCase(_) => UnknownKind::UnsupportedPackCase,
+            Self::SemanticDiffUnclassified => UnknownKind::SemanticDiffUnclassified,
+            Self::SemanticDiffUndiffable(_) => UnknownKind::SemanticDiffUndiffable,
         }
     }
 
@@ -253,6 +275,8 @@ impl Unknown {
                 reason,
             } => format!("{prefix}:{}:{}", certificate.as_str(), reason.token()),
             Self::UnsupportedPackCase(case) => format!("{prefix}:{}:{}", case.pack, case.case),
+            Self::SemanticDiffUnclassified => format!("{prefix}:{PROGRAM_LAYER}"),
+            Self::SemanticDiffUndiffable(cause) => format!("{prefix}:{}", cause.token()),
         }
     }
 
@@ -280,6 +304,10 @@ impl Unknown {
             },
             ("unsupported_pack_case", [pack, case]) => {
                 Self::UnsupportedPackCase(PackCase::new(pack, case).ok()?)
+            }
+            ("semantic_diff_unclassified", [PROGRAM_LAYER]) => Self::SemanticDiffUnclassified,
+            ("semantic_diff_undiffable", [cause]) => {
+                Self::SemanticDiffUndiffable(UndiffableCause::from_token(cause)?)
             }
             _ => return None,
         };
@@ -310,6 +338,7 @@ impl Unknowns {
         gates: [(GateName, GateStatus); 12],
         status: &RefinementCertificateStatus,
         mut pack_cases: Vec<PackCase>,
+        diff: Option<DiffGap>,
     ) -> Result<Self, UnknownsDefect> {
         if pack_cases.len() > MAX_PACK_CASES {
             return Err(UnknownsDefect::Evidence(EvidenceDefect::OverBound(
@@ -374,6 +403,15 @@ impl Unknowns {
             entries.push(Unknown::NoVerifiedCertificate);
         }
         entries.extend(pack_cases.into_iter().map(Unknown::UnsupportedPackCase));
+        match diff {
+            None => {}
+            Some(DiffGap::ProgramLayerUnclassified) => {
+                entries.push(Unknown::SemanticDiffUnclassified);
+            }
+            Some(DiffGap::Undiffable(cause)) => {
+                entries.push(Unknown::SemanticDiffUndiffable(cause))
+            }
+        }
 
         entries.sort_by_cached_key(Unknown::token);
         // Unique by construction: distinct gates, distinct certificate handles (checked
@@ -420,6 +458,24 @@ impl Unknowns {
                             | UnknownKind::CertificateRebuildNotComputed
                             | UnknownKind::NoVerifiedCertificate
                             | UnknownKind::CertificateUnverified
+                    )
+                })
+                .map(|u| Json::String(u.token()))
+                .collect(),
+        )
+    }
+
+    /// The entries the IMPL-03 semantic diff contributed (zero or one), as a JSON array.
+    /// A retained evidence fragment only, like [`Self::status_entries_json`].
+    #[must_use]
+    pub fn diff_entries_json(&self) -> Json {
+        Json::Array(
+            self.entries
+                .iter()
+                .filter(|u| {
+                    matches!(
+                        u.kind(),
+                        UnknownKind::SemanticDiffUnclassified | UnknownKind::SemanticDiffUndiffable
                     )
                 })
                 .map(|u| Json::String(u.token()))
@@ -503,6 +559,10 @@ mod tests {
                 PackCase::new(pack, case).unwrap(),
             ));
         }
+        all.push(Unknown::SemanticDiffUnclassified);
+        for cause in UndiffableCause::ALL {
+            all.push(Unknown::SemanticDiffUndiffable(cause));
+        }
         all
     }
 
@@ -533,6 +593,11 @@ mod tests {
             "unsupported_pack_case:Storage:x",
             "refinement_not_computed:zero",
             "production storage profile assumed (contractual)",
+            "semantic_diff_unclassified",
+            "semantic_diff_unclassified:model_layer",
+            "semantic_diff_undiffable",
+            "semantic_diff_undiffable:impact",
+            "semantic_diff_undiffable:unrenderable:x",
         ] {
             assert_eq!(Unknown::from_token(junk), None, "{junk}");
         }
@@ -617,7 +682,14 @@ mod tests {
                 subsets.extend((0..verdicts.len()).map(|i| vec![i]));
                 subsets.push((0..verdicts.len()).collect());
                 for subset in subsets {
-                    for pack_cases in [Vec::new(), packs.clone()] {
+                    for (pack_cases, diff) in [
+                        (Vec::new(), None),
+                        (packs.clone(), Some(DiffGap::ProgramLayerUnclassified)),
+                        (
+                            Vec::new(),
+                            Some(DiffGap::Undiffable(UndiffableCause::ImpactScope)),
+                        ),
+                    ] {
                         let records: Vec<CertificateRecord> = subset
                             .iter()
                             .map(|i| {
@@ -628,9 +700,14 @@ mod tests {
                             })
                             .collect();
                         let derived_status = status(records);
-                        let unknowns =
-                            Unknowns::derive(profile, gates, &derived_status, pack_cases.clone())
-                                .unwrap();
+                        let unknowns = Unknowns::derive(
+                            profile,
+                            gates,
+                            &derived_status,
+                            pack_cases.clone(),
+                            diff,
+                        )
+                        .unwrap();
 
                         // The expected multiset, one per input, built independently.
                         let mut expected: Vec<Unknown> = Vec::new();
@@ -705,6 +782,15 @@ mod tests {
                             expected.push(Unknown::NoVerifiedCertificate);
                         }
                         expected.extend(pack_cases.into_iter().map(Unknown::UnsupportedPackCase));
+                        match diff {
+                            None => {}
+                            Some(DiffGap::ProgramLayerUnclassified) => {
+                                expected.push(Unknown::SemanticDiffUnclassified);
+                            }
+                            Some(DiffGap::Undiffable(cause)) => {
+                                expected.push(Unknown::SemanticDiffUndiffable(cause));
+                            }
+                        }
 
                         let mut got = unknowns.entries().to_vec();
                         let mut want = expected;
@@ -730,13 +816,13 @@ mod tests {
         let mut gates = initial_gates(GateProfile::PhaseB);
         gates[8].1 = GateStatus::Passed; // certificate_rebuild, outside phase-b
         assert_eq!(
-            Unknowns::derive(GateProfile::PhaseB, gates, &empty, Vec::new()),
+            Unknowns::derive(GateProfile::PhaseB, gates, &empty, Vec::new(), None),
             Err(UnknownsDefect::GateRecord(GateName::CertificateRebuild))
         );
         let mut gates = initial_gates(GateProfile::PhaseB);
         gates[0].1 = GateStatus::NotYetEnforced;
         assert_eq!(
-            Unknowns::derive(GateProfile::PhaseB, gates, &empty, Vec::new()),
+            Unknowns::derive(GateProfile::PhaseB, gates, &empty, Vec::new(), None),
             Err(UnknownsDefect::GateRecord(GateName::BaseReplay))
         );
     }
@@ -748,11 +834,13 @@ mod tests {
         let at_bound: Vec<PackCase> = (0..MAX_PACK_CASES)
             .map(|i| PackCase::new("storage/append-log-v1", &format!("c{i}")).unwrap())
             .collect();
-        assert!(Unknowns::derive(GateProfile::PhaseB, gates, &empty, at_bound.clone()).is_ok());
+        assert!(
+            Unknowns::derive(GateProfile::PhaseB, gates, &empty, at_bound.clone(), None).is_ok()
+        );
         let mut over = at_bound;
         over.push(PackCase::new("x", "y").unwrap());
         assert_eq!(
-            Unknowns::derive(GateProfile::PhaseB, gates, &empty, over),
+            Unknowns::derive(GateProfile::PhaseB, gates, &empty, over, None),
             Err(UnknownsDefect::Evidence(EvidenceDefect::OverBound(
                 EvidenceKind::PackCases
             )))
@@ -762,7 +850,7 @@ mod tests {
             PackCase::new("x", "y").unwrap(),
         ];
         assert_eq!(
-            Unknowns::derive(GateProfile::PhaseB, gates, &empty, twice),
+            Unknowns::derive(GateProfile::PhaseB, gates, &empty, twice, None),
             Err(UnknownsDefect::Evidence(EvidenceDefect::Duplicate(
                 EvidenceKind::PackCases
             )))
@@ -780,6 +868,7 @@ mod tests {
                 CertificateVerdict::Unchecked,
             )]),
             Vec::new(),
+            None,
         )
         .unwrap();
         let tokens = derived.tokens();

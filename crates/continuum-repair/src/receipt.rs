@@ -1,5 +1,5 @@
 //! The promotion-receipt skeleton (PR 22): the field groups PR-22 / IMPL-01, IMPL-02,
-//! IMPL-05, IMPL-06 and IMPL-07/08 own, composed from referenced artifacts and verified
+//! IMPL-03, IMPL-05, IMPL-06 and IMPL-07/08 own, composed from referenced artifacts and verified
 //! against them.
 //!
 //! The normative shape is `notes/plan/schemas/promotion-receipt.schema.json`
@@ -13,6 +13,7 @@
 //! | `intent` is the base intent | RFC 0032 receipt composition table | [`ReceiptSkeleton::compose`] reads it from the transaction's frozen base triple, never from a caller |
 //! | the intent is the protected contract's content identity | ADR-0013; RFC 0037 | the [`IntentRegistry`] must resolve the handle to a contract that declares it and stands `accepted`; the skeleton keeps that contract's [`IntentIdentity`] bytes |
 //! | `base_snapshot`, `result_snapshot` are the before and after | RFC 0032 receipt composition table; promotion step 7 | before = the transaction's `base_snapshot`; after = its sealed `candidate_snapshot`; each must resolve in [`SealedSnapshots`] and be bound to the base intent |
+//! | `semantic_diff` and `intent_diff` name the one RFC 0031 diff, recomputed by the system | RFC 0032 receipt table, correction 10; RFC 0031 "Wire surface" | [`semantic_diff`] (PR-22 / IMPL-03): [`ReceiptDiff`] is [`crate::diff`]'s computation for the named version from the stores, never the claim's; a claimed handle that is not the recomputed one is [`VerifyRefusal::SemanticDiff`], a handle under the other program layer `LayerMismatch`; an undiffable or unclassified diff is an `unknowns` entry, and gate 3 listed `passed` without the recomputed diff passing it is [`VerifyRefusal::IntentIntegrityNotDerived`] |
 //! | the profile is the transaction's, frozen at `begin` | RFC 0032 correction 4 | `gate_profile` is copied from the transaction; no parameter can name another |
 //! | a gate outside the profile is listed `not_yet_enforced`, never omitted, never `passed` | RFC 0032 "Gate profiles"; plan §21; INV-007 | [`NotYetEnforced`] is built from a profile only, and an [`UnenforcedGate`] renders one status token and has no other |
 //! | a gate inside the profile is never `not_yet_enforced` | RFC 0032 "Gate profiles"; the receipt schema has no profile conditional (only `repair-transaction.schema.json` does) | [`verify_skeleton`] refuses [`VerifyRefusal::EnforcedGateListedUnenforced`] |
@@ -31,16 +32,17 @@
 //! a verified receipt (INV-008).
 //!
 //! - This module renders no `passed` entry at all: the whole `gates` array needs the
-//!   in-profile outcomes, which arrive with PR-20 `evaluate` and the PR-22 IMPL-03 and
-//!   IMPL-04 evidence ([`ReceiptSeam::EnforcedGateOutcomes`]). The evidence behind gates
-//!   8 and 9 is IMPL-05's, and it is absent today, so no receipt that lists gate 8
+//!   in-profile outcomes, which arrive with PR-20 `evaluate` and the PR-22 IMPL-04
+//!   evidence ([`ReceiptSeam::EnforcedGateOutcomes`]). The evidence behind gate 3 is
+//!   IMPL-03's recomputed diff, and behind gates 8 and 9 IMPL-05's, and it is absent today, so no receipt that lists gate 8
 //!   `passed` verifies: every profile enforces gate 8, so no receipt verifies until a
 //!   refinement checker ships (PR 17).
 //! - The skeleton does not check that the transaction is the lineage head at `ready`;
 //!   that is `repair.promote` step 1 (RFC 0032 "Promotion"), which is not served yet.
-//! - Daemon wiring: [`IntentRegistry`], [`SealedSnapshots`], [`TransactionStore`] and
-//!   [`CandidateEvidence`] are seams the daemon implements over its intent registry, its
-//!   sealed workspaces, its transaction store and its evidence graph. No daemon path calls this module yet. Each store MUST answer
+//! - Daemon wiring: [`IntentRegistry`], [`SealedSnapshots`], [`TransactionStore`],
+//!   [`CandidateEvidence`] and [`ImpactScope`] are seams the daemon implements over its
+//!   intent registry, its sealed workspaces, its transaction store and its evidence
+//!   graph. No daemon path calls this module yet. Each store MUST answer
 //!   `Unknown` for a handle the caller has no standing to read: the refusals below
 //!   distinguish "does not exist" from "exists but disagrees", so an unscoped store
 //!   would make verification an existence oracle (ADR-0037).
@@ -64,6 +66,7 @@
 use core::fmt;
 use std::collections::BTreeMap;
 
+pub mod semantic_diff;
 pub mod status;
 pub mod unknowns;
 
@@ -71,9 +74,12 @@ use continuum_intent::canonical_json::{Json, JsonError};
 use continuum_intent::contract::{IntentContract, IntentId, IntentIdentity};
 use continuum_value::identity::ContentHasher;
 
+pub use crate::diff::ImpactScope;
+use crate::diff::{self as diff_mod, BaseStanding, DiffBasis, DiffClaimRefusal, TransactionDiff};
 use crate::handle::{RepairId, SnapshotId};
 use crate::transaction::{GateName, GateProfile, GateStatus, RepairTransaction, Resolution};
 
+pub use semantic_diff::{DiffGap, ReceiptDiff, UndiffableCause};
 use status::EvidenceDefect;
 pub use status::{
     CertificateNode, CertificateRecord, CertificateVerdict, CoverageGroup, EvidenceKind,
@@ -126,6 +132,10 @@ pub enum ReceiptField {
     Intent,
     /// `base_snapshot` (PR-22 / IMPL-02).
     BaseSnapshot,
+    /// `semantic_diff` (PR-22 / IMPL-03).
+    SemanticDiff,
+    /// `intent_diff` (PR-22 / IMPL-03): the same `diff_*` identity as `semantic_diff`.
+    IntentDiff,
     /// `result_snapshot` (PR-22 / IMPL-02).
     ResultSnapshot,
     /// `gate_profile` (PR-22 / IMPL-07).
@@ -142,11 +152,13 @@ pub enum ReceiptField {
 
 impl ReceiptField {
     /// Every owned field.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::RepairTransaction,
         Self::Intent,
         Self::BaseSnapshot,
         Self::ResultSnapshot,
+        Self::SemanticDiff,
+        Self::IntentDiff,
         Self::GateProfile,
         Self::Gates,
         Self::Unknowns,
@@ -160,6 +172,8 @@ impl ReceiptField {
             Self::Intent => "intent",
             Self::BaseSnapshot => "base_snapshot",
             Self::ResultSnapshot => "result_snapshot",
+            Self::SemanticDiff => "semantic_diff",
+            Self::IntentDiff => "intent_diff",
             Self::GateProfile => "gate_profile",
             Self::Gates => "gates",
             Self::Unknowns => "unknowns",
@@ -170,11 +184,10 @@ impl ReceiptField {
 /// A receipt field group this skeleton does not compose or verify, with its owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ReceiptSeam {
-    /// The evidence behind every in-profile gate listed `passed` other than gates 8 and 9
-    /// (PR-20 `evaluate`; the gate evidence of PR-22 IMPL-03 and IMPL-04).
+    /// The evidence behind every in-profile gate listed `passed` other than gates 3, 8
+    /// and 9 (PR-20 `evaluate`; the gate evidence of PR-22 IMPL-04). Gate 3 rests on
+    /// IMPL-03's recomputed diff, gates 8 and 9 on IMPL-05's status.
     EnforcedGateOutcomes,
-    /// `semantic_diff`, `intent_diff` (PR-22 / IMPL-03).
-    SemanticDiff,
     /// `coverage`: replay, neighborhood, mutation and parity results (PR-22 / IMPL-04).
     ReplayNeighborhoodMutation,
     /// `policy_decision` (PR-22 / IMPL-09).
@@ -187,15 +200,19 @@ pub enum ReceiptSeam {
     EnvelopeAndSignature,
     /// That the named transaction version is `promoted` and its `receipt` is this
     /// receipt (RFC 0032: `repair_transaction` is "the promoted version"; PR 22 exit, at
-    /// `repair.promote`).
+    /// `repair.promote`). Also which version anchors the semantic diff's evidence scope:
+    /// the skeleton takes the scope as of the version the receipt names, while the
+    /// `ready` version promotion verifies, the `promoted` version a published receipt
+    /// names, and the version whose `semantic_diff` gate 3 was decided on have
+    /// different `rt_` identities. Until promote records one anchor, the daemon's
+    /// `ImpactScope` must answer all of them with the scope gate 3 was decided on.
     PromotionRecord,
 }
 
 impl ReceiptSeam {
     /// Every seam.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 6] = [
         Self::EnforcedGateOutcomes,
-        Self::SemanticDiff,
         Self::ReplayNeighborhoodMutation,
         Self::PolicyDecision,
         Self::LedgerCheckerEpochs,
@@ -207,8 +224,7 @@ impl ReceiptSeam {
     #[must_use]
     pub const fn owner(self) -> &'static str {
         match self {
-            Self::EnforcedGateOutcomes => "PR-20 evaluate; PR-22-IMPL-03..04",
-            Self::SemanticDiff => "PR-22-IMPL-03",
+            Self::EnforcedGateOutcomes => "PR-20 evaluate; PR-22-IMPL-04",
             Self::ReplayNeighborhoodMutation => "PR-22-IMPL-04",
             Self::PolicyDecision => "PR-22-IMPL-09",
             Self::LedgerCheckerEpochs | Self::EnvelopeAndSignature | Self::PromotionRecord => {
@@ -224,7 +240,6 @@ impl ReceiptSeam {
     pub const fn properties(self) -> &'static [&'static str] {
         match self {
             Self::EnforcedGateOutcomes => &["gates"],
-            Self::SemanticDiff => &["intent_diff", "semantic_diff"],
             Self::ReplayNeighborhoodMutation => &["coverage"],
             Self::PolicyDecision => &["policy_decision"],
             Self::LedgerCheckerEpochs => &[
@@ -448,6 +463,8 @@ pub enum Store {
     Transactions,
     /// [`CandidateEvidence`].
     Evidence,
+    /// [`ImpactScope`]: the evidence scope the semantic diff's impact set reads.
+    ImpactScope,
 }
 
 /// Which of the two receipt snapshots.
@@ -606,6 +623,7 @@ pub struct ReceiptSkeleton {
     repair_transaction: RepairId,
     intent: ReceiptIntent,
     snapshots: ReceiptSnapshots,
+    semantic_diff: ReceiptDiff,
     gate_profile: GateProfile,
     not_yet_enforced: NotYetEnforced,
     status: RefinementCertificateStatus,
@@ -616,24 +634,30 @@ impl ReceiptSkeleton {
     /// Compose the skeleton for `transaction` at promotion time.
     ///
     /// Every value is read from the transaction or resolved in a store. The intent must
-    /// stand `accepted`.
+    /// stand `accepted`. The semantic diff is computed for this version from the stores,
+    /// with its evidence scope read from `impact` as of this version.
     ///
     /// # Errors
     ///
-    /// [`ComposeRefusal`], typed; a refusal composes nothing.
+    /// [`ComposeRefusal`], typed; a refusal composes nothing. An undiffable diff is not
+    /// a refusal when it is a fact about the stored inputs: the skeleton carries it as an
+    /// unknown ([`semantic_diff`]).
     pub fn compose<H: ContentHasher>(
         transaction: &RepairTransaction<H>,
         registry: &impl IntentRegistry,
         snapshots: &impl SealedSnapshots,
         evidence: &impl CandidateEvidence,
+        impact: &impl ImpactScope,
     ) -> Result<Self, ComposeRefusal> {
         derive(
             transaction,
             registry,
             snapshots,
             evidence,
+            impact,
             Standing::Current,
         )
+        .map(|(skeleton, _)| skeleton)
     }
 
     /// `repair_transaction`.
@@ -652,6 +676,13 @@ impl ReceiptSkeleton {
     #[must_use]
     pub const fn snapshots(&self) -> &ReceiptSnapshots {
         &self.snapshots
+    }
+
+    /// `semantic_diff` and `intent_diff` (PR-22 / IMPL-03): the diff recomputed for this
+    /// version, or why none could be.
+    #[must_use]
+    pub const fn semantic_diff(&self) -> &ReceiptDiff {
+        &self.semantic_diff
     }
 
     /// `gate_profile`.
@@ -713,6 +744,32 @@ impl ReceiptSkeleton {
         ]))
     }
 
+    /// IMPL-03's fragment: `semantic_diff` and `intent_diff`, both the recomputed
+    /// handle, the `unknowns` entries the diff contributes, and `repair_transaction`. An
+    /// undiffable diff renders no handle: it is only its `unknowns` entry, never a
+    /// placeholder identity.
+    #[must_use]
+    pub fn diff_fields(&self) -> Json {
+        let mut fields = BTreeMap::from([
+            self.anchor(),
+            (
+                ReceiptField::Unknowns.property().to_owned(),
+                self.unknowns.diff_entries_json(),
+            ),
+        ]);
+        fields.extend(self.diff_handles());
+        Json::Object(fields)
+    }
+
+    fn diff_handles(&self) -> Vec<(String, Json)> {
+        self.semantic_diff.handle().map_or_else(Vec::new, |handle| {
+            [ReceiptField::SemanticDiff, ReceiptField::IntentDiff]
+                .into_iter()
+                .map(|field| (field.property().to_owned(), Json::String(handle.to_owned())))
+                .collect()
+        })
+    }
+
     /// IMPL-07's fragment: `gate_profile` and `repair_transaction`. The `gates` property
     /// is not rendered: the schema requires all twelve entries, and the in-profile ones
     /// are [`ReceiptSeam::EnforcedGateOutcomes`]. The unenforced entries are
@@ -768,6 +825,7 @@ impl ReceiptSkeleton {
                 fields.extend(part);
             }
         }
+        fields.extend(self.diff_handles());
         Json::Object(fields)
     }
 }
@@ -806,13 +864,16 @@ fn resolve_evidence<T>(answer: Resolution<T>) -> Result<T, ComposeRefusal> {
     resolve(answer, ComposeRefusal::EvidenceUnknown, Store::Evidence)
 }
 
+/// The skeleton, and the basis its diff was computed from when one was (kept so a
+/// mismatching claimed handle can be named without reading the stores again).
 fn derive<H: ContentHasher>(
     transaction: &RepairTransaction<H>,
     registry: &impl IntentRegistry,
     snapshots: &impl SealedSnapshots,
     evidence: &impl CandidateEvidence,
+    impact: &impl ImpactScope,
     standing: Standing,
-) -> Result<ReceiptSkeleton, ComposeRefusal> {
+) -> Result<(ReceiptSkeleton, Option<DiffBasis>), ComposeRefusal> {
     let after = transaction
         .candidate_snapshot()
         .ok_or(ComposeRefusal::NoCandidate)?
@@ -839,6 +900,35 @@ fn derive<H: ContentHasher>(
     bound_snapshot(snapshots, &before, SnapshotRole::Before, &handle)?;
     bound_snapshot(snapshots, &after, SnapshotRole::After, &handle)?;
 
+    // IMPL-03: the diff of this exact version, from the stores, after the checks above
+    // so that a store-read undiffable is a store that changed its answer. The diff reads
+    // the registry and the bindings again; a second read that disagrees with the first
+    // is refused below rather than composed.
+    let (semantic_diff, basis) = match diff_mod::compute_with_basis(
+        transaction,
+        snapshots,
+        registry,
+        impact,
+        match standing {
+            Standing::Current => BaseStanding::Current,
+            Standing::Historical => BaseStanding::Historical,
+        },
+    ) {
+        Ok((diff, basis)) => {
+            if basis.after_intent() != &handle {
+                return Err(ComposeRefusal::SnapshotBoundElsewhere(SnapshotRole::After));
+            }
+            if basis.before_identity() != record.contract.identity() {
+                return Err(ComposeRefusal::RegistryInconsistent);
+            }
+            (ReceiptDiff::Derived(Box::new(diff)), Some(basis))
+        }
+        Err(undiffable) => (
+            ReceiptDiff::Undiffable(UndiffableCause::of(undiffable)?),
+            None,
+        ),
+    };
+
     let gate_profile = transaction.gate_profile();
     let repair = transaction.repair_id();
     let status = RefinementCertificateStatus::derive(
@@ -853,19 +943,24 @@ fn derive<H: ContentHasher>(
             .map(|gate| (gate.name(), gate.status())),
         &status,
         resolve_evidence(evidence.unsupported_pack_cases(repair, &after))?,
+        semantic_diff.gap(),
     )?;
-    Ok(ReceiptSkeleton {
-        repair_transaction: transaction.repair_id().clone(),
-        intent: ReceiptIntent {
-            handle,
-            identity: record.contract.identity().clone(),
+    Ok((
+        ReceiptSkeleton {
+            repair_transaction: transaction.repair_id().clone(),
+            intent: ReceiptIntent {
+                handle,
+                identity: record.contract.identity().clone(),
+            },
+            snapshots: ReceiptSnapshots { before, after },
+            semantic_diff,
+            gate_profile,
+            not_yet_enforced: NotYetEnforced::of(gate_profile),
+            status,
+            unknowns,
         },
-        snapshots: ReceiptSnapshots { before, after },
-        gate_profile,
-        not_yet_enforced: NotYetEnforced::of(gate_profile),
-        status,
-        unknowns,
-    })
+        basis,
+    ))
 }
 
 // --- claimed receipts --------------------------------------------------------------
@@ -908,6 +1003,9 @@ pub enum ClaimRefusal {
     DuplicateGate(GateName),
     /// `coverage` is not an object, or names a group the schema does not declare.
     MalformedCoverage,
+    /// `semantic_diff` and `intent_diff` name two different diff artifacts, which RFC
+    /// 0032 correction 10 makes malformed.
+    DiffFieldsDisagree,
 }
 
 impl fmt::Display for ClaimRefusal {
@@ -925,6 +1023,9 @@ impl fmt::Display for ClaimRefusal {
             Self::GateCount => f.write_str("`gates` does not list exactly twelve gates"),
             Self::DuplicateGate(gate) => write!(f, "`{}` is listed twice", gate.token()),
             Self::MalformedCoverage => f.write_str("`coverage` is malformed"),
+            Self::DiffFieldsDisagree => {
+                f.write_str("`semantic_diff` and `intent_diff` name different diff artifacts")
+            }
         }
     }
 }
@@ -939,6 +1040,7 @@ pub struct ClaimedReceipt {
     intent: IntentId,
     base_snapshot: SnapshotId,
     result_snapshot: SnapshotId,
+    semantic_diff: String,
     gate_profile: GateProfile,
     gates: [ClaimedGateStatus; 12],
     unknowns: Vec<String>,
@@ -1053,6 +1155,14 @@ fn string_field(
         .ok_or(ClaimRefusal::Malformed(field))
 }
 
+/// A claimed `diff_*` handle, checked against the schema's pattern.
+fn diff_handle(fields: &BTreeMap<String, Json>, field: ReceiptField) -> Result<&str, ClaimRefusal> {
+    let value = string_field(fields, field)?;
+    continuum_semantic_diff::artifact::DiffId::new(value)
+        .map(|_| value)
+        .map_err(|_| ClaimRefusal::Malformed(field))
+}
+
 fn claimed_gates(value: &Json) -> Result<[ClaimedGateStatus; 12], ClaimRefusal> {
     let malformed = ClaimRefusal::Malformed(ReceiptField::Gates);
     let items = value.as_array().ok_or_else(|| malformed.clone())?;
@@ -1142,6 +1252,10 @@ impl ClaimedReceipt {
             .map_err(|_| malformed(ReceiptField::BaseSnapshot))?;
         let result_snapshot = SnapshotId::new(string_field(fields, ReceiptField::ResultSnapshot)?)
             .map_err(|_| malformed(ReceiptField::ResultSnapshot))?;
+        let semantic_diff = diff_handle(fields, ReceiptField::SemanticDiff)?;
+        if diff_handle(fields, ReceiptField::IntentDiff)? != semantic_diff {
+            return Err(ClaimRefusal::DiffFieldsDisagree);
+        }
         let gate_profile = profile_from_token(string_field(fields, ReceiptField::GateProfile)?)
             .ok_or(malformed(ReceiptField::GateProfile))?;
         let gates = claimed_gates(
@@ -1161,6 +1275,7 @@ impl ClaimedReceipt {
             intent,
             base_snapshot,
             result_snapshot,
+            semantic_diff: semantic_diff.to_owned(),
             gate_profile,
             gates,
             unknowns,
@@ -1172,6 +1287,12 @@ impl ClaimedReceipt {
     #[must_use]
     pub const fn repair_transaction(&self) -> &RepairId {
         &self.repair_transaction
+    }
+
+    /// The claimed `semantic_diff` (equal to the claimed `intent_diff`).
+    #[must_use]
+    pub fn semantic_diff(&self) -> &str {
+        &self.semantic_diff
     }
 
     /// The claimed status of `gate`.
@@ -1201,6 +1322,13 @@ pub enum VerifyRefusal {
     IntentMismatch,
     /// A claimed snapshot is not the transaction's own.
     SnapshotMismatch(SnapshotRole),
+    /// The claimed `semantic_diff` (and `intent_diff`) is not the handle of the diff
+    /// recomputed from the stores for the named version: `HandleMismatch`, or
+    /// `LayerMismatch` when it is the diff of these inputs under the other program layer.
+    /// For presented artifact bytes ([`verify_referenced_diff`]), `Disagrees`.
+    SemanticDiff(DiffClaimRefusal),
+    /// No diff can be computed from the stored inputs, so no claimed handle can name one.
+    SemanticDiffUndiffable(UndiffableCause),
     /// The claimed `gate_profile` is not the one the transaction was opened under. Only
     /// the claimed profile is named: the refusal does not disclose the transaction's.
     ProfileMismatch {
@@ -1229,6 +1357,13 @@ pub enum VerifyRefusal {
     UnknownNotDerived,
     /// The claim's `unknowns` lists one entry twice.
     UnknownDuplicated,
+    /// Gate 3 (`intent_integrity`) is listed `passed`, on the claim and on the record,
+    /// and the diff recomputed from the stores does not pass it: no semantic preservation
+    /// may be claimed on a diff whose program-side layer nobody classified.
+    IntentIntegrityNotDerived {
+        /// Gate 3 as the recomputed diff decides it.
+        derived: GateStatus,
+    },
     /// The claim's `unknowns` holds the derived entries in another order.
     UnknownsNotCanonical,
     /// A gate is listed `passed`, on the claim and on the record, but the evidence it
@@ -1253,6 +1388,16 @@ impl fmt::Display for VerifyRefusal {
                 write!(f, "the {role:?} snapshot is not the transaction's own")
             }
             Self::StoreUnavailable(store) => write!(f, "the {store:?} store did not answer"),
+            Self::SemanticDiff(refusal) => write!(f, "`semantic_diff`: {refusal}"),
+            Self::SemanticDiffUndiffable(cause) => write!(
+                f,
+                "no semantic diff is computable ({}), so no claimed handle names one",
+                cause.token()
+            ),
+            Self::IntentIntegrityNotDerived { derived } => write!(
+                f,
+                "`intent_integrity` is listed passed, and the recomputed diff decides it {derived:?}"
+            ),
             Self::ProfileMismatch { claimed } => write!(
                 f,
                 "`gate_profile` claims {}, which is not the transaction's profile",
@@ -1416,6 +1561,32 @@ const fn claimed_group_refusal(
     }
 }
 
+const fn standing_at(stage: VerificationStage) -> Standing {
+    match stage {
+        VerificationStage::Promotion => Standing::Current,
+        VerificationStage::Published => Standing::Historical,
+    }
+}
+
+/// IMPL-03: the claimed handle against the recomputed diff. The claim is compared,
+/// never parsed into a diff.
+fn check_claimed_diff<H: ContentHasher>(
+    claimed: &str,
+    derived: &ReceiptDiff,
+    basis: Option<&DiffBasis>,
+) -> Result<(), VerifyRefusal> {
+    match (derived, basis) {
+        (ReceiptDiff::Derived(diff), Some(basis)) => basis
+            .check::<H>(diff, |candidate| candidate.handle() == claimed)
+            .map_err(VerifyRefusal::SemanticDiff),
+        (ReceiptDiff::Undiffable(cause), _) => Err(VerifyRefusal::SemanticDiffUndiffable(*cause)),
+        // A derived diff always comes with its basis.
+        (ReceiptDiff::Derived(_), None) => Err(VerifyRefusal::SemanticDiff(
+            DiffClaimRefusal::HandleMismatch,
+        )),
+    }
+}
+
 fn verify_at<H: ContentHasher>(
     claim: &ClaimedReceipt,
     stage: VerificationStage,
@@ -1423,12 +1594,16 @@ fn verify_at<H: ContentHasher>(
     registry: &impl IntentRegistry,
     snapshots: &impl SealedSnapshots,
     evidence: &impl CandidateEvidence,
+    impact: &impl ImpactScope,
 ) -> Result<ReceiptSkeleton, VerifyRefusal> {
-    let standing = match stage {
-        VerificationStage::Promotion => Standing::Current,
-        VerificationStage::Published => Standing::Historical,
-    };
-    let derived = derive(transaction, registry, snapshots, evidence, standing)?;
+    let (derived, basis) = derive(
+        transaction,
+        registry,
+        snapshots,
+        evidence,
+        impact,
+        standing_at(stage),
+    )?;
 
     if claim.gate_profile != derived.gate_profile {
         return Err(VerifyRefusal::ProfileMismatch {
@@ -1444,6 +1619,7 @@ fn verify_at<H: ContentHasher>(
     if claim.result_snapshot != derived.snapshots.after {
         return Err(VerifyRefusal::SnapshotMismatch(SnapshotRole::After));
     }
+    check_claimed_diff::<H>(&claim.semantic_diff, &derived.semantic_diff, basis.as_ref())?;
     for gate in GateName::ALL {
         match (derived.not_yet_enforced.contains(gate), claim.gate(gate)) {
             (true, ClaimedGateStatus::Passed) => {
@@ -1492,6 +1668,15 @@ fn verify_at<H: ContentHasher>(
     }
     // IMPL-06: the claimed list is the derived list, entry for entry.
     unknowns::compare(&claim.unknowns, &derived.unknowns)?;
+    // IMPL-03: an enforced gate 3 is listed `passed` here (the checks above leave no
+    // other status for it); the recomputed diff, not the record or the claim, says
+    // whether that holds.
+    if derived.gate_profile.enforces(GateName::IntentIntegrity) {
+        match derived.semantic_diff.gate_status() {
+            GateStatus::Passed => {}
+            other => return Err(VerifyRefusal::IntentIntegrityNotDerived { derived: other }),
+        }
+    }
     // IMPL-05: an enforced gate 8 or 9 is listed `passed` (the checks above leave no
     // other status for it), so its evidence must exist.
     for group in CoverageGroup::ALL {
@@ -1519,9 +1704,9 @@ fn verify_at<H: ContentHasher>(
 ///
 /// [`VerifyRefusal`], for the first check that fails, in this order: the transaction,
 /// the re-derivation, `gate_profile`, `intent`, `base_snapshot`, `result_snapshot`,
-/// `gates` against the profile, then `gates` against the record, each in gate-number
-/// order; then the IMPL-05 `coverage` groups, `unknowns`, and the evidence behind gates
-/// 8 and 9. No transaction records an in-profile gate `passed` until PR-20 `evaluate`
+/// `semantic_diff` against the recomputed diff, `gates` against the profile, then
+/// `gates` against the record, each in gate-number order; then the IMPL-05 `coverage`
+/// groups, `unknowns`, and the evidence behind gates 3, 8 and 9. No transaction records an in-profile gate `passed` until PR-20 `evaluate`
 /// lands, and no refinement checker computes gate 8's evidence, so every claim is
 /// refused today, at the latest [`VerifyRefusal::GateWithoutEvidence`].
 pub fn verify_skeleton<H: ContentHasher>(
@@ -1530,6 +1715,7 @@ pub fn verify_skeleton<H: ContentHasher>(
     registry: &impl IntentRegistry,
     snapshots: &impl SealedSnapshots,
     evidence: &impl CandidateEvidence,
+    impact: &impl ImpactScope,
 ) -> Result<SkeletonVerification, VerifyRefusal> {
     let transaction = resolve_transaction(claim, transactions)?;
     let derived = verify_at(
@@ -1539,6 +1725,7 @@ pub fn verify_skeleton<H: ContentHasher>(
         registry,
         snapshots,
         evidence,
+        impact,
     )?;
     Ok(SkeletonVerification { derived })
 }
@@ -1603,6 +1790,7 @@ pub fn verify_for_promotion<H: ContentHasher>(
     registry: &impl IntentRegistry,
     snapshots: &impl SealedSnapshots,
     evidence: &impl CandidateEvidence,
+    impact: &impl ImpactScope,
 ) -> Result<ReceiptGenerationLicense, VerifyRefusal> {
     let transaction = resolve_transaction(claim, transactions)?;
     let derived = verify_at(
@@ -1612,8 +1800,81 @@ pub fn verify_for_promotion<H: ContentHasher>(
         registry,
         snapshots,
         evidence,
+        impact,
     )?;
     Ok(ReceiptGenerationLicense { derived })
+}
+
+/// Verify the diff artifact bytes presented for a claimed receipt's `semantic_diff`
+/// (PR-22 / IMPL-03; RFC 0032: `evidence.verify` re-fetches every referenced artifact).
+///
+/// The diff is recomputed from the stores for the version the claim names, under the
+/// base standing `stage` admits. The claim's handle must be the recomputed handle, and
+/// `presented` must be exactly the recomputed artifact's canonical bytes. `presented` is
+/// compared, never parsed, so it contributes nothing but equality. The record must
+/// bear the stage out: gate 12 `pending` at promotion, `passed` for a published receipt,
+/// so a caller cannot reach the superseded-base admission by naming a stage. The other skeleton
+/// fields are [`verify_skeleton`]'s and [`verify_for_promotion`]'s, not checked here.
+///
+/// # Errors
+///
+/// [`VerifyRefusal::TransactionUnknown`] and the other transaction refusals;
+/// [`VerifyRefusal::Compose`] when the stores contradict the transaction;
+/// [`VerifyRefusal::SemanticDiffUndiffable`] when no diff can be computed;
+/// [`VerifyRefusal::SemanticDiff`] with `HandleMismatch` or `LayerMismatch` for the
+/// handle, and with `Disagrees` or `LayerMismatch` for the bytes.
+pub fn verify_referenced_diff<H: ContentHasher>(
+    claim: &ClaimedReceipt,
+    presented: &[u8],
+    stage: VerificationStage,
+    transactions: &impl TransactionStore<H>,
+    registry: &impl IntentRegistry,
+    snapshots: &impl SealedSnapshots,
+    impact: &impl ImpactScope,
+) -> Result<TransactionDiff, VerifyRefusal> {
+    let transaction = resolve_transaction(claim, transactions)?;
+    // The stage is the caller's word, so the record must bear it out: a superseded base
+    // is admitted only for a version whose record shows the receipt step done.
+    let receipt_step = transaction
+        .gates()
+        .iter()
+        .find(|gate| gate.name() == GateName::ReceiptGeneration)
+        .map(|gate| gate.status());
+    match (stage, receipt_step) {
+        (VerificationStage::Promotion, Some(GateStatus::Pending))
+        | (VerificationStage::Published, Some(GateStatus::Passed)) => {}
+        (VerificationStage::Promotion, Some(GateStatus::Passed)) => {
+            return Err(VerifyRefusal::ReceiptGenerationAlreadyPassed);
+        }
+        _ => return Err(VerifyRefusal::GateNotOnRecord(GateName::ReceiptGeneration)),
+    }
+    let admit = match standing_at(stage) {
+        Standing::Current => BaseStanding::Current,
+        Standing::Historical => BaseStanding::Historical,
+    };
+    let (diff, basis) =
+        match diff_mod::compute_with_basis(&transaction, snapshots, registry, impact, admit) {
+            Ok(computed) => computed,
+            Err(undiffable) => {
+                return Err(VerifyRefusal::SemanticDiffUndiffable(UndiffableCause::of(
+                    undiffable,
+                )?));
+            }
+        };
+    basis
+        .check::<H>(&diff, |candidate| candidate.handle() == claim.semantic_diff)
+        .map_err(VerifyRefusal::SemanticDiff)?;
+    basis
+        .check::<H>(&diff, |candidate| {
+            candidate.to_artifact_bytes() == presented
+        })
+        .map_err(|refusal| {
+            VerifyRefusal::SemanticDiff(match refusal {
+                DiffClaimRefusal::HandleMismatch => DiffClaimRefusal::Disagrees,
+                other => other,
+            })
+        })?;
+    Ok(diff)
 }
 
 #[cfg(test)]
@@ -1737,6 +1998,13 @@ mod tests {
         }
     }
 
+    /// The evidence scope of every diff: empty.
+    impl ImpactScope for World {
+        fn evidence(&self, _: crate::diff::DiffScope<'_>) -> crate::diff::ScopeAnswer {
+            crate::diff::ScopeAnswer::Complete(Vec::new())
+        }
+    }
+
     impl TransactionStore<Blake3Hasher> for World {
         fn transaction(&self, repair: &RepairId) -> Resolution<RepairTransaction<Blake3Hasher>> {
             self.0
@@ -1747,7 +2015,48 @@ mod tests {
         }
     }
 
+    /// A change that rewrites `src/lib.rs` with its own content: the candidate is the
+    /// base, so the only program-side layer that needs no classifier is classified, and
+    /// the recomputed diff passes gate 3. The record checks below then reach gate 8.
+    fn identity_change() -> DeclaredChange {
+        let tree = Snapshot::build(&base(), &HashedIdentifier::<Blake3Hasher>::new()).unwrap();
+        let path = WorkspacePath::new("src/lib.rs").unwrap();
+        let leaf = tree.node(&path).and_then(|node| node.as_file()).unwrap();
+        DeclaredChange::new(
+            ChangeKind::Rust,
+            [(
+                path,
+                FileEdit::Replace {
+                    before: SnapshotId::new(&leaf.identity().to_string()).unwrap(),
+                    content: b"fn f() {}\n".to_vec(),
+                },
+            )],
+        )
+        .unwrap()
+    }
+
+    /// A change that adds `src/extra.rs`: the program-side layer is not classified.
+    fn extra_file_change() -> DeclaredChange {
+        DeclaredChange::new(
+            ChangeKind::Rust,
+            [(
+                WorkspacePath::new("src/extra.rs").unwrap(),
+                FileEdit::Create {
+                    content: b"fn g() {}\n".to_vec(),
+                },
+            )],
+        )
+        .unwrap()
+    }
+
     fn recorded(profile: GateProfile) -> RepairTransaction<Blake3Hasher> {
+        recorded_with(profile, identity_change())
+    }
+
+    fn recorded_with(
+        profile: GateProfile,
+        change: DeclaredChange,
+    ) -> RepairTransaction<Blake3Hasher> {
         let applied = RepairTransaction::<Blake3Hasher>::begin(
             CrashpackId::new(CRASH).unwrap(),
             profile,
@@ -1755,21 +2064,7 @@ mod tests {
         )
         .unwrap()
         .apply(
-            &Proposal::new(
-                Hypothesis::new("unit"),
-                vec![
-                    DeclaredChange::new(
-                        ChangeKind::Rust,
-                        [(
-                            WorkspacePath::new("src/extra.rs").unwrap(),
-                            FileEdit::Create {
-                                content: b"fn g() {}\n".to_vec(),
-                            },
-                        )],
-                    )
-                    .unwrap(),
-                ],
-            ),
+            &Proposal::new(Hypothesis::new("unit"), vec![change]),
             &base(),
         )
         .unwrap()
@@ -1793,7 +2088,7 @@ mod tests {
     }
 
     fn claim_fields(tx: &RepairTransaction<Blake3Hasher>, world: &World) -> BTreeMap<String, Json> {
-        let skeleton = ReceiptSkeleton::compose(tx, world, world, world).unwrap();
+        let skeleton = ReceiptSkeleton::compose(tx, world, world, world, world).unwrap();
         let mut fields = match skeleton.fields_json() {
             Json::Object(fields) => fields,
             _ => unreachable!(),
@@ -1834,7 +2129,7 @@ mod tests {
     ) -> Result<ReceiptGenerationLicense, VerifyRefusal> {
         let world = World::of(vec![tx.clone()]);
         let claim = ClaimedReceipt::parse(&claim_bytes(tx, &world)).unwrap();
-        verify_for_promotion(&claim, &world, &world, &world, &world)
+        verify_for_promotion(&claim, &world, &world, &world, &world, &world)
     }
 
     fn check_published(
@@ -1842,7 +2137,7 @@ mod tests {
     ) -> Result<SkeletonVerification, VerifyRefusal> {
         let world = World::of(vec![tx.clone()]);
         let claim = ClaimedReceipt::parse(&claim_bytes(tx, &world)).unwrap();
-        verify_skeleton(&claim, &world, &world, &world, &world)
+        verify_skeleton(&claim, &world, &world, &world, &world, &world)
     }
 
     /// Verify `fields` at promotion against `world`, which must hold `tx`.
@@ -1851,7 +2146,7 @@ mod tests {
         world: &World,
     ) -> Result<ReceiptGenerationLicense, VerifyRefusal> {
         let claim = ClaimedReceipt::parse(&Json::Object(fields).to_canonical_bytes())?;
-        verify_for_promotion(&claim, world, world, world, world)
+        verify_for_promotion(&claim, world, world, world, world, world)
     }
 
     /// cr-tz8fwi: at promotion the record shows gate 12 `pending`, and every check of the
@@ -1998,7 +2293,7 @@ mod tests {
     }
 
     fn derived_unknowns(tx: &RepairTransaction<Blake3Hasher>, world: &World) -> Vec<String> {
-        ReceiptSkeleton::compose(tx, world, world, world)
+        ReceiptSkeleton::compose(tx, world, world, world, world)
             .unwrap()
             .unknowns()
             .tokens()
@@ -2181,6 +2476,161 @@ mod tests {
                 Err(VerifyRefusal::GateNotOnRecord(gate))
             );
         }
+    }
+
+    /// pr22-impl03 negative: a record that lists every in-profile gate `passed` on a
+    /// candidate that changes the workspace. The recomputed diff's program-side layer
+    /// is not classified, so no semantic preservation may be claimed: the honest claim
+    /// is refused at gate 3 at both stages, and a claim that drops the unclassified
+    /// unknown is refused for that omission first.
+    #[test]
+    fn pr22_impl03_negative_gate_3_passed_without_a_passing_diff_is_refused() {
+        let promoted = recorded_with(GateProfile::PhaseB, extra_file_change());
+        let ready = promoted.with_recorded_gates(promoted.gates().each_ref().map(|entry| {
+            if entry.name() == GateName::ReceiptGeneration {
+                GateStatus::Pending
+            } else {
+                entry.status()
+            }
+        }));
+        let world = World::of(vec![ready.clone()]);
+        let honest = derived_unknowns(&ready, &world);
+        assert!(honest.contains(&"semantic_diff_unclassified:program_layer".to_owned()));
+        let skeleton = ReceiptSkeleton::compose(&ready, &world, &world, &world, &world).unwrap();
+        assert_eq!(
+            skeleton.semantic_diff().gate_status(),
+            GateStatus::Inconclusive
+        );
+        assert_eq!(
+            check_promotion(&ready),
+            Err(VerifyRefusal::IntentIntegrityNotDerived {
+                derived: GateStatus::Inconclusive
+            })
+        );
+        assert_eq!(
+            check_published(&promoted),
+            Err(VerifyRefusal::IntentIntegrityNotDerived {
+                derived: GateStatus::Inconclusive
+            })
+        );
+        let mut fields = claim_fields(&ready, &world);
+        set_unknowns(
+            &mut fields,
+            honest
+                .iter()
+                .filter(|entry| !entry.starts_with("semantic_diff_"))
+                .cloned()
+                .collect(),
+        );
+        assert_eq!(
+            promote_fields(fields, &world),
+            Err(VerifyRefusal::UnknownOmitted(
+                UnknownKind::SemanticDiffUnclassified
+            ))
+        );
+    }
+
+    /// pr22-impl03 positive: a candidate identical to its base is classified on the
+    /// program side, so its diff passes gate 3, it contributes no unknown, and the
+    /// claim passes the gate-3 check to stop at gate 8's absent evidence.
+    #[test]
+    fn pr22_impl03_positive_a_classified_diff_passes_gate_3_and_adds_no_unknown() {
+        let tx = ready(GateProfile::PhaseB);
+        let world = World::of(vec![tx.clone()]);
+        let skeleton = ReceiptSkeleton::compose(&tx, &world, &world, &world, &world).unwrap();
+        assert_eq!(skeleton.semantic_diff().gate_status(), GateStatus::Passed);
+        assert_eq!(skeleton.semantic_diff().gap(), None);
+        assert!(
+            !derived_unknowns(&tx, &world)
+                .iter()
+                .any(|entry| entry.starts_with("semantic_diff_"))
+        );
+        let Json::Object(fields) = skeleton.fields_json() else {
+            unreachable!()
+        };
+        let handle = skeleton.semantic_diff().handle().unwrap();
+        assert_eq!(
+            fields.get("semantic_diff"),
+            Some(&Json::String(handle.to_owned()))
+        );
+        assert_eq!(
+            fields.get("intent_diff"),
+            Some(&Json::String(handle.to_owned()))
+        );
+        assert_eq!(
+            check_promotion(&tx),
+            Err(VerifyRefusal::GateWithoutEvidence(
+                GateName::RefinementCoverage
+            ))
+        );
+    }
+
+    /// The registry of `World` with the base intent at another standing.
+    struct AtStanding(IntentStanding);
+
+    impl IntentRegistry for AtStanding {
+        fn registered(&self, intent: &IntentId) -> Resolution<RegisteredIntent> {
+            if intent == contract().intent_id() {
+                Resolution::Found(RegisteredIntent::new(contract(), self.0))
+            } else {
+                Resolution::Unknown
+            }
+        }
+    }
+
+    /// pr22-impl03 boundary: a promoted version's diff (gate 12 `passed` on record)
+    /// re-derives by reference after its base intent is superseded, byte for byte; a
+    /// proposal base is refused at every stage, and a superseded one at promotion.
+    #[test]
+    fn pr22_impl03_boundary_a_promoted_versions_diff_re_derives_after_a_revision() {
+        let promoted = recorded(GateProfile::PhaseB);
+        let world = World::of(vec![promoted.clone()]);
+        let skeleton = ReceiptSkeleton::compose(&promoted, &world, &world, &world, &world).unwrap();
+        let bytes = skeleton.semantic_diff().diff().unwrap().to_artifact_bytes();
+        let claim = ClaimedReceipt::parse(&claim_bytes(&promoted, &world)).unwrap();
+        let check = |standing, stage| {
+            verify_referenced_diff(
+                &claim,
+                &bytes,
+                stage,
+                &world,
+                &AtStanding(standing),
+                &world,
+                &world,
+            )
+            .map(|diff| diff.handle().to_owned())
+        };
+        let handle = skeleton.semantic_diff().handle().unwrap().to_owned();
+        for standing in [IntentStanding::Accepted, IntentStanding::Superseded] {
+            assert_eq!(
+                check(standing, VerificationStage::Published),
+                Ok(handle.clone())
+            );
+        }
+        assert_eq!(
+            check(IntentStanding::Proposed, VerificationStage::Published),
+            Err(VerifyRefusal::Compose(ComposeRefusal::IntentNotProtected))
+        );
+        // At promotion the record must still show gate 12 pending.
+        assert_eq!(
+            check(IntentStanding::Superseded, VerificationStage::Promotion),
+            Err(VerifyRefusal::ReceiptGenerationAlreadyPassed)
+        );
+        let ready = ready(GateProfile::PhaseB);
+        let world = World::of(vec![ready.clone()]);
+        let claim = ClaimedReceipt::parse(&claim_bytes(&ready, &world)).unwrap();
+        assert_eq!(
+            verify_referenced_diff(
+                &claim,
+                &bytes,
+                VerificationStage::Promotion,
+                &world,
+                &AtStanding(IntentStanding::Superseded),
+                &world,
+                &world,
+            ),
+            Err(VerifyRefusal::Compose(ComposeRefusal::IntentSuperseded))
+        );
     }
 
     #[test]

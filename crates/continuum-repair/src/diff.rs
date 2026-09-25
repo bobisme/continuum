@@ -40,7 +40,11 @@
 //!   keeps the binding under an `accepted` base intent.
 //! - **Base standing.** The base intent must stand `accepted`. A proposal was never
 //!   protected, and a superseded contract no longer governs (RFC 0037 P7), so both are
-//!   typed inconclusives and never a pass.
+//!   typed inconclusives and never a pass. One exception, crate-private: the receipt
+//!   re-derives a **published** receipt's diff against a base superseded after
+//!   promotion (`BaseStanding::Historical`, RFC 0032: published receipts remain
+//!   verifiable). It reaches that path only after checking that the record shows gate
+//!   12 `passed`, so no new decision rests on a superseded base.
 //! - **Program-side changes: not classified, and fail closed.** No program-diff
 //!   classifier for RFC 0031's seven axes exists in this workspace, so `semantic_changes`
 //!   is empty. RFC 0031: "A layer that was not requested MUST leave its artifact section
@@ -472,6 +476,31 @@ impl TransactionDiff {
     pub const fn classification(&self) -> &IntentClassification {
         &self.classification
     }
+
+    /// Gate 3 on this diff: `failed` for a privileged intent revision; for a repair,
+    /// `passed` only when the program-side layer is classified, else `inconclusive`.
+    #[must_use]
+    pub const fn gate_status(&self) -> GateStatus {
+        match self.classification {
+            IntentClassification::PrivilegedIntentRevision(_) => GateStatus::Failed,
+            IntentClassification::Repair => match self.artifact.program_layer() {
+                ProgramLayer::Classified => GateStatus::Passed,
+                ProgramLayer::Unclassified => GateStatus::Inconclusive,
+            },
+        }
+    }
+
+    /// The INV-008 reason gate 3 records when [`Self::gate_status`] is `inconclusive`:
+    /// a repair over an unclassified program change is `Unsupported`.
+    #[must_use]
+    pub const fn inconclusive_reason(&self) -> Option<InconclusiveReason> {
+        match (&self.classification, self.artifact.program_layer()) {
+            (IntentClassification::Repair, ProgramLayer::Unclassified) => {
+                Some(InconclusiveReason::Unsupported)
+            }
+            _ => None,
+        }
+    }
 }
 
 /// What [`compute`] found.
@@ -498,13 +527,7 @@ impl DiffOutcome {
     #[must_use]
     pub const fn gate_status(&self) -> GateStatus {
         match self {
-            Self::Computed(diff) => match diff.classification {
-                IntentClassification::PrivilegedIntentRevision(_) => GateStatus::Failed,
-                IntentClassification::Repair => match diff.artifact.program_layer() {
-                    ProgramLayer::Classified => GateStatus::Passed,
-                    ProgramLayer::Unclassified => GateStatus::Inconclusive,
-                },
-            },
+            Self::Computed(diff) => diff.gate_status(),
             Self::Inconclusive(Undiffable::NoCandidate) => GateStatus::Pending,
             Self::Inconclusive(_) => GateStatus::Inconclusive,
         }
@@ -517,12 +540,7 @@ impl DiffOutcome {
     #[must_use]
     pub const fn inconclusive_reason(&self) -> Option<InconclusiveReason> {
         match self {
-            Self::Computed(diff) => match (&diff.classification, diff.artifact.program_layer()) {
-                (IntentClassification::Repair, ProgramLayer::Unclassified) => {
-                    Some(InconclusiveReason::Unsupported)
-                }
-                _ => None,
-            },
+            Self::Computed(diff) => diff.inconclusive_reason(),
             Self::Inconclusive(reason) => reason.inconclusive_reason(),
         }
     }
@@ -597,8 +615,26 @@ fn compute_inner<H: ContentHasher>(
     registry: &impl IntentRegistry,
     evidence: &impl ImpactScope,
 ) -> Result<TransactionDiff, Undiffable> {
-    let resolved = resolve(transaction, snapshots, registry, evidence)?;
+    let resolved = resolve(
+        transaction,
+        snapshots,
+        registry,
+        evidence,
+        BaseStanding::Current,
+    )?;
     resolved.build::<H>(resolved.program)
+}
+
+/// Which standings of the base intent a diff may be computed against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BaseStanding {
+    /// Only the protected head: every new decision ([`compute`], promotion).
+    Current,
+    /// Also a base intent superseded after promotion: re-deriving the diff a published
+    /// receipt was decided against (RFC 0032: published receipts remain verifiable).
+    /// The artifact does not carry the standing, so the bytes are the ones promotion
+    /// computed.
+    Historical,
 }
 
 fn resolve<H: ContentHasher>(
@@ -606,6 +642,7 @@ fn resolve<H: ContentHasher>(
     snapshots: &impl SealedSnapshots,
     registry: &impl IntentRegistry,
     evidence: &impl ImpactScope,
+    admit: BaseStanding,
 ) -> Result<Resolved, Undiffable> {
     let candidate = transaction
         .candidate_snapshot()
@@ -619,10 +656,12 @@ fn resolve<H: ContentHasher>(
     let after_intent = binding(snapshots, candidate, SnapshotRole::After)?;
 
     let (before, standing) = contract(registry, base_intent, SnapshotRole::Before)?;
-    match standing {
-        IntentStanding::Accepted => {}
-        IntentStanding::Proposed => return Err(Undiffable::BaseNotProtected),
-        IntentStanding::Superseded => return Err(Undiffable::BaseSuperseded),
+    match (standing, admit) {
+        (IntentStanding::Accepted, _) | (IntentStanding::Superseded, BaseStanding::Historical) => {}
+        (IntentStanding::Proposed, _) => return Err(Undiffable::BaseNotProtected),
+        (IntentStanding::Superseded, BaseStanding::Current) => {
+            return Err(Undiffable::BaseSuperseded);
+        }
     }
     let rebinds = &after_intent != base_intent;
     let after = if rebinds {
@@ -907,24 +946,70 @@ fn verify<H: ContentHasher>(
     evidence: &impl ImpactScope,
     matches: impl Fn(&TransactionDiff) -> bool,
 ) -> Result<TransactionDiff, DiffClaimRefusal> {
-    let resolved = resolve(transaction, snapshots, registry, evidence)
-        .map_err(DiffClaimRefusal::Undiffable)?;
-    let diff = resolved
-        .build::<H>(resolved.program)
-        .map_err(DiffClaimRefusal::Undiffable)?;
-    if matches(&diff) {
-        return Ok(diff);
+    let (diff, basis) = compute_with_basis(
+        transaction,
+        snapshots,
+        registry,
+        evidence,
+        BaseStanding::Current,
+    )
+    .map_err(DiffClaimRefusal::Undiffable)?;
+    basis.check::<H>(&diff, matches)?;
+    Ok(diff)
+}
+
+/// The inputs one diff was computed from, kept so that a claim that does not match it
+/// can be named without reading the stores again.
+pub(crate) struct DiffBasis(Resolved);
+
+impl DiffBasis {
+    /// The content identity of the base contract the diff read.
+    pub(crate) const fn before_identity(&self) -> &continuum_intent::contract::IntentIdentity {
+        self.0.before.identity()
     }
-    let other = match resolved.program {
-        ProgramLayer::Classified => ProgramLayer::Unclassified,
-        ProgramLayer::Unclassified => ProgramLayer::Classified,
-    };
-    match resolved.build::<H>(other) {
-        Ok(alternate) if matches(&alternate) => Err(DiffClaimRefusal::LayerMismatch {
-            computed: resolved.program,
-        }),
-        _ => Err(DiffClaimRefusal::HandleMismatch),
+
+    /// The intent the candidate was bound to when the diff read it.
+    pub(crate) const fn after_intent(&self) -> &IntentId {
+        &self.0.after_intent
     }
+
+    /// `Ok` when `matches` accepts `diff`. Otherwise the refusal: `LayerMismatch` when
+    /// it accepts the diff of these same inputs under the other program layer, else
+    /// `HandleMismatch`.
+    pub(crate) fn check<H: ContentHasher>(
+        &self,
+        diff: &TransactionDiff,
+        matches: impl Fn(&TransactionDiff) -> bool,
+    ) -> Result<(), DiffClaimRefusal> {
+        if matches(diff) {
+            return Ok(());
+        }
+        let resolved = &self.0;
+        let other = match resolved.program {
+            ProgramLayer::Classified => ProgramLayer::Unclassified,
+            ProgramLayer::Unclassified => ProgramLayer::Classified,
+        };
+        match resolved.build::<H>(other) {
+            Ok(alternate) if matches(&alternate) => Err(DiffClaimRefusal::LayerMismatch {
+                computed: resolved.program,
+            }),
+            _ => Err(DiffClaimRefusal::HandleMismatch),
+        }
+    }
+}
+
+/// [`compute`] for the receipt (PR-22 / IMPL-03): the diff of `transaction` under the
+/// base standing `admit`, with the basis it was computed from.
+pub(crate) fn compute_with_basis<H: ContentHasher>(
+    transaction: &RepairTransaction<H>,
+    snapshots: &impl SealedSnapshots,
+    registry: &impl IntentRegistry,
+    evidence: &impl ImpactScope,
+    admit: BaseStanding,
+) -> Result<(TransactionDiff, DiffBasis), Undiffable> {
+    let resolved = resolve(transaction, snapshots, registry, evidence, admit)?;
+    let diff = resolved.build::<H>(resolved.program)?;
+    Ok((diff, DiffBasis(resolved)))
 }
 
 #[cfg(test)]

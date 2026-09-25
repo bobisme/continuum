@@ -130,6 +130,9 @@ EXTERNAL_SCHEMA_FRAGMENTS = {
         ("crates/continuum-repair/tests/fixtures/pr22-impl07-phase-b-not-yet-enforced.json", "gates.items"),
         ("crates/continuum-repair/tests/fixtures/pr22-impl05-ack-after-sync-certificate-status.json", "properties"),
         ("crates/continuum-repair/tests/fixtures/pr22-impl06-ack-after-sync-unknowns.json", "properties"),
+        # PR-22 / IMPL-03 (bn-19gw): `semantic_diff`, `intent_diff` and the diff's
+        # `unknowns` entry, from `tests/pr22_impl03_semantic_diff_evidence.rs`.
+        ("crates/continuum-repair/tests/fixtures/pr22-impl03-ack-after-sync-semantic-diff.json", "properties"),
     ),
 }
 
@@ -266,8 +269,8 @@ def check_schema_fragments() -> int:
                     raise AssertionError(formatted)
             count += 1
     registered = sum(len(fragments) for fragments in EXTERNAL_SCHEMA_FRAGMENTS.values())
-    assert registered == 6 and count == registered, (
-        f"{count} of {registered} schema fragments checked; the PR-22 suites register six"
+    assert registered == 7 and count == registered, (
+        f"{count} of {registered} schema fragments checked; the PR-22 suites register seven"
     )
     return count
 

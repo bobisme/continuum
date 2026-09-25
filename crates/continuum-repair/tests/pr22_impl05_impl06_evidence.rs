@@ -25,6 +25,7 @@ use std::collections::BTreeMap;
 
 use continuum_intent::canonical_json::Json;
 use continuum_intent::contract::{IntentContract, IntentId};
+use continuum_repair::diff::{DiffScope, ImpactScope, ScopeAnswer};
 use continuum_repair::handle::{CrashpackId, RepairId, SnapshotId};
 use continuum_repair::hypothesis::{Hypothesis, Proposal};
 use continuum_repair::receipt::status::{
@@ -155,6 +156,13 @@ impl TransactionStore<Blake3Hasher> for World {
     }
 }
 
+/// No evidence names either side of the diff.
+impl ImpactScope for World {
+    fn evidence(&self, _: DiffScope<'_>) -> ScopeAnswer {
+        ScopeAnswer::Complete(Vec::new())
+    }
+}
+
 impl CandidateEvidence for World {
     fn certificates(
         &self,
@@ -220,7 +228,7 @@ fn register_world(tx: &Tx) -> World {
 }
 
 fn compose(tx: &Tx, world: &World) -> Result<ReceiptSkeleton, ComposeRefusal> {
-    ReceiptSkeleton::compose(tx, world, world, world)
+    ReceiptSkeleton::compose(tx, world, world, world, world)
 }
 
 fn fixture_matches(relative: &str, bytes: &[u8]) {
@@ -291,8 +299,9 @@ fn pr22_impl05_positive_only_the_model_bound_candidate_certificate_counts() {
 
 /// `pr22-impl06-ack-after-sync-unknowns`: the applied transaction's unknowns under
 /// `phase-b`, in byte order — gates 9 and 10 not yet enforced, gates 1–8 and 11 pending (gate 12 is the
-/// receipt step), refinement not computed, the three certificates that do not count, and
-/// the storage pack's case — each exactly once, in canonical order.
+/// receipt step), refinement not computed, the three certificates that do not count, the
+/// semantic diff's unclassified program side (PR-22 / IMPL-03, bn-19gw), and the storage
+/// pack's case — each exactly once, in canonical order.
 #[test]
 fn pr22_impl06_positive_the_applied_transactions_unknowns_are_listed_exactly_once() {
     let tx = applied(GateProfile::PhaseB);
@@ -313,6 +322,7 @@ fn pr22_impl06_positive_the_applied_transactions_unknowns_are_listed_exactly_onc
         "gate_pending:property_mutation",
         "gate_pending:refinement_coverage",
         "refinement_not_computed:checker_not_deployed",
+        "semantic_diff_unclassified:program_layer",
         "unsupported_pack_case:storage/append-log-v1:flush-dishonesty",
     ];
     assert_eq!(tokens(&skeleton), expected);
@@ -489,7 +499,7 @@ fn pr22_impl06_negative_a_claim_is_checked_against_the_record_first() {
         claim.insert("unknowns".to_owned(), unknowns);
         let parsed = ClaimedReceipt::parse(&Json::Object(claim).to_canonical_bytes()).unwrap();
         assert_eq!(
-            verify_skeleton(&parsed, &world, &world, &world, &world).map(|_| ()),
+            verify_skeleton(&parsed, &world, &world, &world, &world, &world).map(|_| ()),
             Err(VerifyRefusal::GateNotOnRecord(GateName::BaseReplay))
         );
     }

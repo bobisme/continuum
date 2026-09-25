@@ -1,0 +1,55 @@
+[change]
+bone = "bn-19gw"
+author = "continuum-dev"
+summary = "PR-22 IMPL-03 (bn-19gw): continuum-repair derives the receipt's semantic_diff and intent_diff from the diff recomputed from the stores for the exact transaction version the receipt names (diff::compute_with_basis over a new ImpactScope store argument), never from the claim. A claimed handle that is not the recomputed one is refused typed (HandleMismatch, or LayerMismatch for a handle minted under the other program layer), the two diff fields must name one diff_ handle, presented diff artifact bytes must equal the recompute (verify_referenced_diff), an undiffable diff is carried as the unknowns entry semantic_diff_undiffable:<cause> and never omitted, an unclassified program side is carried as semantic_diff_unclassified:program_layer, and a receipt listing gate 3 passed while the recomputed diff does not pass it is refused IntentIntegrityNotDerived. A published receipt's diff re-derives against a base intent superseded after promotion"
+
+[semantic]
+covers = [
+  "crates/continuum-repair/src/diff.rs",
+  "crates/continuum-repair/src/receipt.rs",
+  "crates/continuum-repair/src/receipt/",
+]
+reference_tests = [
+  "crates/continuum-repair/tests/pr22_impl03_semantic_diff_evidence.rs::pr22_impl03_pos_01_the_derived_diff_reference_matches_the_recompute",
+  "crates/continuum-repair/tests/pr22_impl03_semantic_diff_evidence.rs::pr22_impl03_pos_02_m01_carries_the_honest_unclassified_state",
+  "crates/continuum-repair/tests/pr22_impl03_semantic_diff_evidence.rs::pr22_impl03_neg_01_a_forged_diff_handle_is_refused",
+  "crates/continuum-repair/tests/pr22_impl03_semantic_diff_evidence.rs::pr22_impl03_neg_02_another_versions_diff_is_refused",
+  "crates/continuum-repair/tests/pr22_impl03_semantic_diff_evidence.rs::pr22_impl03_neg_03_a_diff_under_the_other_program_layer_is_refused",
+  "crates/continuum-repair/tests/pr22_impl03_semantic_diff_evidence.rs::pr22_impl03_neg_04_a_claimed_diff_with_emptied_intent_changes_is_refused",
+  "crates/continuum-repair/tests/pr22_impl03_semantic_diff_evidence.rs::pr22_impl03_neg_05_the_two_diff_fields_must_name_one_well_formed_handle",
+  "crates/continuum-repair/tests/pr22_impl03_semantic_diff_evidence.rs::pr22_impl03_bnd_01_an_undiffable_diff_is_an_unknown_never_omitted",
+  "crates/continuum-repair/tests/pr22_impl03_semantic_diff_evidence.rs::pr22_impl03_bnd_02_a_silent_evidence_store_is_a_refusal_not_an_unknown",
+  "crates/continuum-repair/tests/pr22_impl03_semantic_diff_evidence.rs::pr22_impl03_bnd_03_a_published_receipts_diff_survives_a_later_intent_revision",
+  "crates/continuum-repair/tests/pr22_impl03_semantic_diff_evidence.rs::pr22_impl03_bnd_04_a_store_that_changes_its_answer_between_reads_is_refused",
+  "crates/continuum-repair/src/receipt.rs::pr22_impl03_boundary_a_promoted_versions_diff_re_derives_after_a_revision",
+  "crates/continuum-repair/src/receipt.rs::pr22_impl03_negative_gate_3_passed_without_a_passing_diff_is_refused",
+  "crates/continuum-repair/src/receipt.rs::pr22_impl03_positive_a_classified_diff_passes_gate_3_and_adds_no_unknown",
+  "crates/continuum-repair/src/receipt/semantic_diff.rs::pr22_impl03_only_facts_about_the_inputs_become_unknowns",
+  "crates/continuum-repair/src/receipt/unknowns.rs::pr22_impl06_every_absent_or_inconclusive_input_appears_exactly_once",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-repair/tests/pr22_impl03_semantic_diff_evidence.rs::pr22_impl03_met_01_store_answer_order_moves_no_byte", relation = "set/map insertion order" },
+  { test = "crates/continuum-repair/src/receipt/unknowns.rs::pr22_impl06_the_token_rendering_round_trips_and_is_injective", relation = "serialization round trip" },
+  { test = "crates/continuum-repair/src/receipt/semantic_diff.rs::pr22_impl03_cause_tokens_round_trip_and_are_distinct", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuum-repair/tests/pr22_impl03_semantic_diff_evidence.rs::pr22_impl03_dif_01_the_receipt_diff_is_the_assemblers_output", oracle = "continuum-semantic-diff", subject = "continuum-repair" },
+]
+
+[semantic.claim_impact]
+claims = ["C020", "C033"]
+reason = "No row's state or wording changes. C020 stays at its state: the receipt now names the RFC 0031 diff the repair path recomputes, and an agent cannot substitute an emptied or other-layer diff, but no production path composes a receipt yet (repair.promote and the daemon stores are unwired). C033 stays TARGET: no receipt can verify, because gate 8 has no refinement evidence and gate 3 cannot pass on a workspace-changing candidate while the program side is unclassified"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: semantic_diff and intent_diff are filled with the existing ^diff_ handle the schema declares, and the two new unknowns tokens (semantic_diff_unclassified:program_layer, semantic_diff_undiffable:<cause>) are strings, as the schema types unknowns entries; the token grammar is continuum-repair's (receipt::unknowns). A typed wire marker for an unclassified program layer in semantic-diff.schema.json stays a pending user decision and is not made here. validate_dossier.py checks the new retained fragment against the receipt schema's own property subschemas"
+unaffected = { promotion-receipt = "semantic_diff and intent_diff carry one diff_ handle, as correction 10 requires; unknowns entries stay strings", semantic-diff = "read only: the artifact is the one PR-20 IMPL-04 computes, byte-identical to its retained fixture for the same base and candidate", repair-transaction = "read only: no transaction byte moves" }
+
+[semantic.migration]
+verdict = "Revalidate"
+note = "continuum-repair: ReceiptSkeleton::compose, verify_skeleton and verify_for_promotion take one more store, diff::ImpactScope (re-exported from receipt); ClaimedReceipt now requires semantic_diff and intent_diff and refuses two different handles (ClaimRefusal::DiffFieldsDisagree); ReceiptField gains SemanticDiff and IntentDiff and ReceiptSeam loses SemanticDiff; Store gains ImpactScope; VerifyRefusal gains SemanticDiff, SemanticDiffUndiffable and IntentIntegrityNotDerived; UnknownKind and Unknown gain the two semantic-diff members; verify_referenced_diff is new. The derived unknowns of a workspace-changing candidate gain one entry, so the retained pr22-impl06 fragment was re-blessed. No daemon path calls this module, no wire shape or IDL operation changes, and no dependency is added"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-17p94b"
+verdict = "approved"
