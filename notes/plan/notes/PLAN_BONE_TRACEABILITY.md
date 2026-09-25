@@ -48,7 +48,7 @@ Graph: **714** active Bones; **630** active leaves; **0** untraced Bones.
 - Risk-routing failures: **0**.
 - Missing phase barriers: **0**.
 - Phase exit-goal failures: **0**.
-- PR exit wiring failures: **1**.
+- PR exit wiring failures: **0**.
 - Gate wiring failures: **0**.
 - Risk/kill checkpoint wiring failures: **0**.
 - Frontier-lane wiring failures: **0**.

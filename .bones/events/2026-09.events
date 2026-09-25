@@ -1152,3 +1152,4 @@
 1790350683688539	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy-Rg		item.move	bn-1bj4	{"state":"doing"}	blake3:UTguGBrFkXuSwg-gmXlc3ESCvJNfAxE-hO4Vt8jWrM4
 1790350683694043	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy-hg		item.assign	bn-1bj4	{"action":"assign","agent":"continuum-dev"}	blake3:qVxC8D2kxTM-v-6syAlQQkmc-aM-0cRkw9AAnUi8da8
 1790351550509958	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy-xg		item.move	bn-25z9o	{"state":"done"}	blake3:asfa9sIJn1S_X2h5cieukYyzKSu4yfXT0Ww2DrAWeB4
+1790351615449364	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy_Bg		item.update	bn-1g9sg	{"field":"title","value":"CIR follow-ups (PR 17): actor-local allocation identity, obligation/effect/time validation, encodings, pack independence oracles (bn-1ss follow-ups)"}	blake3:wJ5IZBanDIC51LPvwA7wD2LolwDWgcTIUEO1AZ-kFs8
