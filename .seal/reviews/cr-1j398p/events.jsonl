@@ -15,3 +15,4 @@
 {"ts":"2026-09-25T05:13:09.362790766Z","author":"continuum-security","event":"ReviewerVoted","data":{"review_id":"cr-1j398p","vote":"lgtm","reason":"Full persisted range 49d65d7f1ca7aed4df6cc3cb6b287fda4683af83..15015ebf57afe5da4ce9e0b929a05d56b64abc93 reviewed. Prior HIGH threads are resolved. No remaining security blocker. The risk:critical human approval gate remains separate.","target_commit":"15015ebf57afe5da4ce9e0b929a05d56b64abc93"}}
 {"ts":"2026-09-25T05:13:09.398862322Z","author":"continuum-security","event":"ReviewApproved","data":{"review_id":"cr-1j398p","target_commit":"15015ebf57afe5da4ce9e0b929a05d56b64abc93"}}
 {"ts":"2026-09-25T05:13:19.085550054Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-1qburd","reason":"Informational risk:high review summary; no finding."}}
+{"ts":"2026-09-25T05:53:04.596727841Z","author":"continuum-dev","event":"ReviewMerged","data":{"review_id":"cr-1j398p","final_commit":"e59598b8"}}
