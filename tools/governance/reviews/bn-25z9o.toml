@@ -1,0 +1,59 @@
+[change]
+bone = "bn-25z9o"
+author = "continuum-dev"
+summary = "PR 18 owner, fault and value-domain reduction: continuum-debugger gains a scenario module that reduces a failing run's configuration along RFC 0028's owner, fault and value dimensions, each candidate a smaller configuration the instantiation runs as a real run of the program, each pass declaring the property, defect, semantics and bounds it keeps and refusing rather than change the checked property (INV-013), with a well-founded per-dimension measure, budget charged before work, typed inconclusive results and RFC 0028's minimizer transcript; OwnerMinimal, FaultMinimal and ValueMinimal are claimed only when the last round decided every candidate and the transcript is complete"
+
+[semantic]
+covers = [
+  "crates/continuum-debugger/src/",
+]
+reference_tests = [
+  "crates/continuum-debugger/tests/pr18_scenario.rs::reduces_each_dimension_to_its_minimum_and_claims_minimality",
+  "crates/continuum-debugger/tests/pr18_scenario.rs::rounds_repeat_until_nothing_is_kept",
+  "crates/continuum-debugger/tests/pr18_scenario.rs::a_pass_that_would_change_the_property_is_refused",
+  "crates/continuum-debugger/tests/pr18_scenario.rs::a_declaration_without_the_property_refuses_the_pass",
+  "crates/continuum-debugger/tests/pr18_scenario.rs::an_out_of_scope_candidate_is_recorded_not_run",
+  "crates/continuum-debugger/tests/pr18_scenario.rs::an_undecided_candidate_withholds_minimality",
+  "crates/continuum-debugger/tests/pr18_scenario.rs::a_candidate_that_is_not_smaller_is_a_contract_breach",
+  "crates/continuum-debugger/tests/pr18_scenario.rs::a_repeated_candidate_is_judged_from_the_memo",
+  "crates/continuum-debugger/tests/pr18_scenario.rs::an_exhausted_budget_is_inconclusive_and_charged_before_work",
+  "crates/continuum-debugger/tests/pr18_scenario.rs::an_input_that_does_not_fail_is_refused",
+  "crates/continuum-debugger/tests/pr18_scenario.rs::a_full_transcript_is_counted_and_withholds_minimality",
+  "crates/continuum-debugger/tests/pr18_scenario.rs::a_measure_that_drifts_after_a_run_is_a_contract_breach",
+  "crates/continuum-debugger/tests/pr18_scenario.rs::identical_inputs_give_identical_reductions",
+  "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::the_start_configuration_reruns_the_original_run",
+  "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::pruning_changes_nothing_when_every_owner_is_used",
+  "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::the_agreement_scenario_is_already_owner_fault_and_value_minimal",
+  "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::the_acked_not_durable_scenario_reduces_and_keeps_the_mechanism",
+  "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::every_pass_declares_its_scope_and_refuses_to_change_the_property",
+  "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::the_ratified_core_ratio_is_measured_not_assumed",
+  "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::an_exhausted_budget_is_inconclusive_with_the_last_failing_configuration",
+  "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::a_configuration_that_holds_is_refused",
+  "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::identical_inputs_give_identical_reductions",
+  "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::the_evidence_matches_its_golden",
+  "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::the_transcripts_match_their_golden",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::symmetry_renaming_of_values_renames_the_scenario_reduction", relation = "symmetry renaming" },
+]
+differential_tests = [
+  { test = "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::schedule_free_decisions_agree_with_schedules", oracle = "continuum-asupersync", subject = "continuum-debugger" },
+  { test = "crates/continuum-asupersync/tests/pr18_impl02_scenario_reduction.rs::composed_cores_keep_the_mechanism_over_the_corpus", oracle = "continuum-asupersync", subject = "continuum-debugger" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers causal minimization or causal cores; the causal-minimization frontier row (plan 24.5, research/26, quote-id causal-minimization-core-ratio) is a register threshold on the research/26 corpus, which this change measures and does not meet: the composed M01 corpus median is 31.5 percent of the original run and 59.2 percent of the reduced run it is cut from"
+
+[semantic.schemas]
+updated = []
+reason = "no JSON schema document and no wire shape changes: the scenario reduction and its transcript are an in-process library with no production caller; failure.minimize stays unserved (bn-3ncgl), and crashpack.minimization and the context-pack guarantee enum, which already names OwnerMinimal, FaultMinimal and ValueMinimal, are untouched (RFC 0028 F6 and F8 remain open)"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-debugger gains the scenario module; reduce.rs changes only in visibility (Budget's charge helpers and a transcript-bound accessor become crate-visible), and a refused scenario reduction keeps its start attempt and spending; so every existing reduction, core, pass record, transcript and spending is unchanged: the bn-3km4z and bn-2z08o goldens are byte-identical after the test-side move of the shared register instantiation into tests/support/pr18_program.rs. continuum-asupersync's src is unchanged; its test support gains build_pruned and guided_log, and the plain builds are unchanged operation for operation"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-3k3658"
+verdict = "approved"

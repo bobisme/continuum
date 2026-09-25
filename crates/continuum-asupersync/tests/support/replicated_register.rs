@@ -657,7 +657,7 @@ fn coordinators_with(plan: &Plan, sites: &[Site]) -> Vec<(u8, u8, usize)> {
 /// On a plan that is not well formed: an epoch out of range, or an act on a permit or
 /// bytes that the same incarnation has not taken.
 pub fn build(plan: &Plan) -> Built {
-    build_inner(plan, false, CrashMode::Graceful, &[])
+    build_inner(plan, false, CrashMode::Graceful, &[], false)
 }
 
 /// The binding programs of `plan` with the service's shutdown (PR-16/IMPL-04, bn-5fpl):
@@ -674,7 +674,7 @@ pub fn build(plan: &Plan) -> Built {
 ///
 /// As [`build`].
 pub fn build_with_shutdown(plan: &Plan) -> Built {
-    build_inner(plan, true, CrashMode::Graceful, &[])
+    build_inner(plan, true, CrashMode::Graceful, &[], false)
 }
 
 /// [`build_with_shutdown`] with each crash act realized as `mode` says (bn-20d8u). The
@@ -684,7 +684,7 @@ pub fn build_with_shutdown(plan: &Plan) -> Built {
 ///
 /// As [`build`].
 pub fn build_with_shutdown_in(plan: &Plan, mode: CrashMode) -> Built {
-    build_inner(plan, true, mode, &[])
+    build_inner(plan, true, mode, &[], false)
 }
 
 /// [`build_with_shutdown_in`] with `carrier` at every site of [`carrier_sites`], and each
@@ -713,7 +713,13 @@ pub fn build_with_shutdown_in(plan: &Plan, mode: CrashMode) -> Built {
 ///
 /// As [`build`].
 pub fn build_carried(plan: &Plan, mode: CrashMode, carrier: Carrier, fence: Fence) -> Built {
-    build_inner(plan, true, mode, &carrier_sites(plan, carrier, fence))
+    build_inner(
+        plan,
+        true,
+        mode,
+        &carrier_sites(plan, carrier, fence),
+        false,
+    )
 }
 
 /// [`build_carried`] with explicit `sites`, for a test that needs a payload
@@ -723,7 +729,23 @@ pub fn build_carried(plan: &Plan, mode: CrashMode, carrier: Carrier, fence: Fenc
 ///
 /// As [`build`], and on a site that is not at a crash act of its replica.
 pub fn build_with_sites(plan: &Plan, mode: CrashMode, sites: &[Site]) -> Built {
-    build_inner(plan, true, mode, sites)
+    build_inner(plan, true, mode, sites, false)
+}
+
+/// [`build_with_shutdown`] that spawns only the owners the scripts use (PR 18's owner
+/// reduction, bn-25z9o): an incarnation's region is opened only when the incarnation has
+/// an act, crash acts included, and its writer for epoch `e` is spawned only when the
+/// incarnation has an act on `e`. So a replica with an empty script has no region and no
+/// task, as a node that never starts; the model still has three nodes, and its slots
+/// stay free. The shutdown finishes and closes only what was spawned and opened. Every
+/// other operation is [`build_with_shutdown`]'s, and a plan whose every incarnation acts
+/// on every epoch builds exactly as [`build_with_shutdown`] does.
+///
+/// # Panics
+///
+/// As [`build`].
+pub fn build_pruned(plan: &Plan) -> Built {
+    build_inner(plan, true, CrashMode::Graceful, &[], true)
 }
 
 /// `built` without operation `index` of actor `actor`, its admissibility facts kept in
@@ -785,7 +807,7 @@ pub fn with_op(built: &Built, actor: usize, index: usize, op: SubstrateOp) -> Bu
     out
 }
 
-fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode, sites: &[Site]) -> Built {
+fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode, sites: &[Site], prune: bool) -> Built {
     assert!((1..=2).contains(&plan.epochs), "one or two epochs");
     assert!(
         plan.values
@@ -815,9 +837,32 @@ fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode, sites: &[Site]) -> 
     let mut writer: BTreeMap<(u8, usize, u8), TaskLabel> = BTreeMap::new();
     let mut region: BTreeMap<(u8, usize), RegionLabel> = BTreeMap::new();
     let mut spawns = Vec::new();
+    // What each incarnation's acts use, for a pruned build: `(n, inc, None)` for any act,
+    // `(n, inc, Some(e))` for an act on epoch `e`.
+    let mut used: BTreeSet<(u8, usize, Option<u8>)> = BTreeSet::new();
+    for n in 0..3_u8 {
+        let mut inc = 0;
+        for act in &plan.replicas[usize::from(n)] {
+            used.insert((n, inc, None));
+            match *act {
+                Act::Crash | Act::CrashRepropose(..) => inc += 1,
+                Act::Reserve(e)
+                | Act::Submit(e)
+                | Act::Sync(e)
+                | Act::Release(e)
+                | Act::Abort(e)
+                | Act::Confirm(e) => {
+                    used.insert((n, inc, Some(e)));
+                }
+            }
+        }
+    }
     for n in 0..3_u8 {
         let values = incarnation_values(plan, usize::from(n));
         for (inc, values) in values.iter().enumerate() {
+            if prune && !used.contains(&(n, inc, None)) {
+                continue;
+            }
             let r = RegionLabel(labels.take());
             setup.push(SubstrateOp::OpenRegion {
                 parent: RegionLabel::ROOT,
@@ -826,6 +871,9 @@ fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode, sites: &[Site]) -> 
             region_ordinal += 1;
             region.insert((n, inc), r);
             for e in 0..plan.epochs {
+                if prune && !used.contains(&(n, inc, Some(e))) {
+                    continue;
+                }
                 let t = TaskLabel(labels.take());
                 task_labels.push(t);
                 writer.insert((n, inc, e), t);
@@ -1136,12 +1184,15 @@ fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode, sites: &[Site]) -> 
         for n in 0..3_u8 {
             let inc = incarnations[usize::from(n)] - 1;
             for e in 0..plan.epochs {
-                ops.push(SubstrateOp::Finish {
-                    task: writer[&(n, inc, e)],
-                });
-                m.push(last);
+                // Every writer exists unless the build is pruned.
+                if let Some(&task) = writer.get(&(n, inc, e)) {
+                    ops.push(SubstrateOp::Finish { task });
+                    m.push(last);
+                }
             }
-            live.push(region[&(n, inc)]);
+            if let Some(&r) = region.get(&(n, inc)) {
+                live.push(r);
+            }
         }
         live.push(coord_region);
         for &(r, t) in supervisor.values() {
@@ -1269,6 +1320,27 @@ pub fn admissible_logs(built: &Built, cap: usize) -> Option<Vec<ChoiceLog>> {
     let (sched, mut prefix) = setup_prefix(built);
     let mut out = Vec::new();
     go(built, &sched, &mut prefix, &mut out, cap).then_some(out)
+}
+
+/// The admissible choice log of `built` that follows `rank` (PR 18's scenario reduction,
+/// bn-25z9o): the setup first, then at each step the admissible actor whose next
+/// operation `(actor, index)` has the lowest rank, the lower actor on a tie. A reduced
+/// configuration's run keeps the order its operations had in the original run this way,
+/// and every other operation joins where the program first admits it. `None` when every
+/// actor with operations left is parked: the program deadlocks under this order.
+pub fn guided_log(built: &Built, rank: impl Fn(usize, usize) -> u64) -> Option<ChoiceLog> {
+    let (mut sched, mut prefix) = setup_prefix(built);
+    loop {
+        let enabled = sched.enabled(built);
+        if enabled.is_empty() {
+            return Some(ChoiceLog::new(prefix));
+        }
+        let index = (0..enabled.len())
+            .filter(|&i| sched.admissible(built, enabled[i]))
+            .min_by_key(|&i| (rank(enabled[i], sched.cursors[enabled[i]]), i))?;
+        sched.take(built, enabled[index]);
+        prefix.push(u32::try_from(index).expect("few actors"));
+    }
 }
 
 /// SplitMix64: the explicit, seeded source of the sampled schedules (INV-005: the

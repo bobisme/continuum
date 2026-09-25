@@ -576,6 +576,16 @@ pub fn one_epoch_replica((value, fate): (u8, Fate)) -> Replica {
 /// `bounds.max_crashes` crashes. Each replica is `(value, fate)` over every [`Fate`].
 #[must_use]
 pub fn one_epoch_sweep(bounds: Bounds) -> Vec<Plan> {
+    one_epoch_sweep_replicas(bounds)
+        .into_iter()
+        .map(|r| plan_of("sweep-one-epoch", 1, r))
+        .collect()
+}
+
+/// The replicas of each plan of [`one_epoch_sweep`], in its order: the configuration a
+/// scenario reduction starts from (PR 18, bn-25z9o).
+#[must_use]
+pub fn one_epoch_sweep_replicas(bounds: Bounds) -> Vec<[Replica; 3]> {
     let options = one_epoch_options();
     let index = |o: (u8, Fate)| options.iter().position(|x| *x == o).expect("an option");
     let swap = |(v, f): (u8, Fate)| -> (u8, Fate) {
@@ -599,7 +609,7 @@ pub fn one_epoch_sweep(bounds: Bounds) -> Vec<Plan> {
                 if swapped < [i, j, k] {
                     continue;
                 }
-                out.push(plan_of("sweep-one-epoch", 1, triple.map(one_epoch_replica)));
+                out.push(triple.map(one_epoch_replica));
             }
         }
     }
@@ -671,15 +681,18 @@ pub fn two_epoch_sample(bounds: Bounds, count: usize, seed: u64) -> Vec<Plan> {
 /// its crash, so only `v1` ever gets a majority.
 #[must_use]
 pub fn scenario_plan() -> Plan {
-    plan_of(
-        SCENARIO_NAME,
-        1,
-        [
-            one_epoch_replica((0, Fate::CrashSubmitted { retry: 1 })),
-            one_epoch_replica((0, Fate::Clean)),
-            one_epoch_replica((1, Fate::Clean)),
-        ],
-    )
+    plan_of(SCENARIO_NAME, 1, scenario_replicas())
+}
+
+/// The replicas of [`scenario_plan`]: the configuration a scenario reduction starts from
+/// (PR 18, bn-25z9o).
+#[must_use]
+pub fn scenario_replicas() -> [Replica; 3] {
+    [
+        one_epoch_replica((0, Fate::CrashSubmitted { retry: 1 })),
+        one_epoch_replica((0, Fate::Clean)),
+        one_epoch_replica((1, Fate::Clean)),
+    ]
 }
 
 /// `crash-after-reply`: every replica writes `v0`, and `c` crashes after its

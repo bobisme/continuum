@@ -591,7 +591,12 @@ impl Budget {
         self
     }
 
-    fn charge_replay(&mut self, spent: &mut Spent) -> Result<(), Exhausted> {
+    /// The transcript bound in force.
+    pub(crate) const fn transcript_bound(&self) -> TranscriptBound {
+        self.transcript
+    }
+
+    pub(crate) fn charge_replay(&mut self, spent: &mut Spent) -> Result<(), Exhausted> {
         if self.replays == 0 {
             return Err(Exhausted::Replays);
         }
@@ -600,7 +605,7 @@ impl Budget {
         Ok(())
     }
 
-    fn charge_work(&mut self, units: u64, spent: &mut Spent) -> Result<(), Exhausted> {
+    pub(crate) fn charge_work(&mut self, units: u64, spent: &mut Spent) -> Result<(), Exhausted> {
         if self.work < units {
             return Err(Exhausted::Work);
         }

@@ -23,7 +23,14 @@
 //!   the debugger's selected configuration and reverse step are the same objects
 //!   (RFC 0029), and it depends on no trace producer.
 //!
+//! - [`scenario`] (PR 18, bn-25z9o): the owner, fault and value-domain passes, which
+//!   reduce the failing run's configuration rather than its events. Each candidate is a
+//!   smaller configuration that the instantiation runs as a real run of the program;
+//!   each pass declares what it preserves (INV-013) and refuses rather than change the
+//!   checked property; and every attempt is recorded in RFC 0028's minimizer transcript.
+//!
 //! The debugger core itself (PR 19) is not here yet.
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 
 pub mod reduce;
+pub mod scenario;
