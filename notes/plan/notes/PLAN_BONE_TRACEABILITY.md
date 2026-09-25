@@ -35,7 +35,7 @@ Graph: **711** active Bones; **627** active leaves; **0** untraced Bones.
 
 ## Graph contract
 
-- Active blocking edges: **1512**.
+- Active blocking edges: **1511**.
 - Dependency layers: **13**.
 - Dispatch-ready leaves: **68**; dependency-suppressed Bones: **631**.
 - Dependency cycles: **0**.

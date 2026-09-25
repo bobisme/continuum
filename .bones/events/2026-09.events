@@ -1112,3 +1112,8 @@
 1790315584636863	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy0Rg		item.move	bn-jw7q	{"state":"done"}	blake3:txI_y9LHdb3py5rFEXoITagDbrX2KEGOR8U1zDa7qiI
 1790315584643427	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy0hg		item.move	bn-1nn	{"reason":"auto-completed: all children of bn-1nn are done","state":"done"}	blake3:qIhJq40ufRFeQaRbyOTSTfn2MhFkJV8LAvuGQWG-Vp4
 1790315586560802	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy0xg		item.move	bn-3vhzw	{"state":"done"}	blake3:iMjTrgzaASu6z_5L5L42Lsfy9qe3NV-IyEYAQTVLjPU
+1790315670116796	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy1Bg		item.unlink	bn-1ss	{"target":"bn-oqc"}	blake3:hVbxMiGtysid-qD9uORzKGj4sYHKmqRVVv1nljnA1Ak
+1790315670152275	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy1Rg		item.link	bn-1ss	{"link_type":"blocks","target":"bn-2rsp"}	blake3:ia_C5ji5lYv4Rv6YY8LgVzlr6YlMcOkiMeKAAgxHEGU
+1790315670188021	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy1hg		item.link	bn-1ss	{"link_type":"blocks","target":"bn-5fpl"}	blake3:h_Wt1SMYLg4RLHa6-GpLMYCcydFbi9wyWpjRP-k5qMY
+1790315670223825	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy1xg		item.link	bn-1ss	{"link_type":"blocks","target":"bn-28oa"}	blake3:E7P66BKrM4dqWIJr1OEEvSxssWfIIfBSexu64cufUqc
+1790315670256086	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy2Bg		item.comment	bn-1ss	{"body":"Lead: dependency narrowed from the PR-16 umbrella bn-oqc to the concrete register work it needs (bn-2rsp model, bn-5fpl correct version, bn-28oa mutants). bn-oqc waits on the PR-16 exit, whose M09 campaign needs PR 17's view, so depending on the umbrella was a cycle."}	blake3:BTCllYHBC1TWqTDv_Uo1BYJwcmiTKsv2CKAfsqAtIOs
