@@ -541,6 +541,12 @@ pub struct OperationSpec {
     pub authority: crate::protocol::vocabulary::AuthorityLevel,
     /// The IDL annotations, in declaration order.
     pub annotations: &'static [Annotation],
+    /// The operation's `@since` date: the first protocol version that declares it, or
+    /// `None` for an undated operation, which every version of the current major declares.
+    /// A connection negotiated below it is refused the operation before admission
+    /// ([`OperationSpec::defined_at`]). The values are [`crate::protocol::since`]'s
+    /// constants, and `tests/idl_conformance.rs` requires each to equal the IDL's own.
+    pub since: Option<crate::protocol::scalar::ProtocolVersion>,
     /// The request body.
     pub request: StructSpec,
     /// The response body.
@@ -560,6 +566,13 @@ impl OperationSpec {
     #[must_use]
     pub fn has(&self, annotation: Annotation) -> bool {
         self.annotations.contains(&annotation)
+    }
+
+    /// Whether a connection negotiated at `version` declares this operation
+    /// (`@since`, `rule versioning.compatible_change`).
+    #[must_use]
+    pub fn defined_at(&self, version: crate::protocol::scalar::ProtocolVersion) -> bool {
+        crate::protocol::since::defines(self.since, version)
     }
 }
 

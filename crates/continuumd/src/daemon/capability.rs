@@ -104,8 +104,8 @@ use super::state::DaemonState;
 use super::{Daemon, result};
 use crate::protocol::envelope::EpochSet;
 use crate::protocol::handshake::{
-    ClientHello, EpochAdvanceNotice, Negotiated, NegotiationError, ServerLimits, ServerReject,
-    ServerWelcome, negotiate,
+    ClientHello, EpochAdvanceNotice, Negotiated, NegotiationError, RejectFrame, ServerLimits,
+    ServerReject, ServerWelcome, negotiate,
 };
 use crate::protocol::scalar::{ProtocolVersion, Timestamp};
 use crate::protocol::vocabulary::{Encoding, ErrorCode};
@@ -201,7 +201,7 @@ impl ConnectionPolicy {
 pub struct Refusal {
     /// The typed refusal frame, or [`None`] where the connection must be closed without
     /// one.
-    pub frame: Option<ServerReject>,
+    pub frame: Option<RejectFrame>,
 }
 
 /// Answer one [`ClientHello`].
@@ -315,18 +315,17 @@ fn offered_features(policy: &ConnectionPolicy, hello: &ClientHello) -> Vec<Strin
 /// `rule handshake.rejection` admits exactly two codes and fixes `retryable` false for
 /// both; the detail is the same constant a per-request denial carries, so a client cannot
 /// tell a handshake refusal from a dispatch denial by reading it either.
-fn capability_reject(hello: &ClientHello, majors: &[u32]) -> Option<ServerReject> {
-    // The frame is defined from 3.1; a client whose offer does not reach it cannot parse
-    // one, and "a frame the client cannot parse is not a typed refusal".
-    if hello.protocol_versions.high < ProtocolVersion::new(3, 1) {
-        return None;
-    }
-    Some(ServerReject {
+fn capability_reject(hello: &ClientHello, majors: &[u32]) -> Option<RejectFrame> {
+    // The frame is dated (`protocol::since::SERVER_REJECT`); a client whose offer does not
+    // reach it cannot parse one, and "a frame the client cannot parse is not a typed
+    // refusal". `gated` is the one gate every refusal frame passes (cr-88az2y).
+    ServerReject {
         code: ErrorCode::CapabilityDenied,
         detail: result::DENIAL_DETAIL.to_owned(),
         retryable: false,
         majors_served: majors.to_vec(),
-    })
+    }
+    .gated(hello)
 }
 
 /// The stable, non-interpolated text a version refusal carries (INV-016).

@@ -95,6 +95,7 @@
 pub mod cbor;
 pub mod json;
 pub mod operations;
+pub mod versioned;
 
 use std::collections::BTreeMap;
 
@@ -182,6 +183,13 @@ pub trait Document: Sized + Clone + PartialEq + core::fmt::Debug {
 
     /// The map's entries, when this is a map.
     fn as_entries(&self) -> Option<&BTreeMap<String, Self>>;
+
+    /// The array's items, mutably, when this is an array (`codec::versioned` strips in
+    /// place, so a skipped field is dropped rather than copied).
+    fn as_items_mut(&mut self) -> Option<&mut Vec<Self>>;
+
+    /// The map's entries, mutably, when this is a map.
+    fn as_entries_mut(&mut self) -> Option<&mut BTreeMap<String, Self>>;
 
     /// The name of this value's kind, for a typed mismatch report.
     fn kind(&self) -> &'static str;
@@ -316,6 +324,20 @@ impl Document for Json {
         }
     }
 
+    fn as_items_mut(&mut self) -> Option<&mut Vec<Self>> {
+        match self {
+            Self::Array(items) => Some(items),
+            _ => None,
+        }
+    }
+
+    fn as_entries_mut(&mut self) -> Option<&mut BTreeMap<String, Self>> {
+        match self {
+            Self::Object(fields) => Some(fields),
+            _ => None,
+        }
+    }
+
     fn kind(&self) -> &'static str {
         Json::kind(self)
     }
@@ -425,6 +447,20 @@ impl Document for Cbor {
     }
 
     fn as_entries(&self) -> Option<&BTreeMap<String, Self>> {
+        match self {
+            Self::Map(fields) => Some(fields),
+            _ => None,
+        }
+    }
+
+    fn as_items_mut(&mut self) -> Option<&mut Vec<Self>> {
+        match self {
+            Self::Array(items) => Some(items),
+            _ => None,
+        }
+    }
+
+    fn as_entries_mut(&mut self) -> Option<&mut BTreeMap<String, Self>> {
         match self {
             Self::Map(fields) => Some(fields),
             _ => None,

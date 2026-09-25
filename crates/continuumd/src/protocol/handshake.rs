@@ -319,35 +319,74 @@ impl NegotiationError {
     }
 }
 
-/// The first protocol version that defines [`ServerReject`].
-///
-/// A refusal frame is sent *before* a version is negotiated, so it cannot be gated on
-/// one. The gate is the client's own offer instead: a client whose range reaches this
-/// version has told the daemon it can parse the frame.
-const REJECT_FRAME_SINCE: ProtocolVersion = ProtocolVersion::new(3, 1);
-
 /// The first protocol version that defines `CapabilityDescriptor.instances`
-/// (`@since("3.7")`, `rule capability.instance_scope`).
-pub const INSTANCE_SCOPE_SINCE: ProtocolVersion = ProtocolVersion::new(3, 7);
+/// (`@since("3.7")`, `rule capability.instance_scope`). An alias of
+/// [`super::since::INSTANCE_SCOPE`], the one place the date lives.
+pub const INSTANCE_SCOPE_SINCE: ProtocolVersion = super::since::INSTANCE_SCOPE;
 
 impl CapabilityDescriptor {
     /// This descriptor as a connection negotiated at `version` may be told it.
     ///
     /// `rule versioning.compatible_change` forbids emitting a field the negotiated version
-    /// does not define, so below [`INSTANCE_SCOPE_SINCE`] the `instances` field is dropped.
-    /// Admission still enforces it on every request: the report is then wider than the
+    /// does not define, so below [`INSTANCE_SCOPE_SINCE`] the `instances` field is dropped,
+    /// and below [`super::since::CAPABILITY_PROFILE`] the `profile` field is (bn-7xz8v).
+    /// Admission still enforces both on every request: the report is then wider than the
     /// grant, never narrower, and a client acting on it meets `CapabilityDenied`.
     #[must_use]
     pub fn as_reported_at(&self, version: ProtocolVersion) -> Self {
         let mut reported = self.clone();
-        if version < INSTANCE_SCOPE_SINCE {
+        if !super::since::defines(Some(INSTANCE_SCOPE_SINCE), version) {
             reported.instances = super::spec::Optional::Absent;
+        }
+        if !super::since::defines(Some(super::since::CAPABILITY_PROFILE), version) {
+            reported.profile = super::spec::Optional::Absent;
         }
         reported
     }
 }
 
+/// A [`ServerReject`] that has passed `rule handshake.rejection`'s offer gate, and the only
+/// form of one a daemon emits (bn-7xz8v, cr-88az2y).
+///
+/// The field is private and [`ServerReject::gated`] is the one constructor, so a frame
+/// that skipped the gate does not compile where a frame is sent
+/// ([`Server::open`](crate::transport::Server::open), [`Refusal`](crate::daemon::capability::Refusal)).
+/// The gate reads [`super::since::SERVER_REJECT`], the one place the frame's date lives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RejectFrame(ServerReject);
+
+impl RejectFrame {
+    /// The frame's value.
+    #[must_use]
+    pub const fn frame(&self) -> &ServerReject {
+        &self.0
+    }
+}
+
+/// Read access only: a `RejectFrame` is read as the [`ServerReject`] it carries, and is
+/// never built from one except through [`ServerReject::gated`].
+impl core::ops::Deref for RejectFrame {
+    type Target = ServerReject;
+
+    fn deref(&self) -> &ServerReject {
+        &self.0
+    }
+}
+
 impl ServerReject {
+    /// This refusal as a frame the client can be sent, or [`None`] where the connection
+    /// must close without one because the client's offer does not reach
+    /// [`super::since::SERVER_REJECT`]. A refusal is sent *before* a version is
+    /// negotiated, so the gate is the client's own offer: "a frame the client cannot parse is not a typed
+    /// refusal" (`rule handshake.rejection`).
+    #[must_use]
+    pub fn gated(self, hello: &ClientHello) -> Option<RejectFrame> {
+        // Not `since::defines`: no version is negotiated yet, and `rule
+        // handshake.rejection` gates the frame on the offer reaching the frame's date,
+        // "`high` at or above `\"3.1\"`", whatever major `high` names.
+        (hello.protocol_versions.high >= super::since::SERVER_REJECT).then_some(RejectFrame(self))
+    }
+
     /// The typed refusal for `error`, or [`None`] where the connection must be closed
     /// without a frame.
     ///
@@ -373,16 +412,14 @@ impl ServerReject {
         hello: &ClientHello,
         majors_served: &[u32],
         detail: &str,
-    ) -> Option<Self> {
-        if hello.protocol_versions.high < REJECT_FRAME_SINCE {
-            return None;
-        }
-        Some(Self {
+    ) -> Option<RejectFrame> {
+        Self {
             code: error.error_code()?,
             detail: detail.to_owned(),
             retryable: false,
             majors_served: majors_served.to_vec(),
-        })
+        }
+        .gated(hello)
     }
 }
 

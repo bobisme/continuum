@@ -1488,6 +1488,7 @@ fn negative_control_the_census_flags_a_synthetic_carrier_the_table_does_not_cove
     let synthetic = OperationSpec {
         name: "synthetic.carrier",
         authority: AuthorityLevel::Propose,
+        since: None,
         annotations: &[],
         request: StructSpec::of::<WorkspaceSealRequest>(),
         response: StructSpec::of::<WorkspaceSealResponse>(),

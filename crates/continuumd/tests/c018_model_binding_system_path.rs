@@ -77,8 +77,27 @@ const PROFILE: &str = "continuum-engine-reference/finite-closure";
 
 // --- fixtures ----------------------------------------------------------------------------
 
+/// The fixture version, per test thread: 3.4 unless a test pins another ([`at_version`]).
+///
+/// 3.4 since bn-7xz8v. `evidence.link` is `@since("3.3")`, and a connection below an
+/// operation's date is refused it (`OperationSpec::since`). `CertificateRejection`, the
+/// `Error.data` of `CertificateRejected`, is `@since("3.4")`, and below it the data is
+/// withheld (RFC 0026 correction 62). Before that gate this file ran at 3.1 and was served
+/// both. Nothing else it drives changes between 3.1 and 3.4.
 fn version() -> ProtocolVersion {
-    ProtocolVersion::new(3, 1)
+    VERSION.with(std::cell::Cell::get)
+}
+
+std::thread_local! {
+    static VERSION: std::cell::Cell<ProtocolVersion> =
+        const { std::cell::Cell::new(ProtocolVersion::new(3, 4)) };
+}
+
+/// Run the rest of this test at `pinned`: every fixture and envelope below reads
+/// [`version`]. Each test runs on its own thread, so the pin reaches no other test.
+#[allow(dead_code)]
+fn at_version(pinned: ProtocolVersion) {
+    VERSION.with(|version| version.set(pinned));
 }
 
 fn cap(handle: &str) -> CapabilityHandle {
@@ -130,7 +149,8 @@ fn negotiated() -> Negotiated {
         capability: cap("cap_root"),
         features: Optional::Absent,
     };
-    negotiate(&[version()], ProtocolWindow::new(3), ENCODINGS, &hello).expect("3.1 is served")
+    negotiate(&[version()], ProtocolWindow::new(3), ENCODINGS, &hello)
+        .expect("the fixture version is served")
 }
 
 fn daemon() -> Daemon {

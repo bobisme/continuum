@@ -386,8 +386,8 @@ fn scope_twenty_nine_mutations_are_unreachable_and_therefore_unprobed() {
         DECLARED_MUTATIONS,
         "the partition is total"
     );
-    // Protocol 3.8 (bn-3glnv) added six mutations. This rig negotiates 3.1, where they are
-    // not declared: each is refused before admission and before the ledger, exactly as an
+    // Protocol 3.8 (bn-3glnv) added six mutations. This rig negotiates 3.6 (3.1 until
+    // bn-7xz8v gated every operation at its date), where they are not declared: each is refused before admission and before the ledger, exactly as an
     // unshaped operation is, so they are unreachable here. Their idempotency is measured at
     // 3.8 in `daemon_signing.rs` (`a_replayed_rotation_does_not_rotate_twice`).
     assert_eq!(reachable.len(), 18, "eighteen mutations are reachable");
@@ -516,8 +516,12 @@ const PARK_BUDGET: u64 = 4;
 /// The `states` bound that admits Die Hard's whole reachable set.
 const STATE_CEILING: u64 = 64;
 
+/// 3.6 since bn-7xz8v: `workspace.create_by_reference` is `@since("3.6")`, and a connection below an
+/// operation's date is refused it (`OperationSpec::since`). Before that gate this file ran
+/// at 3.1 and was served operations 3.1 does not declare. Nothing else it drives changes
+/// between 3.1 and 3.6.
 fn version() -> ProtocolVersion {
-    ProtocolVersion::new(3, 1)
+    ProtocolVersion::new(3, 6)
 }
 
 fn cap(handle: &str) -> CapabilityHandle {
@@ -582,7 +586,8 @@ fn negotiated() -> Negotiated {
         capability: cap("cap_root"),
         features: Optional::Absent,
     };
-    negotiate(&[version()], ProtocolWindow::new(3), ENCODINGS, &hello).expect("3.1 is served")
+    negotiate(&[version()], ProtocolWindow::new(3), ENCODINGS, &hello)
+        .expect("the fixture version is served")
 }
 
 /// The epochs this file's daemon pins, matching the exit package's own deployment (§8.2).

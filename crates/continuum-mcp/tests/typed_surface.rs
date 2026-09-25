@@ -98,8 +98,11 @@ const FROZEN_STATES: u64 = 16;
 
 // --- fixture -----------------------------------------------------------------------------
 
+/// 3.4 since bn-7xz8v: `CertificateRejection`, the `Error.data` of `CertificateRejected`,
+/// is `@since("3.4")`, and below it the daemon withholds the data (RFC 0026 correction 62).
+/// Nothing else this file drives changes between 3.2 and 3.4.
 fn version() -> ProtocolVersion {
-    ProtocolVersion::new(3, 2)
+    ProtocolVersion::new(3, 4)
 }
 
 fn actor(name: &str) -> ActorId {
@@ -208,7 +211,7 @@ impl Fixture {
             ENCODINGS,
             &hello,
         )
-        .expect("3.2 is served");
+        .expect("the fixture version is served");
 
         let root = Some(capability("cap_root"));
         let mut daemon = Daemon::builder(Blake3Identity, negotiated, capability("cap_root"))

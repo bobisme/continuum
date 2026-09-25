@@ -24,9 +24,10 @@
 //!    macro crate, and no tool that reads the IDL and writes a file.
 //! 3. **What binds the rest to the IDL, and where does that binding stop?** The
 //!    `blindness` module derives, from the checkers' own sources and from the shipped
-//!    spec types, five limits on what the two checkers can report — four that neither
+//!    spec types, the limits on what the two checkers can report — three that neither
 //!    can see at all, and one where the redundancy of "two independent checkers" does
-//!    not reach. `notes/plan/tools/g2_01_conformance_mutation_audit.py` is the empirical
+//!    not reach. A fourth, `@since`, was closed by bn-7xz8v and is now a regression
+//!    guard. `notes/plan/tools/g2_01_conformance_mutation_audit.py` is the empirical
 //!    half: it applies each class as a real mutant on disk and records, per checker,
 //!    whether it was caught, missed, or rejected by the compiler before any checker ran.
 //!
@@ -449,10 +450,11 @@ fn the_two_conformance_checkers_ship_and_read_the_sources_they_claim() {
 }
 
 mod blindness {
-    //! Four divergence classes neither conformance checker can report, each derived
-    //! from the checkers' own text or from the shipped spec types rather than asserted.
+    //! Divergence classes neither conformance checker can report, each derived from the
+    //! checkers' own text or from the shipped spec types rather than asserted. There were
+    //! four; bn-7xz8v closed `@since`, and its two tests below now guard the closure.
     //!
-    //! `notes/plan/tools/g2_01_conformance_mutation_audit.py` demonstrates the same four
+    //! `notes/plan/tools/g2_01_conformance_mutation_audit.py` demonstrates the four
     //! empirically, by putting each on disk and running both checkers against it. Two
     //! methods because a blindness argued from source can be wrong about what the code
     //! does, and a blindness argued from one mutant can be wrong about the class.
@@ -460,7 +462,12 @@ mod blindness {
     use super::{CHECKERS, IDL, read};
 
     #[test]
-    fn since_is_untranscribed_so_no_checker_can_compare_one() {
+    fn since_is_transcribed_and_leg_one_compares_every_date() {
+        // Until bn-7xz8v this test pinned a blindness: no spec type carried a date, leg one
+        // filtered `@since` out by name, and the daemon's version gate was a hand-kept list
+        // of eight operations, so `evidence.link` (3.3) was served on a 3.2 connection
+        // (bn-162z4). It now guards the closure.
+        //
         // The IDL dates declarations with `@since("X.Y")`. Count the declaration sites:
         // the header's own explanatory line is a `//` comment and is not one.
         let idl = read(IDL);
@@ -474,74 +481,90 @@ mod blindness {
         // `ErrorCode::OutcomeUnknown`.
         assert_eq!(sites, 29, "declaration sites carrying @since");
 
-        // None of the seven spec types carries a field to compare them against. This is
-        // structural, not a gap in a comparison: there is nothing on the shipped side to
-        // compare, so no checker built on these types can ever report a stale @since.
+        // `OperationSpec` carries the date the dispatch gate reads, and the one table of
+        // every other date is `protocol::since`.
         let spec = read("crates/continuumd/src/protocol/spec.rs");
+        let start = spec
+            .find("pub struct OperationSpec {")
+            .expect("spec.rs declares OperationSpec");
+        let end = spec[start..].find("\n}\n").expect("the struct closes") + start;
+        assert!(
+            spec[start..end].contains("pub since: Option<"),
+            "OperationSpec carries its `@since` date"
+        );
+        let table = read("crates/continuumd/src/protocol/since.rs");
         for name in [
-            "OperationSpec",
-            "FieldSpec",
-            "StructSpec",
-            "EnumSpec",
-            "UnionSpec",
-            "HandleSpec",
-            "AliasSpec",
+            "pub const FIELDS",
+            "pub const ENUM_MEMBERS",
+            "pub const DECLARATIONS",
         ] {
-            let start = spec
-                .find(&format!("pub struct {name} {{"))
-                .unwrap_or_else(|| panic!("spec.rs declares {name}"));
-            let end = spec[start..].find("\n}\n").expect("the struct closes") + start;
-            let body = &spec[start..end];
-            assert!(
-                !body.contains("since") && !body.contains("version"),
-                "{name} carries a version field, so this blindness claim is stale"
-            );
+            assert!(table.contains(name), "protocol::since declares {name}");
         }
 
-        // And leg one drops the annotation explicitly, on the operation clause where it
-        // would otherwise have survived the parse.
+        // Leg one compares them: operation dates inside the operation comparison, and the
+        // table inside `all_mismatches`, with mutants that re-date each kind.
         let conformance = read(CHECKERS[0]);
         assert!(
-            conformance.contains(r#".filter(|annotation| annotation != "since")"#),
-            "leg one filters @since out of an operation's annotations"
+            conformance.contains("found.extend(since_mismatches(document));"),
+            "leg one compares the `@since` table in its whole-registry check"
         );
+        assert!(
+            conformance.contains("let mine = spec.since.map(|since| since.to_string());"),
+            "leg one compares every operation's date"
+        );
+        assert!(conformance.contains("fn the_date_check_is_not_vacuous()"));
     }
 
     #[test]
-    fn field_and_member_annotations_are_dropped_by_the_parser() {
-        // `fn fields` and the enum-member loop both call `self.annotations()` and discard
-        // the result, so `@pattern`, `@since`, `@redactable` and every other annotation
-        // that sits on a *field* or an *enum member* is invisible to leg one. Only alias
-        // patterns and operation-level annotations survive.
+    fn field_and_member_dates_are_kept_and_every_field_annotation_is_a_date() {
+        // Until bn-7xz8v `fn fields` and the enum-member loop both called
+        // `self.annotations()` and discarded the result, so a field's or a member's
+        // `@since` was invisible to leg one. It now guards the closure: both keep the date,
+        // and every annotation a field carries today is a date, so none is dropped.
         let conformance = read(CHECKERS[0]);
         let fields = conformance
             .find("fn fields(&mut self) -> Vec<Field> {")
             .expect("leg one parses field lists");
-        let body = &conformance[fields..fields + 700];
+        let end = conformance[fields..]
+            .find("\n        }\n")
+            .expect("the field parser closes")
+            + fields;
+        let body = &conformance[fields..end];
         assert!(
-            body.contains("self.annotations();"),
-            "the field parser calls annotations() and discards the value"
+            body.contains("let (_, since) = self.dated_annotations();"),
+            "the field parser keeps the field's `@since`"
         );
+        assert!(body.contains("since,"), "and stores it on the Field");
         assert!(
-            !body.contains("annotations: "),
-            "and stores nothing from it on the Field"
+            conformance.contains("let (_, member_since) = parser.dated_annotations();"),
+            "the enum-member loop keeps the member's `@since`"
         );
-        // The IDL really does carry field-level annotations, so the hole has content:
-        // five fields declare `@since` (four until protocol 3.8 added
-        // `EvidenceGetResponse.signature`), and every pattern-constrained alias member of a
-        // struct relies on the alias declaration for its constraint.
+        // Five fields carry an annotation (four until protocol 3.8 added
+        // `EvidenceGetResponse.signature`), and each is a `@since`, so the parser drops
+        // no field annotation today. A field annotation of another kind fails here first.
         let idl = read(IDL);
-        let annotated_fields = idl
+        let annotated: Vec<&str> = idl
             .lines()
-            .filter(|line| {
-                let trimmed = line.trim_start();
+            .map(str::trim_start)
+            .filter(|trimmed| {
                 !trimmed.starts_with("//")
                     && trimmed.contains(": ")
                     && trimmed.contains('@')
                     && trimmed.ends_with(';')
             })
-            .count();
-        assert_eq!(annotated_fields, 5, "fields carrying an annotation");
+            .collect();
+        assert_eq!(annotated.len(), 5, "fields carrying an annotation");
+        for line in annotated {
+            assert_eq!(
+                line.matches('@').count(),
+                1,
+                "{line}: one annotation per annotated field"
+            );
+            assert!(
+                line.contains("@since(\""),
+                "{line}: the annotation is a date"
+            );
+        }
     }
 
     #[test]

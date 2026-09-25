@@ -120,7 +120,7 @@ use continuum_workspace::publication::ReferenceStore;
 use super::admission::Derived;
 use super::bundle::{BundleBody, BundleContract, SignedBundle, decode_signed, encode_signed};
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
-use super::signing::{AcceptanceClaim, CustodyRefusal, require_signing_version};
+use super::signing::{AcceptanceClaim, CustodyRefusal};
 use super::state::{Acceptance, DaemonState, IntentRecord, RegistryStatus};
 use super::{Services, identity};
 use crate::protocol::envelope::{StructuralVerdictValue, Verdict};
@@ -392,7 +392,10 @@ fn accept(
             unreconciled_custody()
         });
     }
-    let legacy = services.negotiated().protocol_version() < super::signing::SIGNING_SINCE;
+    let legacy = !crate::protocol::since::defines(
+        Some(crate::protocol::since::SIGNING_WIRE),
+        services.negotiated().protocol_version(),
+    );
     if bundle.is_some_and(|handle| legacy || state.signing().bundle(handle).is_none()) {
         return Err(chain_invalid());
     }
@@ -724,7 +727,10 @@ fn lock_acceptance(
         audit_record: call.audit.as_str().to_owned(),
         chain: Vec::new(),
     };
-    if services.negotiated().protocol_version() < super::signing::SIGNING_SINCE {
+    if !crate::protocol::since::defines(
+        Some(crate::protocol::since::SIGNING_WIRE),
+        services.negotiated().protocol_version(),
+    ) {
         return Ok(acceptance);
     }
     let statement = super::acceptance::Statement {
@@ -952,7 +958,6 @@ fn export_bundle(
     state: &mut DaemonState,
     services: &Services,
 ) -> Result<Effect, Fault> {
-    require_signing_version(services)?;
     // Bounded before the set is built.
     if request.intents.len() > super::bundle::MAX_BUNDLE_CONTRACTS {
         return Err(Fault::new(
@@ -1064,7 +1069,6 @@ fn import_bundle(
     state: &mut DaemonState,
     services: &Services,
 ) -> Result<Effect, Fault> {
-    require_signing_version(services)?;
     super::signing::require_custody_version(services, state.signing())?;
     // Checked first, before any decoding: while custody is unreconciled nothing verifies,
     // so the answer is known (review cr-1dc5ii). `verify_bundle` checks again.

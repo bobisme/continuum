@@ -560,8 +560,12 @@ const STEWARD: Principal = Principal {
 // The fixture
 // =====================================================================================
 
+/// 3.3 since bn-7xz8v: the research/35 corpus drives `evidence.link`, which is
+/// `@since("3.3")`, and a connection below an operation's date is refused it
+/// (`OperationSpec::since`). The corpus runner (`g2_injection_corpus_evidence.rs`) takes
+/// the same baseline. Nothing else this file drives changes between 3.2 and 3.3.
 fn version() -> ProtocolVersion {
-    ProtocolVersion::new(3, 2)
+    ProtocolVersion::new(3, 3)
 }
 
 fn cap(handle: &str) -> CapabilityHandle {
@@ -644,7 +648,7 @@ fn negotiated() -> Negotiated {
         ENCODINGS,
         &hello,
     )
-    .expect("3.2 is served")
+    .expect("3.3 is served")
 }
 
 fn die_hard_contract() -> IntentContract {

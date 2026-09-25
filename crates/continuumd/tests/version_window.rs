@@ -61,7 +61,7 @@
 
 use continuum_value::epoch::ProtocolWindow;
 use continuumd::protocol::handshake::{
-    ClientHello, Negotiated, NegotiationError, ServerReject, VersionRange, negotiate,
+    ClientHello, Negotiated, NegotiationError, RejectFrame, ServerReject, VersionRange, negotiate,
 };
 use continuumd::protocol::registry::{ENCODINGS, MAJORS_SERVED, PROTOCOL_VERSION};
 use continuumd::protocol::scalar::{ActorId, CapabilityHandle, ProtocolVersion};
@@ -347,7 +347,7 @@ fn hello_at(low: (u32, u32), high: (u32, u32)) -> ClientHello {
 }
 
 /// The refusal `hello` would produce, if the daemon sends one at all.
-fn reject(hello: &ClientHello) -> Option<ServerReject> {
+fn reject(hello: &ClientHello) -> Option<RejectFrame> {
     let error = negotiate(&implemented(), window(), ENCODINGS, hello)
         .expect_err("this helper is for refusals");
     ServerReject::for_negotiation(error, hello, MAJORS_SERVED, &error.to_string())
@@ -437,4 +437,27 @@ fn the_protocol_version_spelling_round_trips() {
     for bad in ["3", "3.0.0", "03.0", "3.00", "", "3.", ".0", "3.0 ", "v3.0"] {
         assert!(bad.parse::<ProtocolVersion>().is_err(), "{bad:?}");
     }
+}
+
+/// The negotiation refusal for a hello offering exactly `offered`, against a daemon that
+/// implements only 3.4, so both offers below share no version with it.
+fn reject_exactly(offered: (u32, u32)) -> Option<RejectFrame> {
+    let hello = hello_at(offered, offered);
+    let error = negotiate(&[ProtocolVersion::new(3, 4)], window(), ENCODINGS, &hello)
+        .expect_err("no common version");
+    assert_eq!(error, NegotiationError::NoCommonVersion);
+    ServerReject::for_negotiation(error, &hello, MAJORS_SERVED, &error.to_string())
+}
+
+#[test]
+fn the_negotiation_refusal_frame_is_gated_at_its_date() {
+    // `ServerReject` is `@since("3.1")` (`protocol::since::SERVER_REJECT`). Every refusal
+    // frame passes `ServerReject::gated`, the one gate (bn-7xz8v, cr-88az2y).
+    assert_eq!(
+        reject_exactly((3, 0)),
+        None,
+        "an offer reaching only 3.0 gets no frame"
+    );
+    let frame = reject_exactly((3, 1)).expect("an offer reaching 3.1 gets the frame");
+    assert_eq!(frame.code, ErrorCode::ProtocolVersionUnsupported);
 }

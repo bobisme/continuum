@@ -2453,31 +2453,41 @@ const IDL: &str = include_str!("../../../notes/plan/schemas/continuumd-native-pr
 
 #[test]
 fn the_version_gate_is_exactly_the_idls_3_8_operations() {
-    // Every `operation NAME {` the IDL dates `@since("3.8")` on the line above.
+    // Every `operation NAME {` the IDL dates `@since("X.Y")` on the line above, read from the
+    // text. Before bn-7xz8v the gate was a hand-kept list of the eight 3.8 operations, and
+    // this test compared only those, so `evidence.link` (3.3), `whiteboard.compile` (3.5),
+    // and `workspace.create_by_reference` (3.6) were served undated. Now every operation's
+    // gate is compared, dated or not.
     let lines: Vec<&str> = IDL.lines().collect();
-    let dated: Vec<&str> = lines
+    let dated: Vec<(&str, &str)> = lines
         .windows(2)
-        .filter(|pair| pair[0].trim() == "@since(\"3.8\")")
         .filter_map(|pair| {
-            pair[1]
+            let since = pair[0]
+                .trim()
+                .strip_prefix("@since(\"")
+                .and_then(|rest| rest.strip_suffix("\")"))?;
+            let name = pair[1]
                 .trim()
                 .strip_prefix("operation ")
-                .and_then(|rest| rest.strip_suffix(" {"))
+                .and_then(|rest| rest.strip_suffix(" {"))?;
+            Some((name, since))
         })
         .collect();
     assert_eq!(
-        dated.len(),
+        dated.iter().filter(|(_, since)| *since == "3.8").count(),
         8,
         "six signing operations and two bundle operations"
     );
+    assert_eq!(dated.len(), 11, "and three earlier additions: {dated:?}");
     for spec in registry::OPERATIONS {
-        let gated = registry::introduced_at(spec.name);
-        if dated.contains(&spec.name) {
-            assert_eq!(gated, Some(v38()), "{} is dated 3.8 in the IDL", spec.name);
-        } else {
-            assert_eq!(gated, None, "{} is not dated 3.8 in the IDL", spec.name);
-        }
+        let gated = registry::introduced_at(spec.name).map(|since| since.to_string());
+        let declared = dated
+            .iter()
+            .find(|(name, _)| *name == spec.name)
+            .map(|(_, since)| (*since).to_owned());
+        assert_eq!(gated, declared, "{}: the gate is the IDL's date", spec.name);
     }
+    assert!(registry::introduced_at("signing.mint") == Some(v38()));
 }
 
 #[test]

@@ -367,7 +367,10 @@ fn create(
     check_epochs(&request.components, services)?;
     check_unsupported_components(&request.components)?;
 
-    let placement = declared_placement(&request.components)?;
+    let placement = declared_placement(
+        &request.components,
+        services.negotiated().protocol_version(),
+    )?;
 
     // Resolve the staged content before touching any state, so a request naming content the
     // daemon does not hold leaves nothing behind.
@@ -500,7 +503,18 @@ fn create(
     // seam cannot name it simply holds no reference to it — the by-reference lane then
     // denies, which is the typed outcome for a set the daemon does not hold. Every byte
     // `workspace.create` sends and receives is what 3.5 sent and received.
-    let _ = state.register_components(services.identifier(), request.components.clone());
+    //
+    // Below 3.2 `file_components` is not defined, and it was ignored above; the registered
+    // set carries it absent too, so a by-reference create of the same set is served as
+    // this inline create was (`rule snapshot.by_reference`, bn-7xz8v).
+    let mut registered = request.components.clone();
+    if !crate::protocol::since::defines(
+        Some(crate::protocol::since::FILE_COMPONENTS),
+        services.negotiated().protocol_version(),
+    ) {
+        registered.file_components = Optional::Absent;
+    }
+    let _ = state.register_components(services.identifier(), registered);
 
     Ok(Effect::new(
         Payload::WorkspaceCreate(WorkspaceCreateResponse {
@@ -844,9 +858,19 @@ fn check_unsupported_components(components: &SnapshotComponents) -> Result<(), F
 /// daemon resolves it from what was staged out of band. That lane is not a workaround any
 /// more — it is what a 3.0/3.1 client sends, and `rule versioning.compatible_change`
 /// requires it to keep working.
+///
+/// On a connection negotiated below 3.2 the field is not defined, so it is an unknown
+/// optional request field, which "Servers MUST ignore" (`rule
+/// versioning.compatible_change`, bn-7xz8v): the request takes the pre-3.2 lane whatever
+/// value it carries there. Over the wire the codec drops the field before decoding it
+/// (`codec::versioned`); this check covers a caller that dispatches typed arguments.
 fn declared_placement(
     components: &SnapshotComponents,
+    version: crate::protocol::scalar::ProtocolVersion,
 ) -> Result<Option<&Vec<crate::protocol::shared::FileComponent>>, Fault> {
+    if !crate::protocol::since::defines(Some(crate::protocol::since::FILE_COMPONENTS), version) {
+        return Ok(None);
+    }
     let Optional::Present(declared) = &components.file_components else {
         return Ok(None);
     };
@@ -1044,4 +1068,55 @@ fn artifact(handle: &WorkspaceHandle) -> Result<ArtifactRef, Fault> {
 
 fn structural(outcome: StructuralOutcome) -> Nullable<Verdict> {
     Nullable::Value(Verdict::Structural(StructuralVerdictValue { outcome }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::family::Arguments;
+    use crate::protocol::scalar::{Opaque, ProtocolVersion};
+
+    /// `workspace.create`'s components, with a `file_components` list that disagrees with
+    /// `files` (a different commitment).
+    fn disagreeing() -> SnapshotComponents {
+        let body = br#"{"components":{"cml_modules":[],"configuration":[],"correspondence":[],
+            "dependencies":[],"domain_packs":[],"epochs":{"proof":"p","semantic":"s"},
+            "file_components":[{"commitment":"sha256:01","path":"A.ctm"}],
+            "files":["sha256:00"],"intent":"in_x","proof_environment":[],
+            "rust_extraction":[]}}"#;
+        let body: Vec<u8> = body
+            .iter()
+            .copied()
+            .filter(|b| *b != b'\n' && *b != b' ')
+            .collect();
+        match crate::codec::operations::decode_arguments(
+            "workspace.create",
+            &Opaque::from_bytes(body),
+        )
+        .expect("the body decodes")
+        {
+            Arguments::WorkspaceCreate(request) => request.components,
+            other => panic!("decoded as {other:?}"),
+        }
+    }
+
+    #[test]
+    fn file_components_are_checked_from_their_date() {
+        let components = disagreeing();
+        let refused = declared_placement(&components, ProtocolVersion::new(3, 2))
+            .expect_err("a disagreement is refused at 3.2");
+        assert_eq!(refused.code, ErrorCode::MalformedRequest);
+    }
+
+    #[test]
+    fn file_components_are_ignored_below_their_date() {
+        // `@since("3.2")`: below it the field is an unknown optional request field, which
+        // "Servers MUST ignore" (`rule versioning.compatible_change`, bn-7xz8v).
+        let components = disagreeing();
+        for minor in [0, 1] {
+            let placement = declared_placement(&components, ProtocolVersion::new(3, minor))
+                .expect("ignored, not refused");
+            assert!(placement.is_none(), "3.{minor} takes the pre-3.2 lane");
+        }
+    }
 }

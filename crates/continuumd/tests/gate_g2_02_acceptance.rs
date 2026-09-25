@@ -934,8 +934,12 @@ const RECEIPT: &str = "{\"receipt\":\"kernel-core\"}\n";
 const PROFILE: &str = "otel-1.0/sampled";
 
 /// The protocol version every connection in this file negotiates.
+/// 3.6 since bn-7xz8v: `workspace.create_by_reference` is `@since("3.6")`, and a connection below an
+/// operation's date is refused it (`OperationSpec::since`). Before that gate this file ran
+/// at 3.1 and was served operations 3.1 does not declare. Nothing else it drives changes
+/// between 3.1 and 3.6.
 fn version() -> ProtocolVersion {
-    ProtocolVersion::new(3, 1)
+    ProtocolVersion::new(3, 6)
 }
 
 /// A capability handle.
@@ -1022,7 +1026,8 @@ fn negotiated() -> Negotiated {
         capability: cap("cap_root"),
         features: Optional::Absent,
     };
-    negotiate(&[version()], ProtocolWindow::new(3), ENCODINGS, &hello).expect("3.1 is served")
+    negotiate(&[version()], ProtocolWindow::new(3), ENCODINGS, &hello)
+        .expect("the fixture version is served")
 }
 
 /// An empty budget.

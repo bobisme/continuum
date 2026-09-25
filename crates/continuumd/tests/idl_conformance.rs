@@ -162,12 +162,16 @@ mod idl {
         pub name: String,
         pub ty: String,
         pub presence: String,
+        /// The field's `@since` argument, verbatim.
+        pub since: Option<String>,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct Member {
         pub ident: String,
         pub wire: String,
+        /// The member's `@since` argument, verbatim.
+        pub since: Option<String>,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,12 +179,14 @@ mod idl {
         pub name: String,
         pub open: bool,
         pub members: Vec<Member>,
+        pub since: Option<String>,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct Struct {
         pub name: String,
         pub fields: Vec<Field>,
+        pub since: Option<String>,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,6 +213,8 @@ mod idl {
         pub events: Option<String>,
         pub verdict: Option<String>,
         pub errors: Vec<String>,
+        /// The operation's `@since` argument, verbatim.
+        pub since: Option<String>,
     }
 
     #[derive(Debug, Clone, Default)]
@@ -220,6 +228,8 @@ mod idl {
         pub unions: Vec<Union>,
         pub operations: Vec<Operation>,
         pub rules: Vec<String>,
+        /// `(alias, @since)` for every dated alias.
+        pub alias_since: Vec<(String, String)>,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -279,18 +289,28 @@ mod idl {
             }
         }
 
-        /// Consume `@name` and `@name(args)` annotations, returning their names.
-        fn annotations(&mut self) -> Vec<String> {
+        /// Consume `@name` and `@name(args)` annotations, returning their names and the
+        /// argument of `@since`, which MUST be one string literal. A second `@since` on
+        /// one item is a panic, never a silent choice between them.
+        fn dated_annotations(&mut self) -> (Vec<String>, Option<String>) {
             let mut names = Vec::new();
+            let mut since = None;
             while self.eat('@') {
-                names.push(self.ident());
-                if self.eat('(') {
+                let name = self.ident();
+                if name == "since" {
+                    self.punct('(');
+                    let argument = self.text();
+                    self.punct(')');
+                    assert!(since.is_none(), "an item carries two `@since` annotations");
+                    since = Some(argument);
+                } else if self.eat('(') {
                     while !self.eat(')') {
                         self.at += 1;
                     }
                 }
+                names.push(name);
             }
-            names
+            (names, since)
         }
 
         fn ty(&mut self) -> String {
@@ -326,9 +346,14 @@ mod idl {
                     matches!(presence.as_str(), "required" | "optional" | "nullable"),
                     "field {name} has presence {presence:?}"
                 );
-                self.annotations();
+                let (_, since) = self.dated_annotations();
                 self.punct(';');
-                fields.push(Field { name, ty, presence });
+                fields.push(Field {
+                    name,
+                    ty,
+                    presence,
+                    since,
+                });
             }
             fields
         }
@@ -359,10 +384,13 @@ mod idl {
         };
         let mut document = Document::default();
         while parser.peek().is_some() {
-            let annotations = parser.annotations();
+            let (annotations, since) = parser.dated_annotations();
             let keyword = parser.ident();
             match keyword.as_str() {
                 "protocol" => {
+                    // No `@since` is transcribed for a protocol; one here would be dropped
+                    // silently, so it is a failure until it is (bn-7xz8v).
+                    assert!(since.is_none(), "a dated protocol is not transcribed");
                     parser.ident();
                     parser.punct('.');
                     parser.ident();
@@ -398,10 +426,16 @@ mod idl {
                     }
                 }
                 "scalar" => {
+                    // No `@since` is transcribed for a scalar; one here would be dropped
+                    // silently, so it is a failure until it is (bn-7xz8v).
+                    assert!(since.is_none(), "a dated scalar is not transcribed");
                     document.scalars.push(parser.ident());
                     parser.punct(';');
                 }
                 "handle" => {
+                    // No `@since` is transcribed for a handle; one here would be dropped
+                    // silently, so it is a failure until it is (bn-7xz8v).
+                    assert!(since.is_none(), "a dated handle is not transcribed");
                     let name = parser.ident();
                     parser.punct('=');
                     let prefix = parser.text();
@@ -420,8 +454,13 @@ mod idl {
                             parser.punct(')');
                             if annotation == "pattern" {
                                 pattern = Some(argument);
+                            } else if annotation == "since" {
+                                document.alias_since.push((name.clone(), argument));
                             }
                         }
+                    }
+                    if let Some(since) = since {
+                        document.alias_since.push((name.clone(), since));
                     }
                     parser.punct(';');
                     document.aliases.push((name, base, pattern));
@@ -437,22 +476,34 @@ mod idl {
                         } else {
                             ident.clone()
                         };
-                        parser.annotations();
+                        let (_, member_since) = parser.dated_annotations();
                         parser.punct(',');
-                        members.push(Member { ident, wire });
+                        members.push(Member {
+                            ident,
+                            wire,
+                            since: member_since,
+                        });
                     }
                     document.enums.push(Enum {
                         name,
                         open: annotations.iter().any(|item| item == "open"),
                         members,
+                        since,
                     });
                 }
                 "struct" => {
                     let name = parser.ident();
                     let fields = parser.fields();
-                    document.structs.push(Struct { name, fields });
+                    document.structs.push(Struct {
+                        name,
+                        fields,
+                        since,
+                    });
                 }
                 "union" => {
+                    // No `@since` is transcribed for a union; one here would be dropped
+                    // silently, so it is a failure until it is (bn-7xz8v).
+                    assert!(since.is_none(), "a dated union is not transcribed");
                     let name = parser.ident();
                     parser.punct('{');
                     let mut variants = Vec::new();
@@ -529,6 +580,7 @@ mod idl {
                         events,
                         verdict,
                         errors: errors.expect("an operation declares an errors clause"),
+                        since,
                     });
                 }
                 "rule" => {
@@ -713,6 +765,15 @@ fn operation_mismatches(document: &idl::Document) -> Vec<String> {
         let theirs: Vec<&str> = operation.annotations.iter().map(String::as_str).collect();
         if mine != theirs {
             found.push(format!("{name}: annotations {mine:?} != IDL {theirs:?}"));
+        }
+
+        // The version gate (bn-7xz8v): every operation's date, dated or not, is the IDL's.
+        let mine = spec.since.map(|since| since.to_string());
+        if mine != operation.since {
+            found.push(format!(
+                "{name}: since {mine:?} != IDL {:?} (the dispatch version gate reads this)",
+                operation.since
+            ));
         }
 
         found.extend(body_mismatches(
@@ -923,8 +984,108 @@ fn identity_mismatches(document: &idl::Document) -> Vec<String> {
     found
 }
 
+/// Every field the IDL dates, as `(declaring type, field, @since)`: named structs by their
+/// name, anonymous bodies by their generated name.
+fn dated_fields(document: &idl::Document) -> std::collections::BTreeSet<(String, String, String)> {
+    let mut dated = std::collections::BTreeSet::new();
+    let mut add = |owner: &str, fields: &[idl::Field]| {
+        for field in fields {
+            if let Some(since) = &field.since {
+                dated.insert((owner.to_owned(), field.name.clone(), since.clone()));
+            }
+        }
+    };
+    for item in &document.structs {
+        add(&item.name, &item.fields);
+    }
+    for operation in &document.operations {
+        for (body, suffix) in [
+            (&operation.request, "Request"),
+            (&operation.response, "Response"),
+        ] {
+            if let idl::Body::Anonymous(fields) = body {
+                add(&idl::generated_name(&operation.name, suffix), fields);
+            }
+        }
+    }
+    dated
+}
+
+/// The `@since` table (`continuumd::protocol::since`) against the IDL: every dated field,
+/// enum member, and named declaration, in both directions. Operations are compared in
+/// [`operation_mismatches`], through `OperationSpec::since`.
+fn since_mismatches(document: &idl::Document) -> Vec<String> {
+    use continuumd::protocol::since;
+    use std::collections::BTreeSet;
+
+    fn compare(
+        found: &mut Vec<String>,
+        kind: &str,
+        mine: &BTreeSet<(String, String, String)>,
+        theirs: &BTreeSet<(String, String, String)>,
+    ) {
+        for item in theirs.difference(mine) {
+            found.push(format!(
+                "IDL dates {kind} {}.{} @since({:?}); `protocol::since` does not",
+                item.0, item.1, item.2
+            ));
+        }
+        for item in mine.difference(theirs) {
+            found.push(format!(
+                "`protocol::since` dates {kind} {}.{} at {:?}; the IDL does not",
+                item.0, item.1, item.2
+            ));
+        }
+    }
+
+    let mut found = Vec::new();
+    let triple =
+        |(owner, item, at): &(&str, &str, continuumd::protocol::scalar::ProtocolVersion)| {
+            ((*owner).to_owned(), (*item).to_owned(), at.to_string())
+        };
+
+    let mine: BTreeSet<_> = since::FIELDS.iter().map(triple).collect();
+    compare(&mut found, "field", &mine, &dated_fields(document));
+
+    let theirs: BTreeSet<_> = document
+        .enums
+        .iter()
+        .flat_map(|item| {
+            item.members.iter().filter_map(move |member| {
+                member
+                    .since
+                    .clone()
+                    .map(|since| (item.name.clone(), member.ident.clone(), since))
+            })
+        })
+        .collect();
+    let mine: BTreeSet<_> = since::ENUM_MEMBERS.iter().map(triple).collect();
+    compare(&mut found, "enum member", &mine, &theirs);
+
+    let theirs: BTreeSet<_> = document
+        .structs
+        .iter()
+        .filter_map(|item| item.since.clone().map(|since| (item.name.clone(), since)))
+        .chain(
+            document
+                .enums
+                .iter()
+                .filter_map(|item| item.since.clone().map(|since| (item.name.clone(), since))),
+        )
+        .chain(document.alias_since.iter().cloned())
+        .map(|(name, since)| (name, String::new(), since))
+        .collect();
+    let mine: BTreeSet<_> = since::DECLARATIONS
+        .iter()
+        .map(|(name, at)| ((*name).to_owned(), String::new(), at.to_string()))
+        .collect();
+    compare(&mut found, "declaration", &mine, &theirs);
+    found
+}
+
 fn all_mismatches(document: &idl::Document) -> Vec<String> {
     let mut found = identity_mismatches(document);
+    found.extend(since_mismatches(document));
     found.extend(operation_mismatches(document));
     found.extend(struct_mismatches(document));
     found.extend(enum_mismatches(document));
@@ -1406,5 +1567,295 @@ fn a_removed_operation_is_reported() {
             .iter()
             .any(|item| item.contains("workspace.seal") || item.contains("82")),
         "removing an operation must be reported, got {found:?}"
+    );
+}
+
+// =====================================================================================
+// The version dates (bn-7xz8v)
+// =====================================================================================
+
+#[test]
+fn every_operation_date_is_the_idls_own() {
+    // bn-162z4 found `evidence.link` (`@since("3.3")`) served on a 3.2 connection, because
+    // the dispatch gate was a hand-kept list of the eight 3.8 operations. The gate now reads
+    // `OperationSpec::since`, and this compares that date with the IDL's for all 83
+    // operations, dated or not, so an operation cannot be added or re-dated without its gate.
+    let document = document();
+    let dated: Vec<&str> = document
+        .operations
+        .iter()
+        .filter(|operation| operation.since.is_some())
+        .map(|operation| operation.name.as_str())
+        .collect();
+    assert_eq!(
+        dated.len(),
+        11,
+        "eleven operations carry `@since`: {dated:?}"
+    );
+    let found: Vec<String> = operation_mismatches(&document)
+        .into_iter()
+        .filter(|item| item.contains("since"))
+        .collect();
+    assert_agrees(&found);
+    for spec in OPERATIONS {
+        assert_eq!(
+            continuumd::protocol::registry::introduced_at(spec.name),
+            spec.since,
+            "{}: `registry::introduced_at` is the spec's own date",
+            spec.name
+        );
+    }
+}
+
+#[test]
+fn every_dated_field_member_and_declaration_is_in_the_since_table() {
+    assert_agrees(&since_mismatches(&document()));
+}
+
+#[test]
+fn the_error_code_gate_is_the_since_table_for_every_code() {
+    use continuumd::daemon::errors::introduced_at;
+    use continuumd::protocol::since::ENUM_MEMBERS;
+    use continuumd::protocol::vocabulary::ErrorCode;
+
+    for code in ErrorCode::ALL {
+        let tabled = ENUM_MEMBERS
+            .iter()
+            .find(|(owner, member, _)| *owner == "ErrorCode" && *member == code.ident())
+            .map(|(_, _, since)| *since);
+        assert_eq!(
+            introduced_at(*code),
+            tabled,
+            "{code:?}: the emission gate and the `@since` table disagree"
+        );
+    }
+    // Only `ErrorCode` has dated members today. A dated member of another enum needs its
+    // own emission gate, and this is the reminder that it has none yet.
+    assert!(
+        ENUM_MEMBERS
+            .iter()
+            .all(|(owner, _, _)| *owner == "ErrorCode"),
+        "a dated member of an enum other than `ErrorCode` has no emission gate"
+    );
+}
+
+/// The types a type expression names: `T`, `list<T>`, `map<K,V>`.
+fn named_types(ty: &str) -> Vec<&str> {
+    ty.split(['<', '>', ','])
+        .filter(|part| !part.is_empty() && *part != "list" && *part != "map")
+        .collect()
+}
+
+#[test]
+fn a_dated_declaration_is_reached_only_through_items_dated_no_earlier() {
+    // A declaration reaches the wire only through a field, a union variant, or an operation
+    // body. If each of those is dated no earlier than the declaration it names, gating the
+    // operations and the fields gates the declarations too.
+    use continuumd::protocol::scalar::ProtocolVersion;
+    use continuumd::protocol::since::DECLARATIONS;
+
+    let document = document();
+    let parse = |since: &Option<String>| -> Option<ProtocolVersion> {
+        since
+            .as_ref()
+            .map(|text| text.parse().expect("an `@since` argument is `major.minor`"))
+    };
+    let later = |a: Option<ProtocolVersion>, b: Option<ProtocolVersion>| a.max(b);
+    // (where, the type named, the date of the naming item)
+    let mut uses: Vec<(String, String, Option<ProtocolVersion>)> = Vec::new();
+    for item in &document.structs {
+        for field in &item.fields {
+            let at = later(parse(&item.since), parse(&field.since));
+            for ty in named_types(&field.ty) {
+                uses.push((format!("{}.{}", item.name, field.name), ty.to_owned(), at));
+            }
+        }
+    }
+    for operation in &document.operations {
+        let op_since = parse(&operation.since);
+        for (body, suffix) in [
+            (&operation.request, "Request"),
+            (&operation.response, "Response"),
+        ] {
+            match body {
+                idl::Body::Named(name) => {
+                    uses.push((
+                        format!("{} {suffix}", operation.name),
+                        name.clone(),
+                        op_since,
+                    ));
+                }
+                idl::Body::Anonymous(fields) => {
+                    for field in fields {
+                        let at = later(op_since, parse(&field.since));
+                        for ty in named_types(&field.ty) {
+                            uses.push((
+                                format!("{} {suffix}.{}", operation.name, field.name),
+                                ty.to_owned(),
+                                at,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        for named in operation.events.iter().chain(operation.verdict.iter()) {
+            uses.push((operation.name.clone(), named.clone(), op_since));
+        }
+    }
+    for union in &document.unions {
+        for (variant, ty) in &union.variants {
+            uses.push((format!("{}.{variant}", union.name), ty.clone(), None));
+        }
+    }
+
+    let mut unreached = Vec::new();
+    for (name, since) in DECLARATIONS {
+        let mut reached = false;
+        for (site, ty, at) in &uses {
+            if ty == name {
+                reached = true;
+                assert!(
+                    at.is_some_and(|at| at >= *since),
+                    "{site} names {name} (@since {since}) but is itself dated {at:?}: a \
+                     connection below {since} could be sent it"
+                );
+            }
+        }
+        if !reached {
+            unreached.push(*name);
+        }
+    }
+    // Two dated declarations are named by no field, so each is gated where it is emitted.
+    unreached.sort_unstable();
+    assert_eq!(
+        unreached,
+        ["CertificateRejection", "ServerReject"],
+        "every dated declaration no field reaches has an emission gate below"
+    );
+    emission_gates_hold_by_construction();
+}
+
+/// The emission gates of the two dated declarations no field reaches, checked as
+/// structure rather than as one path (bn-7xz8v, cr-88az2y).
+///
+/// - `ServerReject`: the transport sends only a `RejectFrame` (`Server::open`), and
+///   `Refusal.frame` carries one. `RejectFrame`'s field is private and `ServerReject::gated`
+///   is its one constructor, so an ungated refusal does not compile where a frame is sent,
+///   whichever path built it. The gate reads `protocol::since::SERVER_REJECT`.
+/// - `CertificateRejection` (and `ResultEnvelope.audit`): every answer `Daemon` gives passes
+///   `emitted_at`. The dispatch body (`fn answer`) is private and called once, from
+///   `dispatch_or_die`, which applies `emitted_at`; `refuse` applies it too.
+fn emission_gates_hold_by_construction() {
+    let root = format!("{}/src", env!("CARGO_MANIFEST_DIR"));
+    let read = |file: &str| {
+        std::fs::read_to_string(format!("{root}/{file}"))
+            .unwrap_or_else(|error| panic!("{file}: {error}"))
+    };
+    let mut all = String::new();
+    let mut pending = vec![std::path::PathBuf::from(&root)];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).expect("a source directory") {
+            let path = entry.expect("an entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                all.push_str(&std::fs::read_to_string(&path).expect("a source file"));
+            }
+        }
+    }
+
+    // ServerReject.
+    let handshake = read("protocol/handshake.rs");
+    assert!(
+        handshake.contains("pub struct RejectFrame(ServerReject);"),
+        "the field is private"
+    );
+    assert!(
+        handshake.contains(
+            "(hello.protocol_versions.high >= super::since::SERVER_REJECT).then_some(RejectFrame(self))"
+        ),
+        "`gated` reads the date from `protocol::since`"
+    );
+    assert_eq!(
+        all.matches("RejectFrame(").count(),
+        2,
+        "`RejectFrame(` appears only in its declaration and in `gated`"
+    );
+    assert!(read("transport/mod.rs").contains("reject: Option<&RejectFrame>,"));
+    assert!(read("daemon/capability.rs").contains("pub frame: Option<RejectFrame>,"));
+
+    // CertificateRejection and `ResultEnvelope.audit`.
+    let daemon = read("daemon/mod.rs");
+    assert!(
+        daemon.contains("    fn answer(\n"),
+        "the dispatch body is private"
+    );
+    assert_eq!(daemon.matches("self.answer(").count(), 1, "and called once");
+    assert!(
+        daemon.contains("emitted_at(&mut outcome, version);"),
+        "by `dispatch_or_die`, through `emitted_at`"
+    );
+    assert!(
+        daemon.contains("emitted_at(&mut refused, version);"),
+        "`refuse` too"
+    );
+    assert!(daemon.contains("if !defines(Some(CERTIFICATE_REJECTION), version) {"));
+    assert!(daemon.contains("if !defines(Some(RESULT_AUDIT), version) {"));
+}
+
+#[test]
+fn the_date_check_is_not_vacuous() {
+    let source = std::fs::read_to_string(IDL_PATH).expect("the normative IDL is readable");
+    let cases: [(&str, &str, &str); 5] = [
+        (
+            "an undated operation dated",
+            "operation workspace.seal {",
+            "@since(\"3.9\")\noperation workspace.seal {",
+        ),
+        (
+            "a dated operation re-dated",
+            "@since(\"3.3\")\noperation evidence.link {",
+            "@since(\"3.4\")\noperation evidence.link {",
+        ),
+        (
+            "a dated operation undated",
+            "@since(\"3.5\")\noperation whiteboard.compile {",
+            "operation whiteboard.compile {",
+        ),
+        (
+            "a dated field undated",
+            "signature: Bytes optional @since(\"3.8\");",
+            "signature: Bytes optional;",
+        ),
+        (
+            "a dated enum member re-dated",
+            "OutcomeUnknown @since(\"3.9\"),",
+            "OutcomeUnknown @since(\"3.8\"),",
+        ),
+    ];
+    for (label, from, to) in cases {
+        let mutated = mutate(&source, from, to);
+        let found = all_mismatches(&idl::parse(&mutated));
+        assert!(
+            !found.is_empty(),
+            "{label}: the mutated IDL was accepted; the date check is vacuous for this class"
+        );
+    }
+}
+
+#[test]
+fn a_new_dated_operation_without_a_gate_is_reported() {
+    // An operation added to the IDL with a date must arrive with a registry row, and so
+    // with `OperationSpec::since`, which the struct makes mandatory.
+    let source = std::fs::read_to_string(IDL_PATH).expect("the normative IDL is readable");
+    let mutated = format!(
+        "{source}\n@since(\"3.9\") @readonly\noperation evidence.novel {{\n  authority read;\n  \
+         request {{ }};\n  response {{ }};\n  errors [];\n}}\n"
+    );
+    let found = all_mismatches(&idl::parse(&mutated));
+    assert!(
+        found.iter().any(|item| item.contains("evidence.novel")),
+        "a new operation must be reported, got {found:?}"
     );
 }

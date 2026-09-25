@@ -32,12 +32,13 @@
 
 use crate::codec::cbor::Cbor;
 use crate::codec::json::Json;
+use crate::codec::versioned::read_at;
 use crate::codec::{CodecError, Document, from_opaque_in, to_opaque_in};
 use crate::daemon::family::{Arguments, ErrorData, Payload};
 use crate::protocol::operations::{
     context, evidence, intent, observe, signing, task, verification, whiteboard, workspace,
 };
-use crate::protocol::scalar::Opaque;
+use crate::protocol::scalar::{Opaque, ProtocolVersion};
 use crate::protocol::vocabulary::ErrorCode;
 
 /// Decode an envelope's `arguments` into the typed request body its operation declares.
@@ -51,150 +52,199 @@ pub fn decode_arguments_in<D: Document>(
     operation: &str,
     arguments: &Opaque,
 ) -> Result<Arguments, CodecError> {
+    decode_arguments_with::<D>(operation, arguments, None)
+}
+
+/// Decode an envelope's `arguments` as a connection negotiated at `version` reads them:
+/// a request field `version` does not define is ignored, not decoded, and every other
+/// field is decoded strictly ([`crate::codec::versioned`], bn-7xz8v). This is what the
+/// transport calls.
+///
+/// # Errors
+///
+/// As [`decode_arguments_in`].
+pub fn decode_arguments_at<D: Document>(
+    operation: &str,
+    arguments: &Opaque,
+    version: ProtocolVersion,
+) -> Result<Arguments, CodecError> {
+    decode_arguments_with::<D>(operation, arguments, Some(version))
+}
+
+fn decode_arguments_with<D: Document>(
+    operation: &str,
+    arguments: &Opaque,
+    version: Option<ProtocolVersion>,
+) -> Result<Arguments, CodecError> {
     Ok(match operation {
-        "workspace.create" => Arguments::WorkspaceCreate(from_opaque_in::<
+        "workspace.create" => Arguments::WorkspaceCreate(read_at::<
             D,
             workspace::WorkspaceCreateRequest,
-        >(arguments)?),
-        "workspace.fork" => Arguments::WorkspaceFork(from_opaque_in::<
-            D,
-            workspace::WorkspaceForkRequest,
-        >(arguments)?),
-        "workspace.diff" => Arguments::WorkspaceDiff(from_opaque_in::<
-            D,
-            workspace::WorkspaceDiffRequest,
-        >(arguments)?),
-        "workspace.seal" => Arguments::WorkspaceSeal(from_opaque_in::<
-            D,
-            workspace::WorkspaceSealRequest,
-        >(arguments)?),
-        "intent.get" => {
-            Arguments::IntentGet(from_opaque_in::<D, intent::IntentGetRequest>(arguments)?)
-        }
-        "intent.diff" => {
-            Arguments::IntentDiff(from_opaque_in::<D, intent::IntentDiffRequest>(arguments)?)
-        }
-        "intent.propose_revision" => Arguments::IntentProposeRevision(from_opaque_in::<
-            D,
-            intent::IntentProposeRevisionRequest,
-        >(arguments)?),
-        "intent.accept" => {
-            Arguments::IntentAccept(from_opaque_in::<D, intent::IntentAcceptRequest>(arguments)?)
-        }
-        "intent.reject" => {
-            Arguments::IntentReject(from_opaque_in::<D, intent::IntentRejectRequest>(arguments)?)
-        }
-        "intent.lock" => {
-            Arguments::IntentLock(from_opaque_in::<D, intent::IntentLockRequest>(arguments)?)
-        }
-        "evidence.get" => Arguments::EvidenceGet(
-            from_opaque_in::<D, evidence::EvidenceGetRequest>(arguments)?,
+        >(arguments.as_bytes(), version)?),
+        "workspace.fork" => Arguments::WorkspaceFork(
+            read_at::<D, workspace::WorkspaceForkRequest>(arguments.as_bytes(), version)?,
         ),
-        "evidence.query" => Arguments::EvidenceQuery(from_opaque_in::<
-            D,
-            evidence::EvidenceQueryRequest,
-        >(arguments)?),
-        "evidence.verify" => Arguments::EvidenceVerify(from_opaque_in::<
+        "workspace.diff" => Arguments::WorkspaceDiff(
+            read_at::<D, workspace::WorkspaceDiffRequest>(arguments.as_bytes(), version)?,
+        ),
+        "workspace.seal" => Arguments::WorkspaceSeal(
+            read_at::<D, workspace::WorkspaceSealRequest>(arguments.as_bytes(), version)?,
+        ),
+        "intent.get" => Arguments::IntentGet(read_at::<D, intent::IntentGetRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "intent.diff" => Arguments::IntentDiff(read_at::<D, intent::IntentDiffRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "intent.propose_revision" => {
+            Arguments::IntentProposeRevision(read_at::<D, intent::IntentProposeRevisionRequest>(
+                arguments.as_bytes(),
+                version,
+            )?)
+        }
+        "intent.accept" => Arguments::IntentAccept(read_at::<D, intent::IntentAcceptRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "intent.reject" => Arguments::IntentReject(read_at::<D, intent::IntentRejectRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "intent.lock" => Arguments::IntentLock(read_at::<D, intent::IntentLockRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "evidence.get" => Arguments::EvidenceGet(read_at::<D, evidence::EvidenceGetRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "evidence.query" => Arguments::EvidenceQuery(read_at::<D, evidence::EvidenceQueryRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "evidence.verify" => Arguments::EvidenceVerify(read_at::<
             D,
             evidence::EvidenceVerifyRequest,
-        >(arguments)?),
-        "evidence.subscribe" => Arguments::EvidenceSubscribe(from_opaque_in::<
-            D,
-            evidence::EvidenceSubscribeRequest,
-        >(arguments)?),
-        "evidence.link" => Arguments::EvidenceLink(from_opaque_in::<
-            D,
-            evidence::EvidenceLinkRequest,
-        >(arguments)?),
-        "observe.ingest" => Arguments::ObserveIngest(from_opaque_in::<
-            D,
-            observe::ObserveIngestRequest,
-        >(arguments)?),
-        "observe.classify" => Arguments::ObserveClassify(from_opaque_in::<
+        >(arguments.as_bytes(), version)?),
+        "evidence.subscribe" => {
+            Arguments::EvidenceSubscribe(read_at::<D, evidence::EvidenceSubscribeRequest>(
+                arguments.as_bytes(),
+                version,
+            )?)
+        }
+        "evidence.link" => Arguments::EvidenceLink(read_at::<D, evidence::EvidenceLinkRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "observe.ingest" => Arguments::ObserveIngest(read_at::<D, observe::ObserveIngestRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "observe.classify" => Arguments::ObserveClassify(read_at::<
             D,
             observe::ObserveClassifyRequest,
-        >(arguments)?),
-        "observe.result" => Arguments::ObserveResult(from_opaque_in::<
-            D,
-            observe::ObserveResultRequest,
-        >(arguments)?),
-        "verification.start" => Arguments::VerificationStart(from_opaque_in::<
-            D,
-            verification::VerificationStartRequest,
-        >(arguments)?),
-        "verification.result" => Arguments::VerificationResult(from_opaque_in::<
-            D,
-            verification::VerificationResultRequest,
-        >(arguments)?),
-        "verification.await" => Arguments::VerificationAwait(from_opaque_in::<
-            D,
-            verification::VerificationAwaitRequest,
-        >(arguments)?),
-        "task.status" => {
-            Arguments::TaskStatus(from_opaque_in::<D, task::TaskStatusRequest>(arguments)?)
+        >(arguments.as_bytes(), version)?),
+        "observe.result" => Arguments::ObserveResult(read_at::<D, observe::ObserveResultRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "verification.start" => {
+            Arguments::VerificationStart(read_at::<D, verification::VerificationStartRequest>(
+                arguments.as_bytes(),
+                version,
+            )?)
         }
-        "task.cancel" => {
-            Arguments::TaskCancel(from_opaque_in::<D, task::TaskCancelRequest>(arguments)?)
+        "verification.result" => {
+            Arguments::VerificationResult(read_at::<D, verification::VerificationResultRequest>(
+                arguments.as_bytes(),
+                version,
+            )?)
         }
-        "task.resume" => {
-            Arguments::TaskResume(from_opaque_in::<D, task::TaskResumeRequest>(arguments)?)
+        "verification.await" => {
+            Arguments::VerificationAwait(read_at::<D, verification::VerificationAwaitRequest>(
+                arguments.as_bytes(),
+                version,
+            )?)
         }
-        "task.subscribe" => {
-            Arguments::TaskSubscribe(from_opaque_in::<D, task::TaskSubscribeRequest>(arguments)?)
+        "task.status" => Arguments::TaskStatus(read_at::<D, task::TaskStatusRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "task.cancel" => Arguments::TaskCancel(read_at::<D, task::TaskCancelRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "task.resume" => Arguments::TaskResume(read_at::<D, task::TaskResumeRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "task.subscribe" => Arguments::TaskSubscribe(read_at::<D, task::TaskSubscribeRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "task.update_budget" => {
+            Arguments::TaskUpdateBudget(read_at::<D, task::TaskUpdateBudgetRequest>(
+                arguments.as_bytes(),
+                version,
+            )?)
         }
-        "task.update_budget" => Arguments::TaskUpdateBudget(from_opaque_in::<
-            D,
-            task::TaskUpdateBudgetRequest,
-        >(arguments)?),
-        "context.compile" => Arguments::ContextCompile(from_opaque_in::<
-            D,
-            context::ContextCompileRequest,
-        >(arguments)?),
-        "context.expand" => Arguments::ContextExpand(from_opaque_in::<
-            D,
-            context::ContextExpandRequest,
-        >(arguments)?),
-        "whiteboard.compile" => Arguments::WhiteboardCompile(from_opaque_in::<
-            D,
-            whiteboard::WhiteboardCompileRequest,
-        >(arguments)?),
+        "context.compile" => Arguments::ContextCompile(
+            read_at::<D, context::ContextCompileRequest>(arguments.as_bytes(), version)?,
+        ),
+        "context.expand" => Arguments::ContextExpand(read_at::<D, context::ContextExpandRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "whiteboard.compile" => {
+            Arguments::WhiteboardCompile(read_at::<D, whiteboard::WhiteboardCompileRequest>(
+                arguments.as_bytes(),
+                version,
+            )?)
+        }
         "workspace.create_by_reference" => {
-            Arguments::WorkspaceCreateByReference(from_opaque_in::<
+            Arguments::WorkspaceCreateByReference(read_at::<
                 D,
                 workspace::WorkspaceCreateByReferenceRequest,
-            >(arguments)?)
+            >(arguments.as_bytes(), version)?)
         }
-        "intent.export_bundle" => Arguments::IntentExportBundle(from_opaque_in::<
-            D,
-            intent::IntentExportBundleRequest,
-        >(arguments)?),
-        "intent.import_bundle" => Arguments::IntentImportBundle(from_opaque_in::<
-            D,
-            intent::IntentImportBundleRequest,
-        >(arguments)?),
-        "signing.mint" => {
-            Arguments::SigningMint(from_opaque_in::<D, signing::SigningMintRequest>(arguments)?)
+        "intent.export_bundle" => {
+            Arguments::IntentExportBundle(read_at::<D, intent::IntentExportBundleRequest>(
+                arguments.as_bytes(),
+                version,
+            )?)
         }
-        "signing.rotate" => Arguments::SigningRotate(from_opaque_in::<
-            D,
-            signing::SigningRotateRequest,
-        >(arguments)?),
-        "signing.revoke" => Arguments::SigningRevoke(from_opaque_in::<
-            D,
-            signing::SigningRevokeRequest,
-        >(arguments)?),
-        "signing.registry" => Arguments::SigningRegistry(from_opaque_in::<
+        "intent.import_bundle" => {
+            Arguments::IntentImportBundle(read_at::<D, intent::IntentImportBundleRequest>(
+                arguments.as_bytes(),
+                version,
+            )?)
+        }
+        "signing.mint" => Arguments::SigningMint(read_at::<D, signing::SigningMintRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "signing.rotate" => Arguments::SigningRotate(read_at::<D, signing::SigningRotateRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "signing.revoke" => Arguments::SigningRevoke(read_at::<D, signing::SigningRevokeRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "signing.registry" => Arguments::SigningRegistry(read_at::<
             D,
             signing::SigningRegistryRequest,
-        >(arguments)?),
-        "signing.verify" => Arguments::SigningVerify(from_opaque_in::<
-            D,
-            signing::SigningVerifyRequest,
-        >(arguments)?),
-        "signing.sign_pack" => Arguments::SigningSignPack(from_opaque_in::<
+        >(arguments.as_bytes(), version)?),
+        "signing.verify" => Arguments::SigningVerify(read_at::<D, signing::SigningVerifyRequest>(
+            arguments.as_bytes(),
+            version,
+        )?),
+        "signing.sign_pack" => Arguments::SigningSignPack(read_at::<
             D,
             signing::SigningSignPackRequest,
-        >(arguments)?),
+        >(arguments.as_bytes(), version)?),
         _ => return Err(CodecError::UnknownOperation),
     })
 }

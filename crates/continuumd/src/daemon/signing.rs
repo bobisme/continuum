@@ -107,15 +107,11 @@ use crate::protocol::operations::signing::{
     SigningRevokeResponse, SigningRotateRequest, SigningRotateResponse, SigningSignPackRequest,
     SigningSignPackResponse, SigningVerifyRequest, SigningVerifyResponse,
 };
-use crate::protocol::scalar::{IntentBundleHandle, IntentHandle, ProtocolVersion, SignerHandle};
+use crate::protocol::scalar::{IntentBundleHandle, IntentHandle, SignerHandle};
 use crate::protocol::spec::{Nullable, Optional};
 use crate::protocol::vocabulary::{
     ErrorCode, RevocationReason, SignatureOutcome, SignedArtifactKind, StructuralOutcome,
 };
-
-/// The first protocol version that defines the signing operations, the two bundle
-/// operations, and `EvidenceGetResponse.signature` (`@since("3.8")`).
-pub const SIGNING_SINCE: ProtocolVersion = ProtocolVersion::new(3, 8);
 
 /// The largest artifact `signing.verify` checks or `signing.sign_pack` signs, in bytes.
 /// Checked before the bytes are hashed, copied, or wrapped.
@@ -1883,8 +1879,10 @@ pub(crate) fn require_custody_version(
     authority: &SigningAuthority,
 ) -> Result<(), Fault> {
     if authority.custody.is_some()
-        && services.negotiated().protocol_version()
-            < crate::protocol::registry::OUTCOME_UNKNOWN_SINCE
+        && !super::errors::defined_at(
+            ErrorCode::OutcomeUnknown,
+            services.negotiated().protocol_version(),
+        )
     {
         return Err(Fault::new(
             ErrorCode::UnsupportedSemanticFeature,
@@ -1910,22 +1908,6 @@ pub(crate) fn no_active_key() -> Fault {
         ErrorCode::PolicyGateFailed,
         "this daemon holds no active signing key",
     )
-}
-
-/// Refuse an operation the negotiated version does not define.
-///
-/// # Errors
-///
-/// `MalformedRequest` on a connection negotiated below [`SIGNING_SINCE`].
-pub(crate) fn require_signing_version(services: &Services) -> Result<(), Fault> {
-    if services.negotiated().protocol_version() < SIGNING_SINCE {
-        return Err(Fault::new(
-            ErrorCode::MalformedRequest,
-            "this operation is not defined at the negotiated protocol version",
-        )
-        .not_retryable());
-    }
-    Ok(())
 }
 
 /// The signing-audit actor of the admitted call: who performed, or adopted, a record.
@@ -2006,7 +1988,8 @@ impl OperationFamily for SigningFamily {
         services: &Services,
         _store: &ReferenceStore,
     ) -> Result<Effect, Fault> {
-        require_signing_version(services)?;
+        // The version gate is dispatch's (`OperationSpec::defined_at`): below 3.8 none of
+        // these operations reaches its family.
         if matches!(
             call.arguments,
             Arguments::SigningMint(_) | Arguments::SigningRotate(_) | Arguments::SigningRevoke(_)

@@ -501,8 +501,10 @@ fn get(
             // it (`rule versioning.compatible_change`).
             signature: match state.receipt_signature(&request.evidence) {
                 Some(signature)
-                    if services.negotiated().protocol_version()
-                        >= super::signing::SIGNING_SINCE =>
+                    if crate::protocol::since::defines(
+                        Some(crate::protocol::since::SIGNING_WIRE),
+                        services.negotiated().protocol_version(),
+                    ) =>
                 {
                     Optional::Present(signature.encode())
                 }

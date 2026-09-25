@@ -319,8 +319,8 @@ fn probe_signer() -> SignerHandle {
 /// (`SIGNING_WIRE_PROBES`, `probe`, `run_probe`, all removed here): a hand-picked operation
 /// list, a hand-built request per operation, and a `RequestEnvelope.protocol_version`
 /// hardcoded to `ProtocolVersion::new(3, 8)`. The reason was structural, not laziness: a
-/// `Case` names no protocol version, `registry::introduced_at` refuses these six below a
-/// connection negotiated at 3.8, and RFC 0026 fixes one version per connection — so a `Case`
+/// `Case` names no protocol version, the daemon refuses these six below a
+/// connection negotiated at 3.8 (`registry::introduced_at`), and RFC 0026 fixes one version per connection — so a `Case`
 /// planted on one of them could not run on the ratified corpus's own connection, which
 /// negotiates [`version`]. [`case_protocol_version`] and [`fixture_at`] together remove that
 /// obstacle without touching the corpus's own shape: each of these six still gets its own
@@ -415,10 +415,13 @@ const SIGNING_WIRE_CASES: [Case; 6] = [
 /// the moment `case_protocol_version` enforces it below. So the baseline is the highest floor
 /// any operation the ratified corpus itself (`CASES`) already drives at imposes — today,
 /// `evidence.link`'s (`@since("3.3")`), read the same mechanical way as every other floor
-/// rather than copied in as a literal `3.3`. Nothing between 3.2 and 3.3 is behaviourally
-/// different in this daemon (only `registry::introduced_at`'s eight protocol-3.8 operations
-/// carry a real version gate — see `protocol_floor`'s doc comment), so this move changes no
-/// existing case's answer.
+/// rather than copied in as a literal `3.3`. bn-7xz8v made this baseline load-bearing:
+/// the daemon now refuses every operation below its own `@since` (`OperationSpec::since`),
+/// so at 3.2 each `evidence.link` case would be refused `MalformedRequest` before admission
+/// and would test the version gate, not the injection. Before bn-7xz8v nothing between
+/// 3.2 and 3.3 was behaviourally different in this daemon (only the eight protocol-3.8
+/// operations carried a real version gate), so bn-162z4's move from 3.2 to 3.3 changed no
+/// existing case's answer, and bn-7xz8v leaves the value at 3.3.
 ///
 /// A case whose own floor is still higher than this (today: the six signing-wire operations,
 /// `@since("3.8")`) still needs its own separately negotiated connection
@@ -2068,9 +2071,9 @@ fn is_landed(operation: &str) -> bool {
 // =====================================================================================
 
 /// Every operation's `@since` version, derived from [`idl_source`]. Not
-/// `registry::introduced_at` (`crates/continuumd/src/protocol/registry.rs`): that table is
-/// the daemon's own hand-kept list of just the eight operations *it* refuses below 3.8,
-/// checked by hand against the IDL rather than read from it. This reads the whole IDL's
+/// `registry::introduced_at` (`crates/continuumd/src/protocol/registry.rs`): that is the
+/// daemon's own transcription (`OperationSpec::since`, bn-7xz8v; until then a hand-kept
+/// list of just the eight operations it refused below 3.8). This reads the whole IDL's
 /// `@since` text directly, over every operation, mechanically — docs/03 §8's independent
 /// second reader, not a copy of the first.
 fn idl_since_versions() -> &'static BTreeMap<String, ProtocolVersion> {
@@ -3147,26 +3150,21 @@ fn a_protocol_floor_for_an_operation_the_idl_does_not_declare_is_a_loud_failure(
 }
 
 #[test]
-fn the_mechanically_derived_floor_agrees_with_every_operation_the_daemon_actually_gates() {
+fn the_mechanically_derived_floor_is_exactly_the_daemons_gate_for_every_operation() {
     // `protocol_floor` is a second, independent reader over the IDL's `@since` text
-    // (docs/03 §8) — deliberately not `registry::introduced_at`, the daemon's own hand-kept
-    // gate list. Independence is only worth something if it is checked: `since_above`'s
-    // column-zero scan could miss a floor it should have found — an `@since` spelled with
-    // extra whitespace inside the parens, or separated from its `operation` by a stray
-    // comment line — and fall back to `NO_FLOOR` in total silence, since a missing floor
-    // looks exactly like "no annotation" from inside `protocol_floor` alone. This cannot
-    // hide from a comparison against the other reader: for every operation the registry
-    // names a real runtime gate for, this file's own mechanically derived floor must be
-    // exactly that gate's version.
+    // (docs/03 §8) — deliberately not `registry::introduced_at`, the daemon's own
+    // transcription (`OperationSpec::since`). Independence is only worth something if it
+    // is checked: `since_above`'s column-zero scan could miss a floor it should have found
+    // and fall back to `NO_FLOOR` in silence. Until bn-7xz8v the daemon gated only eight
+    // operations, so this compared only those eight. It now gates every operation at its
+    // date, so the comparison is exact for all 83: a dated operation's floor is its gate,
+    // and an undated one's is `NO_FLOOR`.
     for operation in registry::OPERATIONS.iter().map(|spec| spec.name) {
-        if let Some(gated) = registry::introduced_at(operation) {
-            assert_eq!(
-                protocol_floor(operation),
-                gated,
-                "{operation}: this file's IDL-derived floor disagrees with \
-                 `registry::introduced_at`"
-            );
-        }
+        assert_eq!(
+            protocol_floor(operation),
+            registry::introduced_at(operation).unwrap_or(NO_FLOOR),
+            "{operation}: this file's IDL-derived floor disagrees with the daemon's gate"
+        );
     }
 }
 

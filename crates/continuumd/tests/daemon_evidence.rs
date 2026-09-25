@@ -86,8 +86,27 @@ const PROFILE: &str = "otel-1.0/sampled";
 
 // --- fixtures ----------------------------------------------------------------------------
 
+/// The fixture version, per test thread: 3.4 unless a test pins another ([`at_version`]).
+///
+/// 3.4 since bn-7xz8v. `evidence.link` is `@since("3.3")`, and a connection below an
+/// operation's date is refused it (`OperationSpec::since`). `CertificateRejection`, the
+/// `Error.data` of `CertificateRejected`, is `@since("3.4")`, and below it the data is
+/// withheld (RFC 0026 correction 62). Before that gate this file ran at 3.1 and was served
+/// both. Nothing else it drives changes between 3.1 and 3.4.
 fn version() -> ProtocolVersion {
-    ProtocolVersion::new(3, 1)
+    VERSION.with(std::cell::Cell::get)
+}
+
+std::thread_local! {
+    static VERSION: std::cell::Cell<ProtocolVersion> =
+        const { std::cell::Cell::new(ProtocolVersion::new(3, 4)) };
+}
+
+/// Run the rest of this test at `pinned`: every fixture and envelope below reads
+/// [`version`]. Each test runs on its own thread, so the pin reaches no other test.
+#[allow(dead_code)]
+fn at_version(pinned: ProtocolVersion) {
+    VERSION.with(|version| version.set(pinned));
 }
 
 fn cap(handle: &str) -> CapabilityHandle {
@@ -148,7 +167,7 @@ fn negotiated() -> Negotiated {
         ENCODINGS,
         &hello("cap_root", "service:continuumd", version(), version()),
     )
-    .expect("3.1 is served")
+    .expect("the fixture version is served")
 }
 
 fn hello(
@@ -3424,4 +3443,70 @@ fn the_daemon_relays_the_eventuality_scope_the_temporal_kernel_decides() {
             }
         }
     }
+}
+
+/// The same rejection at 3.3 and at 3.4. `CertificateRejection` is `@since("3.4")`: below it
+/// no code declares an `Error.data` shape, so the data stays absent (`rule
+/// encoding.opaque_payloads`, RFC 0026 correction 62, bn-7xz8v). The code and the detail
+/// do not move.
+fn mutated_rejection_at(version: ProtocolVersion) -> OperationOutcome {
+    at_version(version);
+    let mut fixture = fixture();
+    let mut mutated = certificate_bytes();
+    mutated.push(0x00);
+    let handle = certificate_node(&mut fixture, "certs/mutated.cert", mutated);
+    verify(&mut fixture, &handle, "req_mutated", "idem-mutated")
+}
+
+#[test]
+fn certificate_rejection_data_is_absent_below_its_date() {
+    let below = mutated_rejection_at(ProtocolVersion::new(3, 3));
+    assert_eq!(code(&below), ErrorCode::CertificateRejected);
+    assert!(
+        matches!(below.data, ErrorData::None),
+        "3.3 defines no `Error.data` shape"
+    );
+    let detail = below
+        .envelope
+        .error
+        .value()
+        .expect("an error")
+        .detail
+        .clone();
+    assert!(detail.contains("continuum-kernel-core"));
+}
+
+#[test]
+fn certificate_rejection_data_is_present_from_its_date() {
+    let at = mutated_rejection_at(ProtocolVersion::new(3, 4));
+    assert_eq!(code(&at), ErrorCode::CertificateRejected);
+    assert!(matches!(at.data, ErrorData::CertificateRejection(_)));
+}
+
+#[test]
+fn the_capability_refusal_frame_is_gated_at_its_date() {
+    // `ServerReject` is `@since("3.1")`. A capability refusal goes through the same gate
+    // as a negotiation refusal (`ServerReject::gated`, bn-7xz8v, cr-88az2y), so a client
+    // whose offer reaches only 3.0 is closed without a frame, and one reaching 3.1 gets it.
+    let daemon = daemon();
+    let at = |minor| {
+        daemon
+            .welcome(
+                &policy(),
+                &hello(
+                    "cap_never-minted",
+                    "agent:reader",
+                    ProtocolVersion::new(3, 0),
+                    ProtocolVersion::new(3, minor),
+                ),
+            )
+            .expect_err("an unregistered capability is refused")
+    };
+    assert_eq!(
+        at(0).frame,
+        None,
+        "an offer reaching only 3.0 gets no frame"
+    );
+    let frame = at(1).frame.expect("an offer reaching 3.1 gets the frame");
+    assert_eq!(frame.code, ErrorCode::CapabilityDenied);
 }

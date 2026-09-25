@@ -89,7 +89,7 @@ use crate::daemon::family::{Arguments, Payload};
 use crate::daemon::{Daemon, OperationRequest};
 use crate::protocol::envelope::{RequestEnvelope, ResultEnvelope};
 use crate::protocol::handshake::{
-    CapabilityDescriptor, ClientHello, Negotiated, NegotiationError, ServerReject, ServerWelcome,
+    CapabilityDescriptor, ClientHello, Negotiated, NegotiationError, RejectFrame, ServerWelcome,
 };
 use crate::protocol::shared::EvidenceQuery;
 use crate::protocol::spec::{Nullable, Optional};
@@ -628,13 +628,13 @@ impl Server {
     /// [`TransportError`] when the frame cannot be encoded.
     pub fn open(
         welcome: &ServerWelcome,
-        reject: Option<&ServerReject>,
+        reject: Option<&RejectFrame>,
         outcome: Result<Negotiated, NegotiationError>,
     ) -> Result<Option<Vec<u8>>, TransportError> {
         Ok(match outcome {
             Ok(_) => Some(to_bytes(welcome)?),
             Err(_) => match reject {
-                Some(frame) => Some(to_bytes(frame)?),
+                Some(frame) => Some(to_bytes(frame.frame())?),
                 None => None,
             },
         })
@@ -790,10 +790,18 @@ impl Server {
         // correlation identity for a message that never carried one would be inventing the
         // echo the field exists to make truthful. RFC 0026 leaves a frame a reader cannot
         // parse at the transport level, and so does this.
-        let envelope: RequestEnvelope = read_in::<D, _>(frame)?;
-        let arguments = match codec::operations::decode_arguments_in::<D>(
+        // Read at the connection's version, like the arguments below: an envelope field
+        // the version does not define is ignored, not decoded (bn-7xz8v).
+        let envelope: RequestEnvelope = codec::versioned::read_at::<D, RequestEnvelope>(
+            frame,
+            Some(self.negotiated.protocol_version()),
+        )?;
+        // Read at the connection's version: a request field it does not define is ignored,
+        // not decoded (`rule versioning.compatible_change`, bn-7xz8v).
+        let arguments = match codec::operations::decode_arguments_at::<D>(
             envelope.operation.as_str(),
             &envelope.arguments,
+            self.negotiated.protocol_version(),
         ) {
             Ok(arguments) => arguments,
             Err(error) => {

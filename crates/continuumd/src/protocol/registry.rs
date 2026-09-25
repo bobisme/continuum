@@ -13,6 +13,7 @@ use super::operations::{
     signing::*, task::*, verification::*, whiteboard::*, workspace::*,
 };
 use super::prelude::*;
+use super::since;
 use super::spec::{
     AliasSpec, Annotation, EnumSpec, HandleSpec, OperationSpec, StructSpec, UnionSpec,
 };
@@ -167,13 +168,9 @@ pub const IDL_VERSION: &str = "1.17";
 /// versioning.error_codes` — and one rule, `signing.custody`. The code answers a
 /// signing write whose durable record passed its commit point unconfirmed. It is never
 /// emitted below 3.9: a daemon with durable signing custody refuses its four signing
-/// writes on an older connection ([`OUTCOME_UNKNOWN_SINCE`]). Counts: 83 operations,
+/// writes on an older connection ([`since::OUTCOME_UNKNOWN`]). Counts: 83 operations,
 /// 37 enums, rules 54 -> 55.
 pub const PROTOCOL_VERSION: &str = "3.9";
-
-/// The first protocol version that defines `ErrorCode::OutcomeUnknown`
-/// (`@since("3.9")`).
-pub const OUTCOME_UNKNOWN_SINCE: ProtocolVersion = ProtocolVersion::new(3, 9);
 
 /// The protocol majors a conforming daemon serves concurrently: N and N-1
 /// (`protocol.majors_served`).
@@ -198,6 +195,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "workspace.create",
         authority: AuthorityLevel::Propose,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<WorkspaceCreateRequest>(),
         response: StructSpec::of::<WorkspaceCreateResponse>(),
@@ -211,6 +209,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "workspace.create_by_reference",
         authority: AuthorityLevel::Propose,
+        since: Some(since::CREATE_BY_REFERENCE),
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<WorkspaceCreateByReferenceRequest>(),
         response: StructSpec::of::<WorkspaceCreateByReferenceResponse>(),
@@ -221,6 +220,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "workspace.fork",
         authority: AuthorityLevel::Propose,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<WorkspaceForkRequest>(),
         response: StructSpec::of::<WorkspaceForkResponse>(),
@@ -231,6 +231,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "workspace.diff",
         authority: AuthorityLevel::Propose,
+        since: None,
         annotations: &[Annotation::Readonly, Annotation::TaskStarting],
         request: StructSpec::of::<WorkspaceDiffRequest>(),
         response: StructSpec::of::<WorkspaceDiffResponse>(),
@@ -244,6 +245,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "workspace.seal",
         authority: AuthorityLevel::Propose,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<WorkspaceSealRequest>(),
         response: StructSpec::of::<WorkspaceSealResponse>(),
@@ -254,6 +256,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "intent.get",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<IntentGetRequest>(),
         response: StructSpec::of::<IntentGetResponse>(),
@@ -264,6 +267,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "intent.diff",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<IntentDiffRequest>(),
         response: StructSpec::of::<IntentDiffResponse>(),
@@ -274,6 +278,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "intent.propose_revision",
         authority: AuthorityLevel::ReviseIntent,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<IntentProposeRevisionRequest>(),
         response: StructSpec::of::<IntentProposeRevisionResponse>(),
@@ -287,6 +292,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "intent.accept",
         authority: AuthorityLevel::ReviseIntent,
+        since: None,
         annotations: &[
             Annotation::Mutation,
             Annotation::Privileged,
@@ -305,6 +311,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "intent.reject",
         authority: AuthorityLevel::ReviseIntent,
+        since: None,
         annotations: &[
             Annotation::Mutation,
             Annotation::Privileged,
@@ -319,6 +326,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "intent.lock",
         authority: AuthorityLevel::ReviseIntent,
+        since: None,
         annotations: &[
             Annotation::Mutation,
             Annotation::Privileged,
@@ -333,6 +341,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "intent.export_bundle",
         authority: AuthorityLevel::ReviseIntent,
+        since: Some(since::SIGNING_WIRE),
         annotations: &[
             Annotation::Mutation,
             Annotation::Privileged,
@@ -347,6 +356,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "intent.import_bundle",
         authority: AuthorityLevel::ReviseIntent,
+        since: Some(since::SIGNING_WIRE),
         annotations: &[
             Annotation::Mutation,
             Annotation::Privileged,
@@ -361,6 +371,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "verification.start",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<VerificationStartRequest>(),
         response: StructSpec::of::<VerificationStartResponse>(),
@@ -376,6 +387,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "verification.result",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<VerificationResultRequest>(),
         response: StructSpec::of::<VerificationResult>(),
@@ -389,6 +401,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "verification.await",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Readonly, Annotation::TaskStarting],
         request: StructSpec::of::<VerificationAwaitRequest>(),
         response: StructSpec::of::<VerificationResult>(),
@@ -402,6 +415,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "model.check",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<ModelCheckRequest>(),
         response: StructSpec::of::<VerificationResult>(),
@@ -416,6 +430,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "model.explore",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<ModelExploreRequest>(),
         response: StructSpec::of::<ModelExploreResponse>(),
@@ -429,6 +444,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "model.compare",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Readonly, Annotation::TaskStarting],
         request: StructSpec::of::<ModelCompareRequest>(),
         response: StructSpec::of::<ModelCompareResponse>(),
@@ -442,6 +458,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "program.extract",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<ProgramExtractRequest>(),
         response: StructSpec::of::<ProgramExtractResponse>(),
@@ -456,6 +473,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "program.run",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<ProgramRunRequest>(),
         response: StructSpec::of::<ProgramRunResponse>(),
@@ -470,6 +488,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "program.replay",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<ProgramReplayRequest>(),
         response: StructSpec::of::<ProgramReplayResponse>(),
@@ -484,6 +503,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "refinement.check",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<RefinementCheckRequest>(),
         response: StructSpec::of::<VerificationResult>(),
@@ -498,6 +518,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "refinement.explain",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<RefinementExplainRequest>(),
         response: StructSpec::of::<RefinementExplainResponse>(),
@@ -511,6 +532,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "proof.goal",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<ProofGoalRequest>(),
         response: StructSpec::of::<ProofGoalResponse>(),
@@ -524,6 +546,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "proof.attempt",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<ProofAttemptRequest>(),
         response: StructSpec::of::<ProofAttemptResponse>(),
@@ -538,6 +561,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "proof.check",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<ProofCheckRequest>(),
         response: StructSpec::of::<ProofCheckResponse>(),
@@ -552,6 +576,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "proof.slice",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Readonly, Annotation::Paginated],
         request: StructSpec::of::<ProofSliceRequest>(),
         response: StructSpec::of::<ProofSliceResponse>(),
@@ -562,6 +587,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "correspondence.bind",
         authority: AuthorityLevel::Propose,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<CorrespondenceBindRequest>(),
         response: StructSpec::of::<CorrespondenceBindResponse>(),
@@ -575,6 +601,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "correspondence.status",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<CorrespondenceStatusRequest>(),
         response: StructSpec::of::<CorrespondenceStatusResponse>(),
@@ -585,6 +612,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "correspondence.drift",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<CorrespondenceDriftRequest>(),
         response: StructSpec::of::<CorrespondenceDriftResponse>(),
@@ -598,6 +626,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "debug.open",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<DebugOpenRequest>(),
         response: StructSpec::of::<DebugOpenResponse>(),
@@ -611,6 +640,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "debug.state",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<DebugStateRequest>(),
         response: StructSpec::of::<DebugStateResponse>(),
@@ -621,6 +651,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "debug.enabled",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Readonly, Annotation::Paginated],
         request: StructSpec::of::<DebugEnabledRequest>(),
         response: StructSpec::of::<DebugEnabledResponse>(),
@@ -631,6 +662,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "debug.step_event",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<DebugStepEventRequest>(),
         response: StructSpec::of::<DebugStepEventResponse>(),
@@ -641,6 +673,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "debug.step_abstract",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<DebugStepAbstractRequest>(),
         response: StructSpec::of::<DebugStepAbstractResponse>(),
@@ -651,6 +684,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "debug.reverse_causal",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<DebugReverseCausalRequest>(),
         response: StructSpec::of::<DebugReverseCausalResponse>(),
@@ -661,6 +695,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "debug.branch",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<DebugBranchRequest>(),
         response: StructSpec::of::<DebugBranchResponse>(),
@@ -671,6 +706,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "debug.compare",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<DebugCompareRequest>(),
         response: StructSpec::of::<DebugCompareResponse>(),
@@ -681,6 +717,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "debug.why_enabled",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<DebugWhyEnabledRequest>(),
         response: StructSpec::of::<DebugWhyEnabledResponse>(),
@@ -691,6 +728,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "debug.why_blocked",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<DebugWhyBlockedRequest>(),
         response: StructSpec::of::<DebugWhyBlockedResponse>(),
@@ -701,6 +739,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "debug.export",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<DebugExportRequest>(),
         response: StructSpec::of::<DebugExportResponse>(),
@@ -714,6 +753,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "context.compile",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<ContextCompileRequest>(),
         response: StructSpec::of::<ContextCompileResponse>(),
@@ -728,6 +768,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "context.expand",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<ContextExpandRequest>(),
         response: StructSpec::of::<ContextExpandResponse>(),
@@ -741,6 +782,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "failure.explain",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Readonly, Annotation::TaskStarting],
         request: StructSpec::of::<FailureExplainRequest>(),
         response: StructSpec::of::<FailureExplainResponse>(),
@@ -755,6 +797,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "failure.minimize",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<FailureMinimizeRequest>(),
         response: StructSpec::of::<FailureMinimizeResponse>(),
@@ -768,6 +811,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "failure.branch",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<FailureBranchRequest>(),
         response: StructSpec::of::<FailureBranchResponse>(),
@@ -781,6 +825,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "repair.begin",
         authority: AuthorityLevel::Propose,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<RepairBeginRequest>(),
         response: StructSpec::of::<RepairBeginResponse>(),
@@ -794,6 +839,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "repair.apply",
         authority: AuthorityLevel::Propose,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<RepairApplyRequest>(),
         response: StructSpec::of::<RepairApplyResponse>(),
@@ -807,6 +853,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "repair.attach",
         authority: AuthorityLevel::Propose,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<RepairAttachRequest>(),
         response: StructSpec::of::<RepairAttachResponse>(),
@@ -817,6 +864,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "repair.evaluate",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<RepairEvaluateRequest>(),
         response: StructSpec::of::<RepairEvaluateResponse>(),
@@ -831,6 +879,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "repair.resume",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<RepairResumeRequest>(),
         response: StructSpec::of::<RepairResumeResponse>(),
@@ -846,6 +895,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "repair.review",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<RepairReviewRequest>(),
         response: StructSpec::of::<RepairReviewResponse>(),
@@ -856,6 +906,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "repair.promote",
         authority: AuthorityLevel::Promote,
+        since: None,
         annotations: &[
             Annotation::Mutation,
             Annotation::Privileged,
@@ -876,6 +927,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "repair.reject",
         authority: AuthorityLevel::Promote,
+        since: None,
         annotations: &[
             Annotation::Mutation,
             Annotation::Privileged,
@@ -890,6 +942,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "observe.ingest",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[
             Annotation::Mutation,
             Annotation::TaskStarting,
@@ -908,6 +961,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "observe.classify",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<ObserveClassifyRequest>(),
         response: StructSpec::of::<ObserveClassifyResponse>(),
@@ -921,6 +975,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "observe.result",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<ObserveResultRequest>(),
         response: StructSpec::of::<VerificationResult>(),
@@ -934,6 +989,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "forge.create",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<ForgeCreateRequest>(),
         response: StructSpec::of::<ForgeCreateResponse>(),
@@ -947,6 +1003,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "forge.step",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<ForgeStepRequest>(),
         response: StructSpec::of::<ForgeStepResponse>(),
@@ -960,6 +1017,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "forge.archive",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Readonly, Annotation::Paginated],
         request: StructSpec::of::<ForgeArchiveRequest>(),
         response: StructSpec::of::<ForgeArchiveResponse>(),
@@ -970,6 +1028,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "forge.materialize",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<ForgeMaterializeRequest>(),
         response: StructSpec::of::<ForgeMaterializeResponse>(),
@@ -983,6 +1042,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "benchmark.run",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<BenchmarkRunRequest>(),
         response: StructSpec::of::<BenchmarkRunResponse>(),
@@ -997,6 +1057,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "task.status",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<TaskStatusRequest>(),
         response: StructSpec::of::<TaskRecord>(),
@@ -1007,6 +1068,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "task.cancel",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<TaskCancelRequest>(),
         response: StructSpec::of::<TaskCancelResponse>(),
@@ -1017,6 +1079,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "task.resume",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<TaskResumeRequest>(),
         response: StructSpec::of::<TaskResumeResponse>(),
@@ -1032,6 +1095,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "task.subscribe",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly, Annotation::Streaming],
         request: StructSpec::of::<TaskSubscribeRequest>(),
         response: StructSpec::of::<TaskSubscribeResponse>(),
@@ -1042,6 +1106,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "task.update_budget",
         authority: AuthorityLevel::Execute,
+        since: None,
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<TaskUpdateBudgetRequest>(),
         response: StructSpec::of::<TaskUpdateBudgetResponse>(),
@@ -1052,6 +1117,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "evidence.get",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<EvidenceGetRequest>(),
         response: StructSpec::of::<EvidenceGetResponse>(),
@@ -1062,6 +1128,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "evidence.query",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly, Annotation::Paginated],
         request: StructSpec::of::<EvidenceQueryRequest>(),
         response: StructSpec::of::<EvidenceQueryResponse>(),
@@ -1072,6 +1139,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "evidence.verify",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<EvidenceVerifyRequest>(),
         response: StructSpec::of::<EvidenceVerifyResponse>(),
@@ -1087,6 +1155,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "evidence.subscribe",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly, Annotation::Streaming],
         request: StructSpec::of::<EvidenceSubscribeRequest>(),
         response: StructSpec::of::<EvidenceSubscribeResponse>(),
@@ -1097,6 +1166,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "evidence.link",
         authority: AuthorityLevel::Execute,
+        since: Some(since::EVIDENCE_LINK),
         annotations: &[Annotation::Mutation, Annotation::AuditRecorded],
         request: StructSpec::of::<EvidenceLinkRequest>(),
         response: StructSpec::of::<EvidenceLinkResponse>(),
@@ -1107,6 +1177,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "whiteboard.compile",
         authority: AuthorityLevel::Propose,
+        since: Some(since::WHITEBOARD_COMPILE),
         annotations: &[Annotation::Mutation],
         request: StructSpec::of::<WhiteboardCompileRequest>(),
         response: StructSpec::of::<WhiteboardCompileResponse>(),
@@ -1117,6 +1188,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "signing.mint",
         authority: AuthorityLevel::ReviseIntent,
+        since: Some(since::SIGNING_WIRE),
         annotations: &[
             Annotation::Mutation,
             Annotation::Privileged,
@@ -1131,6 +1203,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "signing.rotate",
         authority: AuthorityLevel::ReviseIntent,
+        since: Some(since::SIGNING_WIRE),
         annotations: &[
             Annotation::Mutation,
             Annotation::Privileged,
@@ -1145,6 +1218,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "signing.revoke",
         authority: AuthorityLevel::ReviseIntent,
+        since: Some(since::SIGNING_WIRE),
         annotations: &[
             Annotation::Mutation,
             Annotation::Privileged,
@@ -1159,6 +1233,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "signing.registry",
         authority: AuthorityLevel::Read,
+        since: Some(since::SIGNING_WIRE),
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<SigningRegistryRequest>(),
         response: StructSpec::of::<SigningRegistryResponse>(),
@@ -1169,6 +1244,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "signing.verify",
         authority: AuthorityLevel::Read,
+        since: Some(since::SIGNING_WIRE),
         annotations: &[Annotation::Readonly],
         request: StructSpec::of::<SigningVerifyRequest>(),
         response: StructSpec::of::<SigningVerifyResponse>(),
@@ -1179,6 +1255,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "signing.sign_pack",
         authority: AuthorityLevel::ReviseIntent,
+        since: Some(since::SIGNING_WIRE),
         annotations: &[
             Annotation::Mutation,
             Annotation::Privileged,
@@ -1193,6 +1270,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "query.explain_reuse",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly, Annotation::Paginated],
         request: StructSpec::of::<QueryExplainReuseRequest>(),
         response: StructSpec::of::<QueryExplainReuseResponse>(),
@@ -1203,6 +1281,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "query.explain_invalidation",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Readonly, Annotation::Paginated],
         request: StructSpec::of::<QueryExplainInvalidationRequest>(),
         response: StructSpec::of::<QueryExplainInvalidationResponse>(),
@@ -1213,6 +1292,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
     OperationSpec {
         name: "query.clean_compare",
         authority: AuthorityLevel::Read,
+        since: None,
         annotations: &[Annotation::Mutation, Annotation::TaskStarting],
         request: StructSpec::of::<QueryCleanCompareRequest>(),
         response: StructSpec::of::<QueryCleanCompareResponse>(),
@@ -1400,26 +1480,20 @@ pub const ALIASES: &[AliasSpec] = &[
     },
 ];
 
-/// The protocol version that first declares `operation`, for the operations a daemon must
-/// refuse on a connection negotiated below it (bn-3glnv): the eight of the signing wire,
-/// `@since("3.8")`. `None` for every operation declared before 3.8: this gate is 3.8's,
-/// and it does not change how an earlier `@since` operation is served. The list is kept by
-/// hand and checked against the IDL's `@since("3.8")` operations by
-/// `daemon_signing::the_version_gate_is_exactly_the_idls_3_8_operations`.
+/// The protocol version that first declares `operation` (its IDL `@since`), or `None` for
+/// an undated operation and for a name the registry does not declare.
+///
+/// The two `None`s are not told apart, so this is not a gate: to decide whether a
+/// connection declares an operation, look it up with [`operation`] and ask
+/// [`OperationSpec::defined_at`], which refuses an unknown name by construction.
+///
+/// Read from [`OperationSpec::since`], so every operation is covered: bn-7xz8v replaced
+/// the hand-kept list of the eight protocol-3.8 operations this used to be, which left
+/// `evidence.link` (3.3), `whiteboard.compile` (3.5), and `workspace.create_by_reference`
+/// (3.6) served on connections that do not declare them.
 #[must_use]
 pub fn introduced_at(operation: &str) -> Option<ProtocolVersion> {
-    matches!(
-        operation,
-        "signing.mint"
-            | "signing.rotate"
-            | "signing.revoke"
-            | "signing.registry"
-            | "signing.verify"
-            | "signing.sign_pack"
-            | "intent.export_bundle"
-            | "intent.import_bundle"
-    )
-    .then(|| ProtocolVersion::new(3, 8))
+    self::operation(operation).and_then(|spec| spec.since)
 }
 
 /// Look an operation up by its wire name.

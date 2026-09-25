@@ -596,19 +596,28 @@ impl Daemon {
             .services
             .correlator
             .correlate(&envelope.request_id, &envelope.actor);
-        let audit_required = registry::operation(envelope.operation.as_str())
-            .is_some_and(obligation::audit_required);
-        raise(
-            &self.services,
-            envelope,
-            Fault::new(
-                code,
-                "the request body is not the shape this operation declares",
-            ),
-            &audit,
-            audit_required,
-        )
-        .envelope
+        let version = self.services.negotiated.protocol_version();
+        let spec = registry::operation(envelope.operation.as_str());
+        // An operation the negotiated version does not declare gets the one answer
+        // `dispatch` gives it, whatever its body: the version gate is decided before the
+        // body matters (`OperationSpec::defined_at`, bn-7xz8v), and it records no audit.
+        let mut refused = if spec.is_some_and(|spec| !spec.defined_at(version)) {
+            raise(&self.services, envelope, undeclared(), &audit, false)
+        } else {
+            let audit_required = spec.is_some_and(obligation::audit_required);
+            raise(
+                &self.services,
+                envelope,
+                Fault::new(
+                    code,
+                    "the request body is not the shape this operation declares",
+                ),
+                &audit,
+                audit_required,
+            )
+        };
+        emitted_at(&mut refused, version);
+        refused.envelope
     }
 
     /// Answer one operation call.
@@ -647,6 +656,22 @@ impl Daemon {
     /// [`Killed`] when `injector` kills at one of the nine boundaries [`CrashPoint`]
     /// enumerates.
     pub fn dispatch_or_die(
+        &mut self,
+        request: &OperationRequest,
+        injector: &dyn CrashInjector,
+    ) -> Result<OperationOutcome, Killed> {
+        let version = self.services.negotiated.protocol_version();
+        self.answer(request, injector).map(|mut outcome| {
+            emitted_at(&mut outcome, version);
+            outcome
+        })
+    }
+
+    /// [`dispatch_or_die`](Daemon::dispatch_or_die) before the answer is held to the
+    /// connection's version ([`emitted_at`]). The idempotency ledger records what this
+    /// returns, so a recorded answer is held to the version of the connection that replays
+    /// it, not of the one that recorded it.
+    fn answer(
         &mut self,
         request: &OperationRequest,
         injector: &dyn CrashInjector,
@@ -701,22 +726,13 @@ impl Daemon {
             ));
         };
         //    An operation `@since` a version later than the negotiated one is not declared at
-        //    that version: refused here, before admission and before the idempotency ledger,
-        //    so the answer does not depend on the grant and no key recorded on a newer
-        //    connection replays on an older one (`rule signing.identities`).
-        if registry::introduced_at(spec.name)
-            .is_some_and(|since| services.negotiated.protocol_version() < since)
-        {
-            return Ok(raise(
-                services,
-                envelope,
-                Fault::new(
-                    ErrorCode::MalformedRequest,
-                    "the request names an operation this protocol version does not declare",
-                ),
-                &audit,
-                false,
-            ));
+        //    that version, so it is refused exactly as an undeclared name is: here, before
+        //    admission and before the idempotency ledger, so the answer does not depend on
+        //    the grant and no key recorded on a newer connection replays on an older one
+        //    (`rule versioning.compatible_change`, `rule signing.identities`). The date is
+        //    the registry's own for every operation (`OperationSpec::since`, bn-7xz8v).
+        if !spec.defined_at(services.negotiated.protocol_version()) {
+            return Ok(raise(services, envelope, undeclared(), &audit, false));
         }
         let audit_required = obligation::audit_required(spec);
 
@@ -1149,6 +1165,42 @@ impl DurableSubstrate {
 /// `spec`-less failures — an unknown operation, an unnegotiated version — are checked
 /// against nothing because there is no operation to check against; every other code passes
 /// through [`Fault::admissible_for`] at its call site in [`Daemon::dispatch`].
+/// Hold an answer to the version of the connection it is emitted on.
+///
+/// A daemon "MUST NOT emit fields the negotiated version does not define" (`rule
+/// versioning.compatible_change`), and that rule governs a dated field over any rule that
+/// requires it (RFC 0026 correction 62, bn-7xz8v):
+///
+/// - `ResultEnvelope.audit` is `@since("3.1")` ([`crate::protocol::since::RESULT_AUDIT`]).
+///   Below 3.1 it is not emitted. The audit record is still written daemon-side; `rule
+///   audit.correlation` applies from 3.1, where the field exists.
+/// - `CertificateRejection`, the `Error.data` shape of `CertificateRejected`, is
+///   `@since("3.4")` ([`crate::protocol::since::CERTIFICATE_REJECTION`]). Below 3.4 no code
+///   declares a shape, so `data` stays absent (`rule encoding.opaque_payloads`).
+///
+/// Every answer [`Daemon`] gives passes through here, fresh, replayed, or refused before
+/// its body decoded.
+fn emitted_at(outcome: &mut OperationOutcome, version: crate::protocol::scalar::ProtocolVersion) {
+    use crate::protocol::since::{CERTIFICATE_REJECTION, RESULT_AUDIT, defines};
+    if !defines(Some(RESULT_AUDIT), version) {
+        outcome.envelope.audit = crate::protocol::spec::Optional::Absent;
+    }
+    if !defines(Some(CERTIFICATE_REJECTION), version) {
+        if let family::ErrorData::CertificateRejection(_) = outcome.data {
+            outcome.data = family::ErrorData::None;
+        }
+    }
+}
+
+/// The refusal for an operation this connection's version does not declare: the one an
+/// undeclared name gets (`rule signing.identities` names it for the 3.8 operations).
+fn undeclared() -> Fault {
+    Fault::new(
+        ErrorCode::MalformedRequest,
+        "the request names an operation this protocol version does not declare",
+    )
+}
+
 fn raise(
     services: &Services,
     envelope: &RequestEnvelope,
@@ -1221,6 +1273,11 @@ fn admissible_offers(
         let Some(spec) = registry::operation(offer.arguments.operation()) else {
             return false;
         };
+        // An operation the connection's version does not declare is not offered: the
+        // client could only be refused it (`OperationSpec::defined_at`).
+        if !spec.defined_at(services.negotiated.protocol_version()) {
+            return false;
+        }
         let Some(family) = families
             .iter()
             .find(|family| Some(family.namespace()) == namespace(spec.name))

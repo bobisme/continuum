@@ -103,10 +103,14 @@ pub const fn retryable(code: ErrorCode) -> bool {
 
 /// The first protocol version that defines `code` (`@since`), or `None` for a code every
 /// version of the current major defines.
+///
+/// The dates are [`crate::protocol::since`]'s: `tests/idl_conformance.rs` requires this
+/// function to agree with [`crate::protocol::since::ENUM_MEMBERS`] for every member of
+/// `ErrorCode`, and that table to agree with the IDL.
 #[must_use]
 pub const fn introduced_at(code: ErrorCode) -> Option<crate::protocol::scalar::ProtocolVersion> {
     match code {
-        ErrorCode::OutcomeUnknown => Some(crate::protocol::registry::OUTCOME_UNKNOWN_SINCE),
+        ErrorCode::OutcomeUnknown => Some(crate::protocol::since::OUTCOME_UNKNOWN),
         _ => None,
     }
 }
@@ -116,7 +120,7 @@ pub const fn introduced_at(code: ErrorCode) -> Option<crate::protocol::scalar::P
 /// check at the one boundary every answer, fresh or replayed, crosses (review cr-1dc5ii).
 #[must_use]
 pub fn defined_at(code: ErrorCode, version: crate::protocol::scalar::ProtocolVersion) -> bool {
-    introduced_at(code).is_none_or(|since| version >= since)
+    crate::protocol::since::defines(introduced_at(code), version)
 }
 
 const fn retryable_code(code: ErrorCode) -> bool {

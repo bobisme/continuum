@@ -63,6 +63,10 @@ Read three ways.
   declaration-level `@since` sites; nothing on the shipped side has anywhere to
   put one, and leg one filters the annotation out by name. A version stamp that
   says a 3.6 operation arrived at 1.0 is accepted by everything in the tree.
+  *Superseded by bn-7xz8v:* `OperationSpec::since` and `protocol::since` now
+  transcribe every date, the daemon's version gate reads them, and leg one
+  compares all of them with the IDL, so `since-staled` is caught by `idl-conf`
+  by construction. The matrix above is the bn-2wypi record and was not re-run.
 - **Neither conformance checker looks at a shipped client.** Both compare the
   *transcription*. The agent client's grammar naming an operation the protocol
   does not declare, and `AgentClient::task_cancel` putting `task.status` on the
@@ -210,6 +214,7 @@ MUTANTS: tuple[Mutant, ...] = (
             "    OperationSpec {\n"
             '        name: "debug.enabled",\n'
             "        authority: AuthorityLevel::Execute,\n"
+            "        since: None,\n"
             "        annotations: &[Annotation::Readonly, Annotation::Paginated],\n"
             "        request: StructSpec::of::<DebugEnabledRequest>(),\n"
             "        response: StructSpec::of::<DebugEnabledResponse>(),\n"
@@ -244,11 +249,13 @@ MUTANTS: tuple[Mutant, ...] = (
         anchor=(
             '        name: "task.subscribe",\n'
             "        authority: AuthorityLevel::Read,\n"
+            "        since: None,\n"
             "        annotations: &[Annotation::Readonly, Annotation::Streaming],"
         ),
         replacement=(
             '        name: "task.subscribe",\n'
             "        authority: AuthorityLevel::Read,\n"
+            "        since: None,\n"
             "        annotations: &[Annotation::Streaming],"
         ),
         note="`@readonly` is dropped, so the idempotency-key obligation flips",
@@ -281,6 +288,7 @@ MUTANTS: tuple[Mutant, ...] = (
         anchor=(
             '        name: "workspace.create",\n'
             "        authority: AuthorityLevel::Propose,\n"
+            "        since: None,\n"
             "        annotations: &[Annotation::Mutation],\n"
             "        request: StructSpec::of::<WorkspaceCreateRequest>(),\n"
             "        response: StructSpec::of::<WorkspaceCreateResponse>(),\n"
@@ -289,6 +297,7 @@ MUTANTS: tuple[Mutant, ...] = (
         replacement=(
             '        name: "workspace.create",\n'
             "        authority: AuthorityLevel::Propose,\n"
+            "        since: None,\n"
             "        annotations: &[Annotation::Mutation],\n"
             "        request: StructSpec::of::<WorkspaceCreateRequest>(),\n"
             "        response: StructSpec::of::<WorkspaceCreateResponse>(),\n"

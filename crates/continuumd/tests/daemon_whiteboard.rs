@@ -83,8 +83,12 @@ const NOTE_TIME: &str = "2026-08-03T09:15:00.000Z";
 
 // --- fixtures ----------------------------------------------------------------------------
 
+/// 3.5 since bn-7xz8v: `whiteboard.compile` is `@since("3.5")`, and a connection below an
+/// operation's date is refused it (`OperationSpec::since`). Before that gate this file ran
+/// at 3.1 and was served operations 3.1 does not declare. Nothing else it drives changes
+/// between 3.1 and 3.5.
 fn version() -> ProtocolVersion {
-    ProtocolVersion::new(3, 1)
+    ProtocolVersion::new(3, 5)
 }
 
 fn cap(handle: &str) -> CapabilityHandle {
@@ -147,7 +151,8 @@ fn hello() -> ClientHello {
 }
 
 fn negotiated() -> Negotiated {
-    negotiate(&[version()], ProtocolWindow::new(3), ENCODINGS, &hello()).expect("3.1 is served")
+    negotiate(&[version()], ProtocolWindow::new(3), ENCODINGS, &hello())
+        .expect("the fixture version is served")
 }
 
 /// The daemon, with the three families a whiteboard test needs: `observe` to give the

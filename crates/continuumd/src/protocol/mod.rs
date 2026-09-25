@@ -102,6 +102,7 @@ pub mod operations;
 pub mod registry;
 pub mod scalar;
 pub mod shared;
+pub mod since;
 pub mod spec;
 pub mod task;
 pub mod vocabulary;

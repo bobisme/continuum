@@ -72,8 +72,26 @@ const DIE_HARD_CONTRACT: &str =
 
 // --- fixtures ----------------------------------------------------------------------------
 
+/// 3.6 since bn-7xz8v: `workspace.create_by_reference` is `@since("3.6")`, and a connection below an
+/// operation's date is refused it (`OperationSpec::since`). Before that gate this file ran
+/// at 3.1 and was served operations 3.1 does not declare. Nothing else it drives changes
+/// between 3.1 and 3.6.
 fn version() -> ProtocolVersion {
-    ProtocolVersion::new(3, 1)
+    VERSION.with(std::cell::Cell::get)
+}
+
+std::thread_local! {
+    /// The fixture version, per test thread: 3.6 unless a test pins a 3.1 client
+    /// ([`as_a_3_1_client`]). Each test runs on its own thread, so one test's pin never
+    /// reaches another.
+    static VERSION: std::cell::Cell<ProtocolVersion> =
+        const { std::cell::Cell::new(ProtocolVersion::new(3, 6)) };
+}
+
+/// Run the rest of this test as a 3.1 client: every fixture, envelope, and negotiation
+/// below reads [`version`].
+fn as_a_3_1_client() {
+    VERSION.with(|version| version.set(ProtocolVersion::new(3, 1)));
 }
 
 fn cap(handle: &str) -> CapabilityHandle {
@@ -126,7 +144,7 @@ fn negotiated() -> Negotiated {
         ENCODINGS,
         &hello(version(), version()),
     )
-    .expect("3.1 is served")
+    .expect("the fixture version is served")
 }
 
 struct Fixture {
@@ -1020,7 +1038,9 @@ fn the_inline_create_is_byte_identical_at_the_bump() {
     // frames below are what a 3.1 client sent and received before `workspace.create_by_
     // reference` existed; the operation added nothing to either, and `workspace.create`
     // now additionally *registers* its components, which is daemon-side state and reaches
-    // no field.
+    // no field. The frames are a 3.1 client's, so this test runs at 3.1: `workspace.create`
+    // is undated, and bn-7xz8v's gate serves it at every version.
+    as_a_3_1_client();
     let fixture = fixture();
     let intent = fixture.intent.clone();
     let set = components(&fixture, &intent);
@@ -1139,3 +1159,82 @@ const PINNED_CREATE_REQUEST: &str = "{\"actor\":\"agent:builder\",\"arguments\":
 
 /// `workspace.create`'s result frame, pinned.
 const PINNED_CREATE_RESULT: &str = "{\"artifacts\":[{\"handle\":\"ws_a9ec523550c5a44dfb807ba201844be81c891531c1bbe85a30f894d233e91317\",\"kind\":\"ws\"}],\"cost\":{},\"epochs\":{\"corpus\":null,\"engine\":null,\"evidence\":null,\"intent\":null,\"proof\":null,\"protocol\":\"3.1\",\"semantic\":null},\"next_operations\":[],\"omissions\":[],\"payload\":{\"diagnostics\":[],\"sealed\":true,\"snapshot\":\"ws_a9ec523550c5a44dfb807ba201844be81c891531c1bbe85a30f894d233e91317\"},\"request_id\":\"req_pinned\",\"status\":\"ok\",\"verdict\":{\"structural\":{\"outcome\":\"created\"}},\"warnings\":[]}";
+
+/// A well-framed `workspace.create` request frame whose `file_components` holds `42`, a
+/// value of the wrong type, at the fixture version. The key sits in canonical order.
+fn create_with_garbage_placement() -> (Fixture, Vec<u8>) {
+    let fixture = fixture();
+    let intent = fixture.intent.clone();
+    let set = components(&fixture, &intent);
+    let request = encode_request(
+        &keyed(
+            envelope(
+                "workspace.create",
+                "agent:builder",
+                "cap_builder",
+                "req_garbage",
+            ),
+            "idem-garbage",
+        ),
+        &Arguments::WorkspaceCreate(WorkspaceCreateRequest {
+            components: set,
+            overlay: Optional::Absent,
+            seal: Optional::Absent,
+        }),
+    )
+    .expect("the request encodes");
+    let text = String::from_utf8(request).expect("canonical JSON is UTF-8");
+    assert_eq!(text.matches("\"files\":[").count(), 1);
+    let garbage = text.replace("\"files\":[", "\"file_components\":42,\"files\":[");
+    (fixture, garbage.into_bytes())
+}
+
+fn answered_code(answer: &[u8]) -> Option<ErrorCode> {
+    let (result, _) = decode_result("workspace.create", answer).expect("the result decodes");
+    result.error.value().map(|error| error.code)
+}
+
+#[test]
+fn below_3_2_an_undefined_file_components_is_ignored_not_decoded() {
+    // `file_components` is `@since("3.2")`. At 3.1 it is an unknown optional request field,
+    // which "Servers MUST ignore": its value is never interpreted, so a value of the wrong
+    // type does not refuse the request (bn-7xz8v, cr-88az2y).
+    as_a_3_1_client();
+    let (fixture, request) = create_with_garbage_placement();
+    let mut server = Server::new(fixture.daemon, negotiated());
+    let answer = server.answer(&request).expect("the daemon answers");
+    assert_eq!(
+        answered_code(&answer),
+        None,
+        "served, and the field ignored"
+    );
+}
+
+#[test]
+fn from_3_2_the_same_file_components_is_decoded_and_refused() {
+    let (fixture, request) = create_with_garbage_placement();
+    let mut server = Server::new(fixture.daemon, negotiated());
+    let answer = server.answer(&request).expect("the daemon answers");
+    assert_eq!(
+        answered_code(&answer),
+        Some(ErrorCode::MalformedRequest),
+        "the field is defined, so the strict codec reads it"
+    );
+}
+
+#[test]
+fn a_broken_frame_is_refused_at_every_version() {
+    // A skip that cannot find the field's end is a broken frame, at every version: the
+    // document is parsed whole before any field is skipped.
+    for pinned in [ProtocolVersion::new(3, 1), ProtocolVersion::new(3, 6)] {
+        VERSION.with(|version| version.set(pinned));
+        let (fixture, request) = create_with_garbage_placement();
+        let text = String::from_utf8(request).expect("UTF-8");
+        let broken = text.replace("\"file_components\":42,", "\"file_components\":[42,");
+        let mut server = Server::new(fixture.daemon, negotiated());
+        assert!(
+            server.answer(broken.as_bytes()).is_err(),
+            "{pinned}: an unterminated value is a broken frame"
+        );
+    }
+}

@@ -237,8 +237,13 @@ const PARKING_CEILING: u64 = 4;
 /// The `states` ceiling the resume offers, large enough to close the campaign.
 const CLOSING_CEILING: u64 = 64;
 
+/// 3.5 since bn-7xz8v: `whiteboard.compile` is `@since("3.5")`, and a connection below
+/// an operation's date is refused it (`OperationSpec::since`) as undeclared, which is not
+/// the declared-but-unserved refusal the cold-start test reads. Before that gate this file
+/// ran at 3.1 and was served operations 3.1 does not declare. Nothing else it drives
+/// changes between 3.1 and 3.5.
 fn version() -> ProtocolVersion {
-    ProtocolVersion::new(3, 1)
+    ProtocolVersion::new(3, 5)
 }
 
 fn cap(handle: &str) -> CapabilityHandle {
@@ -2181,7 +2186,7 @@ fn the_capability_token_reaches_no_response() {
 /// or a spelling the protocol fixes.
 const PROGRAM_CONSTANTS: &[(&str, &str)] = &[
     (
-        "3.1",
+        "3.5",
         "the negotiated protocol version, fixed by the connection",
     ),
     ("agent:worker", "the actor the connection was opened as"),
