@@ -23,6 +23,7 @@ continuum-value = { path = "../continuum-value" }
 
 [dev-dependencies]
 continuum-engine-reference = { path = "../continuum-engine-reference" }
+continuum-engine-dpor = { path = "../continuum-engine-dpor" }
 continuum-kernel-core = { path = "../continuum-kernel-core" }
 
 [lints]

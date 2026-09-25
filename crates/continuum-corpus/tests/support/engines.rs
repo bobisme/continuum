@@ -8,11 +8,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use continuum_corpus::differential::engine::{EXPLICIT, KERNEL, REFERENCE, SEMANTIC_ORACLE};
+use continuum_corpus::differential::engine::{DPOR, EXPLICIT, KERNEL, REFERENCE, SEMANTIC_ORACLE};
 use continuum_corpus::differential::{
     Budget, Engine, EngineIdentity, Fields, Inconclusive, InvariantVerdict, Normalized, Projection,
     Trace, UndefinedKind, UndefinedRead,
 };
+use continuum_engine_dpor as dpor;
 use continuum_engine_reference::bfs::{self, Bounds, Exploration};
 use continuum_engine_reference::certificate::{
     self, ClaimEnvelope, ClosedSet, EmissionError, PRODUCER,
@@ -546,6 +547,283 @@ impl Engine for SemanticOracleEngine {
             invariants: BTreeMap::new(),
             undefined_action: None,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// the partial-order reduction engine (bn-3vhzw, C005)
+// ---------------------------------------------------------------------------
+
+/// The `work` bound `dpor::Bounds` needs beyond the corpus's `Budget`: generous
+/// enough that a check never refuses for lack of a work reserve
+/// (`dpor::CheckError::WorkBelowObligations`), while `states`/`transitions`/`depth`
+/// still do the actual bounding (mirrors bn-voq4's own `tests/support/differential.rs`
+/// `dpor_bounds`).
+const DPOR_WORK: u64 = 1 << 40;
+
+fn dpor_bounds(budget: Budget) -> dpor::Bounds {
+    dpor::Bounds::new(budget.states, budget.transitions, budget.depth, DPOR_WORK)
+}
+
+/// A bitmask with one bit set per declared variable: the mask a reduction would need
+/// to cover to make its visible projection the model's full state domain.
+fn full_mask(model: &Model) -> u64 {
+    let bits = model.variables().len();
+    if bits >= 64 {
+        u64::MAX
+    } else {
+        (1_u64 << bits) - 1
+    }
+}
+
+fn dpor_unresolved(reason: &dpor::Unresolved) -> Inconclusive {
+    match reason {
+        dpor::Unresolved::ResourceExhausted { tripped, stored } => Inconclusive::new(
+            InconclusiveReason::ResourceExhausted,
+            format!("{tripped} bound tripped after {stored} states stored"),
+        ),
+        dpor::Unresolved::EngineError(fault) => {
+            Inconclusive::new(InconclusiveReason::EngineError, fault.to_string())
+        }
+    }
+}
+
+fn dpor_trace(model: &Model, trace: &dpor::Trace) -> Trace {
+    Trace {
+        start: vector(trace.start()),
+        steps: trace
+            .steps()
+            .iter()
+            .map(|step| {
+                let name = model
+                    .actions()
+                    .get(step.action())
+                    .expect("a dpor trace names a declared action")
+                    .name()
+                    .as_str()
+                    .to_owned();
+                (name, vector(step.target()))
+            })
+            .collect(),
+    }
+}
+
+fn dpor_undefined(model: &Model, read: &dpor::UndefinedRead) -> UndefinedRead {
+    UndefinedRead {
+        kind: match read.read() {
+            Guarded::Action => UndefinedKind::Action,
+            Guarded::Predicate(_) => UndefinedKind::Invariant,
+        },
+        subject: read.subject().to_owned(),
+        state: Some(vector(read.state())),
+        path: read.trace().map(|trace| dpor_trace(model, trace)),
+    }
+}
+
+fn dpor_invariant(model: &Model, outcome: &dpor::InvariantOutcome) -> InvariantVerdict {
+    match outcome {
+        dpor::InvariantOutcome::Holds { .. } => InvariantVerdict::Holds,
+        dpor::InvariantOutcome::Violated { trace, .. } => InvariantVerdict::Violated {
+            witness: trace.as_ref().map(|found| dpor_trace(model, found)),
+        },
+        dpor::InvariantOutcome::Undefined(read) => {
+            InvariantVerdict::Undefined(dpor_undefined(model, read))
+        }
+        dpor::InvariantOutcome::Inconclusive(reason) => {
+            InvariantVerdict::Inconclusive(dpor_unresolved(reason))
+        }
+    }
+}
+
+/// `dpor::check` over every model predicate as an invariant, deadlock a defect
+/// (`Obligations::every_predicate`, `DeadlockPolicy::Defect`): the RFC 0004 engine
+/// that fills the DPOR slot.
+///
+/// Its reachable-state answer is the reduction's *visible* projection (INV-013: the
+/// variables the invariants and every action's definedness chain read;
+/// `ReductionWitness::visible`), which docs/33's soundness argument proves
+/// exhaustive over the visible valuations — not necessarily over the full state
+/// domain the tiny exhaustive oracle enumerates. Claiming `Projection::Exact` (a
+/// genuine full reachable set, comparable to the oracle's) is honest only when the
+/// visible mask happens to cover every declared variable and the search completed;
+/// otherwise the field is typed `Unsupported` (a question this engine's answer does
+/// not decide at the full-state grain) or `ResourceExhausted`, never a laundered
+/// claim. A full mask is provably the one case where the reduction is a no-op: every
+/// progressing label then writes a visible variable, so no stubborn set without an
+/// enabled visible label can ever exist and every state expands in full
+/// (`witness::FullReason::Exhaustive`) — checked directly over `Stats` by
+/// `the_dpor_lane_s_exact_answers_are_provably_unreduced_full_mask_fixtures`, which
+/// finds `declined_persistent == declined_sleep == 0` on every full-mask corpus
+/// fixture. So agreement on those fixtures is evidence that DPOR's search machinery
+/// (visits, the cycle proviso, discovery and replay) agrees with a second,
+/// differently-coded exhaustive explorer, never evidence about the persistent-set or
+/// sleep-set reduction, which only narrows the search on the fixtures this field
+/// cannot claim exact — those still compare deadlocks and verdicts nowhere in this
+/// lane (the oracle judges neither), a residual gap the docs/19 §5 basis for this
+/// lane accepts because `continuum-engine-dpor`'s own `tests/c005_differential.rs`
+/// (bn-voq4) already compares verdicts, visible states and terminal states against
+/// the unreduced reference engine exhaustively, including on masked fixtures, where
+/// the reduction is genuinely active. The
+/// deadlock question and the model-level undefined-action read are exact regardless
+/// of the mask (RFC 0004's cycle proviso, and an action's own definedness chain is
+/// always visible), but this adapter reports deadlocks only inside the `Exact`
+/// answer, since `Projection` has no shape for "deadlocks without a full reachable
+/// set" — deliberately conservative, never a claim past what the field can carry. An
+/// engine fault the deadlock question itself carries is reported as `EngineError`
+/// ahead of completeness or the mask, so it is never relabelled a typed inconclusive
+/// nothing quarantines it for. Every trace this adapter offers is the reducer's own
+/// discovery path, and the harness replays it against the model independently —
+/// nothing here is taken on the reducer's word.
+pub struct DporEngine;
+
+impl Engine for DporEngine {
+    fn identity(&self) -> EngineIdentity {
+        EngineIdentity {
+            slot: DPOR.to_owned(),
+            build: dpor::ALGORITHM.to_owned(),
+        }
+    }
+
+    fn fields(&self) -> Fields {
+        Fields::ALL
+    }
+
+    fn evaluate(&self, model: &Model, budget: Budget) -> Normalized {
+        let obligations = dpor::Obligations::every_predicate(model, dpor::DeadlockPolicy::Defect);
+        let report = match dpor::check(model, &obligations, dpor_bounds(budget)) {
+            Ok(report) => report,
+            Err(error) => {
+                return Normalized::inconclusive(
+                    &Inconclusive::new(InconclusiveReason::EngineError, error.to_string()),
+                    names(model),
+                );
+            }
+        };
+
+        let mut invariants = BTreeMap::new();
+        for result in report.invariants() {
+            invariants.insert(
+                result.name().as_str().to_owned(),
+                dpor_invariant(model, result.outcome()),
+            );
+        }
+
+        // The deadlock question's own undefined read is the successor computation's
+        // (an action read, RFC 0003), reported as-is like the reference and kernel
+        // adapters.
+        let undefined_action = match report.deadlock() {
+            dpor::DeadlockOutcome::Undefined(read) => Some(dpor_undefined(model, read)),
+            _ => None,
+        };
+
+        // An engine fault the deadlock question itself carries (an internal
+        // invariant broken while reconstructing a terminal state's discovery trace,
+        // say) is checked first, ahead of completeness and the mask: an `EngineError`
+        // must always enter the defect lifecycle (compare.rs's
+        // `engine_error_of_projection`), and relabelling it `ResourceExhausted` (the
+        // completeness arm below) or `Unsupported` (the mask arm below) would launder
+        // a fault into a typed inconclusive nothing ever quarantines it for. Likewise
+        // `NotJudged`: every obligation this adapter asks is `DeadlockPolicy::Defect`,
+        // so an answer under the policy never requested is the engine's own contract
+        // broken, not this fixture's semantics.
+        let fault = match report.deadlock() {
+            dpor::DeadlockOutcome::Inconclusive(dpor::Unresolved::EngineError(deadlock_fault)) => {
+                Some(deadlock_fault.to_string())
+            }
+            dpor::DeadlockOutcome::NotJudged { .. } => {
+                Some("deadlock not judged although DeadlockPolicy::Defect was requested".to_owned())
+            }
+            _ => None,
+        };
+        let projection = if let Some(detail) = fault {
+            Projection::Inconclusive(Inconclusive::new(InconclusiveReason::EngineError, detail))
+        } else {
+            match report.completeness() {
+                dpor::Completeness::Exhausted(bound) => {
+                    Projection::Inconclusive(Inconclusive::new(
+                        InconclusiveReason::ResourceExhausted,
+                        format!("{bound} bound tripped"),
+                    ))
+                }
+                dpor::Completeness::Faulted(fault) => Projection::Inconclusive(Inconclusive::new(
+                    InconclusiveReason::EngineError,
+                    fault.to_string(),
+                )),
+                dpor::Completeness::Complete if report.witness().visible() != full_mask(model) => {
+                    Projection::Inconclusive(Inconclusive::new(
+                        InconclusiveReason::Unsupported,
+                        format!(
+                            "the reduced search's exact reachable set is the visible projection \
+                             (mask {:#x} of {:#x}); the full state domain is not reported",
+                            report.witness().visible(),
+                            full_mask(model),
+                        ),
+                    ))
+                }
+                dpor::Completeness::Complete => match report.deadlock() {
+                    dpor::DeadlockOutcome::Deadlocked { states } => Projection::Exact {
+                        states: report.projections().clone(),
+                        deadlocks: states.iter().map(|d| vector(d.state())).collect(),
+                    },
+                    dpor::DeadlockOutcome::Free { .. } | dpor::DeadlockOutcome::Undefined(_) => {
+                        Projection::Exact {
+                            states: report.projections().clone(),
+                            deadlocks: BTreeSet::new(),
+                        }
+                    }
+                    dpor::DeadlockOutcome::Inconclusive(reason) => {
+                        Projection::Inconclusive(dpor_unresolved(reason))
+                    }
+                    // Excluded above: `fault` catches every `EngineError` and every
+                    // `NotJudged` before this arm is reached.
+                    dpor::DeadlockOutcome::NotJudged { .. } => {
+                        Projection::Inconclusive(Inconclusive::new(
+                            InconclusiveReason::EngineError,
+                            "unreachable: excluded above",
+                        ))
+                    }
+                },
+            }
+        };
+
+        Normalized {
+            projection,
+            invariants,
+            undefined_action,
+        }
+    }
+}
+
+/// A DPOR that has lost one discovered state: a stand-in for a reduction defect that
+/// drops a transition or wakes a sleeping label too late. `continuum-engine-dpor`'s
+/// own seeded mutants (`Mutant::NoSleepWakeup`, `Mutant::DropWriteReadDependence`,
+/// …) are `#[cfg(test)]`-private to that crate (`src/mutation.rs`) and unreachable
+/// from here, so this wraps the honest engine and perturbs its answer instead: the
+/// least state (by canonical order) is dropped from the reachable set whenever the
+/// wrapped engine reports one exactly. The oracle still reports the true set, so
+/// the lane's own comparison catches it — nothing here is told what to expect.
+pub struct DporLostState;
+
+impl Engine for DporLostState {
+    fn identity(&self) -> EngineIdentity {
+        EngineIdentity {
+            slot: DPOR.to_owned(),
+            build: "planted-mutant/dpor-lost-state".to_owned(),
+        }
+    }
+
+    fn fields(&self) -> Fields {
+        Fields::ALL
+    }
+
+    fn evaluate(&self, model: &Model, budget: Budget) -> Normalized {
+        let mut answer = DporEngine.evaluate(model, budget);
+        if let Projection::Exact { states, .. } = &mut answer.projection
+            && let Some(least) = states.iter().next().cloned()
+        {
+            states.remove(&least);
+        }
+        answer
     }
 }
 

@@ -35,7 +35,10 @@ use continuum_corpus::differential::{
 use continuum_engine_reference::diehard;
 use continuum_value::assurance::InconclusiveReason;
 
-use support::engines::{KernelEngine, Mutant, Mutation, ReferenceEngine, SemanticOracleEngine};
+use support::engines::{
+    DporEngine, DporLostState, KernelEngine, Mutant, Mutation, ReferenceEngine,
+    SemanticOracleEngine,
+};
 use support::json;
 
 const SEEDS: std::ops::Range<u64> = 0..64;
@@ -278,6 +281,194 @@ fn the_run_is_deterministic() {
     let second = run(&trunk_engines(), BUDGET);
     assert_eq!(first.summary(), second.summary());
     assert_eq!(first, second);
+}
+
+// ---------------------------------------------------------------------------
+// the DPOR lane (bn-3vhzw, C005): continuum-engine-dpor is now on trunk
+// ---------------------------------------------------------------------------
+
+fn dpor_engines() -> [&'static dyn Engine; 2] {
+    [&SemanticOracleEngine, &DporEngine]
+}
+
+/// The pinned per-lane counts of the seeded corpus run against the reduced engine
+/// alone: only the DPOR lane can run (its oracle needs no other slot), so every
+/// other lane in the table is absent. A change here is a change in the reducer's
+/// answers or in the corpus, and must be explained, not re-pinned blindly.
+const DPOR_PINNED_SUMMARY: &str = "\
+fixtures=81 unbuildable=0
+lane continuum-corpus::closure vs continuum-engine-reference absent missing=continuum-corpus::closure,continuum-engine-reference
+lane continuum-kernel-core vs continuum-engine-reference absent missing=continuum-kernel-core,continuum-engine-reference
+lane continuum-engine-reference::semantic vs continuum-engine-reference absent missing=continuum-engine-reference
+lane continuum-engine-explicit vs continuum-engine-reference absent missing=continuum-engine-explicit,continuum-engine-reference
+lane continuum-engine-dpor vs continuum-engine-reference::semantic fixtures=81 no-invariants=0 agreed=53 unjudged=157 witnesses-replayed=62 undefined-checked=39 undecided=[-/Unsupported:22,Unsupported/-:14,Unsupported/Unsupported:16,deadlocks-under-undefined-action:5] disagreeing-fixtures=0 disagreements=0
+faulted-slots=[]
+";
+
+#[test]
+fn the_dpor_lane_agrees_with_the_tiny_oracle_over_the_seeded_corpus() {
+    let report = run(&dpor_engines(), BUDGET);
+    let summary = report.summary();
+    println!("{summary}");
+    assert!(report.unbuildable.is_empty(), "{:?}", report.unbuildable);
+    // The halting rule: no lane may disagree.
+    assert_eq!(
+        halts(&report.ledger, &register(), &claim_states()),
+        Vec::new(),
+        "DPOR disagrees with the tiny oracle:\n{summary}"
+    );
+
+    let LaneStatus::Ran(counts) = lane(&report, DPOR, SEMANTIC_ORACLE) else {
+        panic!("the DPOR lane did not run");
+    };
+    assert_eq!(counts.fixtures, CORPUS_LEN);
+    assert_eq!(counts.disagreements, 0);
+    assert_eq!(counts.disagreeing_fixtures, 0);
+    // Anti-vacuity: the lane genuinely compared something (a fixture whose visible
+    // mask covers every declared variable, so the reduced search's answer is a
+    // full, exact reachable set the tiny oracle's own exact set is checked
+    // against), and models the reduction cannot decide at that grain are counted,
+    // not silently dropped as agreement.
+    assert!(counts.agreed > 0, "{counts:?}");
+    assert!(!counts.undecided.is_empty(), "{counts:?}");
+    assert!(counts.witnesses_replayed > 0, "{counts:?}");
+    assert_eq!(summary, DPOR_PINNED_SUMMARY);
+}
+
+/// A full visible mask is provably the one case where the reduction is a no-op: with
+/// every variable visible, every progressing label writes a visible one, so no
+/// stubborn set without an enabled visible label can ever exist
+/// (`footprint::Footprints::is_visible`; every seed's closure covers every enabled
+/// label or contains a visible one) and every state expands in full
+/// (`witness::FullReason::Exhaustive`) — never a persistent-set decline, and, because
+/// a visit's sleep set is only consulted inside a `Reduced` expansion, never a
+/// sleep-set decline either. This checks it directly over the reducer's own `Stats`,
+/// so the claim in `DporEngine`'s doc cannot go stale: the DPOR lane's exact-set
+/// agreement (`agreed` in `the_dpor_lane_agrees_with_the_tiny_oracle_over_the_seeded_corpus`)
+/// is evidence that DPOR's search machinery agrees with a second, differently-coded
+/// exhaustive explorer on these fixtures, never evidence about the persistent-set or
+/// sleep-set reduction specifically — that reduction is exercised and checked
+/// exhaustively by `continuum-engine-dpor`'s own `tests/c005_differential.rs`
+/// (bn-voq4), including on masked models this lane cannot decide the reachable-state
+/// field for at all (it reports them `Unsupported`, `undecided` in the corpus run).
+#[test]
+fn the_dpor_lane_s_exact_answers_are_provably_unreduced_full_mask_fixtures() {
+    let mut checked = 0_usize;
+    for fixture in corpus() {
+        let model = fixture.build().expect("every corpus fixture builds");
+        let obligations = continuum_engine_dpor::Obligations::every_predicate(
+            &model,
+            continuum_engine_dpor::DeadlockPolicy::Defect,
+        );
+        let bounds = continuum_engine_dpor::Bounds::new(
+            BUDGET.states,
+            BUDGET.transitions,
+            BUDGET.depth,
+            1 << 40,
+        );
+        let Ok(report) = continuum_engine_dpor::check(&model, &obligations, bounds) else {
+            continue;
+        };
+        let full = if model.variables().len() >= 64 {
+            u64::MAX
+        } else {
+            (1_u64 << model.variables().len()) - 1
+        };
+        if *report.completeness() == continuum_engine_dpor::Completeness::Complete
+            && report.witness().visible() == full
+        {
+            let stats = report.stats();
+            assert_eq!(
+                stats.declined_persistent, 0,
+                "{}: a full-mask fixture declined a persistent-set label: {stats:?}",
+                fixture.label
+            );
+            assert_eq!(
+                stats.declined_sleep, 0,
+                "{}: a full-mask fixture declined a sleeping label: {stats:?}",
+                fixture.label
+            );
+            checked = checked.saturating_add(1);
+        }
+    }
+    assert!(
+        checked > 0,
+        "no corpus fixture reached a full visible mask; this test checks nothing"
+    );
+}
+
+#[test]
+fn a_planted_dpor_fault_is_detected_quarantined_and_minimized() {
+    let engines: [&dyn Engine; 2] = [&SemanticOracleEngine, &DporLostState];
+    let report = run(&engines, BUDGET);
+    println!("{}", report.summary());
+    assert!(
+        !report.findings.is_empty(),
+        "the planted DPOR fault was not detected"
+    );
+    // Pinned so a change is explained, not silently absorbed as "still non-empty".
+    // `DporLostState` perturbs every fixture whose honest answer is `Exact` (51 of
+    // the corpus's 81): the 29 the tiny oracle also decides show `ReachableStates`
+    // directly; of the other 22 (`Unsupported`), only the 2 whose dropped state is
+    // also the state one of DPOR's own undefined-read claims names show
+    // `InvalidUndefined` (the drop corrupts the claim's own reachable-set proof, even
+    // though its path still replays); the remaining 20 firings are real but silent on
+    // this lane — nothing here re-derives the reachable set independently of DPOR's
+    // own answer to check a merely-smaller one against, on a fixture the oracle
+    // cannot decide.
+    let LaneStatus::Ran(mutant_counts) = lane(&report, DPOR, SEMANTIC_ORACLE) else {
+        panic!("the DPOR lane did not run");
+    };
+    assert_eq!(mutant_counts.disagreeing_fixtures, 31, "{mutant_counts:?}");
+    for finding in &report.findings {
+        assert_eq!(finding.lane.subject, DPOR);
+        assert_eq!(finding.lane.oracle, SEMANTIC_ORACLE);
+        // Most fixtures let the tiny oracle decide the reachable-state field, and the
+        // dropped state shows there directly; on a fixture the oracle itself cannot
+        // decide (a nondeterministic action, `Unsupported`), the same drop still
+        // shows because DPOR's own undefined-read claim about the dropped state
+        // no longer holds against DPOR's own (now smaller) reachable set.
+        assert!(
+            finding.disagreements.iter().any(|d| matches!(
+                d,
+                Disagreement::ReachableStates { .. }
+                    | Disagreement::InvalidUndefined {
+                        side: Side::Subject,
+                        ..
+                    }
+            )),
+            "{:?}",
+            finding.disagreements
+        );
+        assert!(finding.minimized.size() <= finding.report.original.size);
+    }
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|f| f.minimized.size() < f.report.original.size),
+        "minimization never shrank a fixture"
+    );
+
+    // Halting: C005 is quarantined, is OBSERVED in docs/18, and is not registered.
+    assert_eq!(report.ledger.claims(), BTreeSet::from(["C005"]));
+    let states = claim_states();
+    assert!(
+        gate(&report.ledger, &states).contains(&GateFinding::AssertedPositive {
+            claim: "C005".to_owned(),
+            state: ClaimState::Observed,
+        })
+    );
+    let halted = halts(&report.ledger, &register(), &states);
+    assert!(halted.contains(&GateFinding::AssertedPositive {
+        claim: "C005".to_owned(),
+        state: ClaimState::Observed,
+    }));
+    assert!(
+        halted
+            .iter()
+            .any(|f| matches!(f, GateFinding::Unregistered { claim, .. } if claim == "C005"))
+    );
 }
 
 // ---------------------------------------------------------------------------
